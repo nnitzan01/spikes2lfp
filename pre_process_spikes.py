@@ -9,11 +9,13 @@ class pre_process_spikes:
         self.bin_size = bin_size
         self.sigma  = sigma
         self.spkMat = []
+        self.timestamps = []
         
     def getSpkMat(self, start, stop):
         dur = stop - start
         bin_count = int(np.ceil(dur/self.bin_size))
         bins = np.linspace(start,stop,num=bin_count+1)
+        self.timestamps = np.linspace(start, stop, num=bin_count)
         self.spkMat = np.zeros((bin_count, len(self.units)))
         for i, unit in enumerate(tqdm.tqdm(self.units.index)):
             self.spkMat[:, i] = np.histogram(self.spike_times[unit], bins=bins)[0].tolist()
