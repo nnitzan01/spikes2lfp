@@ -60,8 +60,8 @@ class process_model:
                 
             # average losses from this epoch
             losses[epochi] = np.mean(seglosses)
-            msg = f'Finished epoch {epochi+1}/{numepochs}'
-            sys.stdout.write('\r' + msg)
+            # msg = f'Finished epoch {epochi+1}/{numepochs} '
+            # sys.stdout.write('\r' + msg)
         # flag model as "trained"
         self.trained = True
         return losses
