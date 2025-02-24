@@ -49,4 +49,3 @@ class pre_process_lfp:
             power = np.abs(hilbert(filt, axis=0))**2 
             # z-score the power
             self.lfpMat[:, :, i+1] = zscore(power, axis=0)
-        
