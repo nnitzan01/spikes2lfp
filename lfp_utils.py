@@ -3,8 +3,9 @@ import numpy as np
 import os
 from pynwb import NWBHDF5IO
 
-base_path = 'Z:/Buzsakilabspace/LabShare/NoamNitzan/Open_Access/Allen_2022/data/'
-    
+# base_path = 'Z:/Buzsakilabspace/LabShare/NoamNitzan/Open_Access/Allen_2022/data/'
+base_path = 'E:/vbn_s3_cache/visual-behavior-neuropixels-0.5.0/behavior_ecephys_sessions'
+
 def load_nwb(session_id, probe_letter):
     probe_letter = probe_letter.upper()
     path = f'{base_path}/session_{session_id}/'
