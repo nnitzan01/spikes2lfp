@@ -32,5 +32,8 @@ class session:
         self.behavior_id = self.session.behavior_session_id
         self.behavior_trials = None # not implemented yet
         self.session_info = None # not implmented yet
-        self.start = self.active.start_time.values[0]
-        self.stop = self.active.end_time.values[-1]
+        self.active_times = [int(self.active.start_time.values[0]) - 1, int(self.active.end_time.values[-1]) + 1]
+        self.passive_times = [int(self.passive.start_time.values[0]) - 1, int(self.passive.end_time.values[-1]) + 1]
+        self.spontaneous_times = [int(self.spontaneous.start_time.values[-1]), int(self.spontaneous.end_time.values[-1])]
+        self.flash_times = [int(self.flash.start_time.values[0]), int(self.flash.end_time.values[-1])]
+        self.gabor_times = [int(self.gabor.start_time.values[0]), int(self.gabor.end_time.values[-1])]

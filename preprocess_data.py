@@ -51,6 +51,13 @@ class pre_process_lfp:
             power = np.abs(hilbert(filt, axis=0))**2 
             # z-score the power
             self.lfpMat[:, :, i+1] = zscore(power, axis=0)
+    
+    def downsample_lfp(self, factor):
+        self.lfpMat = self.lfpMat[::factor,:,:]
+    
+    def align_lfp(self, length):
+        if self.lfpMat.shape[0] > length:
+            self.lfpMat = self.lfpMat[:length,:,:]
 
 class pre_process_training_data:
     def __init__(self, lfp_obj, spikes_obj, seqlength):
@@ -94,7 +101,7 @@ class pre_process_training_data:
         return self.X_train, self.y_train, self.X_test, self.y_test
 
 def generate_training_data(lfp_obj, spikes_obj, seqlength, test_size=0.2):
-    lfp = lfp_obj.lfpMat[::5,:,:] # downsample by 5
+    lfp = lfp_obj.lfpMat[::5,:,:]
     if lfp.shape[0] > spikes_obj.spkMat.shape[0]:
         lfp = lfp[:spikes_obj.spkMat.shape[0],:,:]
     num_trials = int(lfp.shape[0] / seqlength)

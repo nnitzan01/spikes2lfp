@@ -28,7 +28,7 @@ class probe:
         self.chans = session.channels.loc[self.all_chans][session.channels.loc[self.all_chans]['structure_acronym'] == 'VISp']
         # print(lfp.channel.values)
         # print(self.chans.index.values)
-        lfp_sliced = lfp.sel(time=slice(self.session.start, self.session.stop), channel=self.chans.index.values)
+        lfp_sliced = lfp.sel(time=slice(self.session.active_times[0], self.session.active_times[1]), channel=self.chans.index.values)
         self.lfp = lfp_sliced.values
         # self.fs 
         self.bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)]
