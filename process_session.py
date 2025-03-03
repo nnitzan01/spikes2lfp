@@ -1,6 +1,6 @@
 import pandas as pd
 from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorNeuropixelsProjectCache
-output_dir = r'F:\vbn_s3_cache'
+output_dir = r'Y:\buzsakilab\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022'
 cache = VisualBehaviorNeuropixelsProjectCache.from_s3_cache(output_dir)
 
 class session:

@@ -1,6 +1,6 @@
 import os
 import torch
-import lstm_module as lstm
+import models as models
 import numpy as np
 from tqdm import tqdm
 

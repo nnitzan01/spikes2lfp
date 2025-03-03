@@ -125,41 +125,6 @@ class process_model:
             sys.stdout.write('Model was not yet trained.\n')
         return self.model
     
-def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
-    """
-    Chunks the spike and LFP data into equal segments, reshapes them,
-    and splits them into training and testing sets.
-
-    Args:
-        spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
-        lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
-             If LFP is single channel, should be (num_timepoints, 1).
-        seqlength: The length of each chunk (window size).
-        test_size: The proportion of data to use for the test set.
-        random_state: The random state for the train_test_split function.
-
-    Returns:
-        X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
-                                         for the spikes (X) and LFP (y) data.
-    """
-
-    num_trials = int(lfp.shape[0] / seqlength)
-
-    # Truncate spikes and LFP data to be multiples of seqlength
-    spikes = spikes[:num_trials * seqlength, :]
-    lfp = lfp[:num_trials * seqlength, :]
-
-    # Reshape the data into trials
-    X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
-    lfp_reshaped = np.reshape(lfp, (num_trials, seqlength, lfp.shape[1]))
-
-    # Split into training and testing sets at the trial level
-    X_train, X_test, y_train, y_test = train_test_split(
-        X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
-    )
-
-    return X_train, X_test, y_train, y_test
-
 class LinearRegressionModel:
     def __init__(self, input_size):
         self.model = LinearRegression()
