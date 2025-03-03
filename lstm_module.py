@@ -219,3 +219,67 @@ class LinearRegressionModel:
         if not self.trained:
             sys.stdout.write('Model was not yet trained.\n')
         return self.model
+    
+    
+class SpikingTransformer(nn.Module):
+    def __init__(self, input_size, embedding_dim, num_heads, num_layers, dropout=0.1):
+        super(SpikingTransformer, self).__init__()
+
+        self.input_size = input_size
+        self.embedding_dim = embedding_dim
+        self.num_heads = num_heads
+        self.num_layers = num_layers
+
+        # Embedding Layer:  Maps spike counts to a higher-dimensional space
+        self.embedding = nn.Linear(input_size, embedding_dim)
+        self.embedding_bn = nn.BatchNorm1d(embedding_dim) # Batchnorm after embedding
+
+        # Positional Encoding (Learnable)
+        self.positional_embedding = nn.Embedding(750, embedding_dim)  # Window size is 750
+
+        # Transformer Encoder Layers
+        self.transformer_encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embedding_dim,
+            nhead=num_heads,
+            dropout=dropout,
+            batch_first=True # Important for PyTorch >= 1.9
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            self.transformer_encoder_layer,
+            num_layers=num_layers
+        )
+
+        # Regression Head
+        self.regression_head = nn.Linear(embedding_dim, 1)  # Predicts a single LFP value
+
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        """
+        Args:
+            x:  Input spike counts, shape (batch_size, sequence_length, num_neurons)
+        Returns:
+            lfp_predictions: Predicted LFP values, shape (batch_size, sequence_length)
+        """
+        batch_size, seq_len, _ = x.shape
+
+        # Embedding
+        embedded = self.embedding(x)  # (batch_size, sequence_length, embedding_dim)
+        #Reshape is required before applying batch norm!
+        embedded = embedded.permute(0,2,1)
+        embedded = self.embedding_bn(embedded)
+        embedded = embedded.permute(0,2,1)
+        embedded = self.dropout(embedded)
+
+        # Positional Encoding
+        positions = torch.arange(0, seq_len, device=x.device).unsqueeze(0).expand(batch_size, seq_len)  # (batch_size, sequence_length)
+        positional_embeddings = self.positional_embedding(positions) # (batch_size, sequence_length, embedding_dim)
+        embedded += positional_embeddings
+
+        # Transformer Encoder
+        transformer_output = self.transformer_encoder(embedded) # (batch_size, sequence_length, embedding_dim)
+
+        # Regression Head
+        lfp_predictions = self.regression_head(transformer_output).squeeze(-1)  # (batch_size, sequence_length)
+
+        return lfp_predictions
