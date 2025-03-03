@@ -37,8 +37,7 @@ class process_model:
             
     def train(self, x_train, y_train, numepochs, lr=.001, weight_decay=0.001):
         self.model.train()
-        lossfun = self.criterion
-        # ensure N is a multiple of seqlength
+        lossfun = self.criterion 
         N = x_train.shape[0] - np.mod(x_train.shape[0], self.seqlength)
         input_size = x_train.shape[1]
         self.model.to(self.device)

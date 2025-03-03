@@ -6,7 +6,8 @@ class probe:
         self.session_id = session.id
         self.target_area = 'VISp'
         self.session = session
-        probe_table = pd.read_csv(r"Z:\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
+        # probe_table = pd.read_csv(r"Z:\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
+        probe_table = pd.read_csv(r"F:\vbn_s3_cache\visual-behavior-neuropixels-0.5.0\project_metadata\probes.csv")
         session_probes = probe_table[probe_table['ecephys_session_id'] == self.session_id]
         qualified_probes = []
         for probe_id in session_probes.ecephys_probe_id.values:

@@ -28,7 +28,6 @@ def set_single_process():
     torch.set_num_threads(1)
 
 def calculate_attr(X_attr, integrated_gradients):
-    set_single_process()
     attributions = []
     for i in tqdm(range(0, X_attr.shape[0], 100)):
         attributions.append(integrated_gradients.attribute(X_attr[i:i+100,:].contiguous(),target=0,n_steps=50))
@@ -46,7 +45,7 @@ def multi(models_chani, X_attr, bands, filename):
         filename_bandi = f'{filename}_band{bandi}.npy' 
         data.append([X_attr, integrated_gradients])
         filenames.append(filename_bandi)
-    with multiprocessing.Pool(processes=6) as pool:
+    with multiprocessing.Pool(processes=9) as pool:
         results = pool.starmap(calculate_attr, data)
     return [results, filenames]
 
@@ -64,5 +63,4 @@ def divide_task_for_attr(models, session_id, output_dir, spikes_obj, bin_size, p
         results = multi(models_chani, X_attr, bands, filename)
         assert len(results) == 2
         multi_save(results[0], results[1])
-        break
 
