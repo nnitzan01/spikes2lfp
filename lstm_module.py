@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
 
 class LSTMnet(nn.Module):
     def __init__(self, input_size, num_hidden, num_layers, print=False):
@@ -158,3 +159,63 @@ def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
     )
 
     return X_train, X_test, y_train, y_test
+
+class LinearRegressionModel:
+    def __init__(self, input_size):
+        self.model = LinearRegression()
+        self.input_size = input_size
+        self.trained = False
+
+    def train(self, train_dataloader, test_dataloader, numepochs=1, lr=None, weight_decay=None):
+        # Linear Regression is trained in batches
+        train_losses = np.zeros(numepochs)
+        test_losses = np.zeros(numepochs)
+
+        for epochi in range(numepochs):
+            batch_losses = []
+            for X, y in train_dataloader:
+                X = X.view(-1, self.input_size).cpu().numpy()
+                y = y.view(-1).cpu().numpy()
+                self.model.fit(X, y)
+                y_hat = self.model.predict(X)
+                batch_loss = np.mean((y - y_hat) ** 2)
+                batch_losses.append(batch_loss)
+            train_losses[epochi] = np.mean(batch_losses)
+            test_losses[epochi] = self.evaluate_loss(test_dataloader)
+
+        self.trained = True
+        return train_losses, test_losses
+
+    def evaluate(self, x_data):
+        if isinstance(x_data, torch.Tensor):
+            x_data = x_data.view(-1, self.input_size).cpu().numpy()
+        elif isinstance(x_data, np.ndarray):
+            x_data = x_data.reshape(-1, self.input_size)
+
+        y_hat = self.model.predict(x_data)
+        return y_hat
+
+    def evaluate_loss(self, dataloader):
+        total_loss = 0
+        num_samples = 0
+        for X, y in dataloader:
+            X = X.view(-1, self.input_size).cpu().numpy()
+            y = y.view(-1).cpu().numpy()
+            y_hat = self.model.predict(X)
+            loss = np.mean((y - y_hat) ** 2)  # MSE loss
+            total_loss += loss * y.shape[0]
+            num_samples += y.shape[0]
+        return total_loss / num_samples
+
+    def save_model(self, filename):
+        # For simplicity, we'll just save the model's coefficients.
+        np.savez(filename, coef=self.model.coef_, intercept=self.model.intercept_)
+
+    def load_model(self, filename):
+        data = np.load(filename)
+        self.model.coef_ = data['coef']
+        self.model.intercept_ = data['intercept']
+        self.trained = True
+        if not self.trained:
+            sys.stdout.write('Model was not yet trained.\n')
+        return self.model
