@@ -59,47 +59,6 @@ class pre_process_lfp:
         if self.lfpMat.shape[0] > length:
             self.lfpMat = self.lfpMat[:length,:,:]
 
-class pre_process_training_data:
-    def __init__(self, lfp_obj, spikes_obj, seqlength):
-        self.lfp_obj = lfp_obj
-        self.spikes_obj = spikes_obj
-        self.seqlength = seqlength
-        self.X_train = None
-        self.y_train = None
-        self.X_test = None
-        self.y_test = None
-
-    def create_training_data(self, test_size=0.2):
-        lfp = self.lfp_obj.lfpMat[::5,:,:] # downsample by 5
-        if lfp.shape[0] > self.spikes_obj.spkMat.shape[0]:
-            lfp = lfp[:self.spikes_obj.spkMat.shape[0],:,:]
-        num_trials = int(lfp.shape[0] / self.seqlength)
-        X = self.spikes_obj.spkMat[:num_trials * self.seqlength, :]
-        X = X.reshape(num_trials, self.seqlength, X.shape[1])
-
-        y = lfp[:num_trials * self.seqlength, :,:]
-        y = y.reshape(num_trials, self.seqlength, y.shape[1], y.shape[2])
-
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
-
-        X_train = X_train.reshape(X_train.shape[0] * X_train.shape[1], X_train.shape[2])
-        X_test = X_test.reshape(X_test.shape[0] * X_test.shape[1], X_test.shape[2])
-        y_train = y_train.reshape(y_train.shape[0] * y_train.shape[1], y_train.shape[2], y_train.shape[3])
-        y_test = y_test.reshape(y_test.shape[0] * y_test.shape[1], y_test.shape[2], y_test.shape[3]) 
-
-        X_trainT = torch.tensor(X_train).float()
-        y_trainT = torch.tensor(y_train).float()
-        X_testT = torch.tensor(X_test).float()
-        y_testT = torch.tensor(y_test).float()
-
-        self.X_train = X_trainT
-        self.y_train = y_trainT
-        self.X_test = X_testT
-        self.y_test = y_testT
-
-    def get_training_data(self):
-        return self.X_train, self.y_train, self.X_test, self.y_test
-
 def generate_training_data(lfp_obj, spikes_obj, seqlength, test_size=0.2, make_val=False, val_size=0.5):
     lfp = lfp_obj.lfpMat[::5,:,:]
     if lfp.shape[0] > spikes_obj.spkMat.shape[0]:

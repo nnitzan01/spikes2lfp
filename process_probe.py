@@ -32,8 +32,6 @@ class probe:
         self.bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)]
         del lfp
 
-
-
 # The original version, kept as archive
 # class probe:
 #     def __init__(self, session):
