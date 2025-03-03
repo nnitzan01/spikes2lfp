@@ -63,4 +63,3 @@ def divide_task_for_attr(models, session_id, output_dir, spikes_obj, bin_size, p
         results = multi(models_chani, X_attr, bands, filename)
         assert len(results) == 2
         multi_save(results[0], results[1])
-
