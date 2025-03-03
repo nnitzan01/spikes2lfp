@@ -1,5 +1,68 @@
+import os
+import numpy as np
+import xarray as xr
 import pandas as pd
-from lfp_utils import *
+from pynwb import NWBHDF5IO
+
+# base_path = 'Z:/Buzsakilabspace/LabShare/NoamNitzan/Open_Access/Allen_2022/data/'
+base_path = 'F:/vbn_s3_cache/visual-behavior-neuropixels-0.5.0/behavior_ecephys_sessions'
+
+def load_nwb(session_id, probe_letter):
+    """
+    Instead of downloading LFP data using AllenSDK, LFP is loaded directly from .nwb files.
+    Faster this way.
+
+    input:
+    session_id: int, session_id
+    probe_letter: str, probe letter, e.g. 'A', 'B', 'C', etc.
+    
+    output:
+    nwbfile: NWBFile object
+    
+    note:
+    assuming the following file structure:
+    
+    base_path/session_id/probeA_lfp.nwb
+    """
+    probe_letter = probe_letter.upper()
+    
+    path = f'{base_path}/session_{session_id}/'
+    # session folder does not exist
+    if not os.path.exists(path): 
+        print(f'Session {session_id} does not exist')
+        return None
+    # probe does not exist
+    if not os.path.exists(f'{path}/probe{probe_letter}_lfp.nwb'):
+        print(f'Probe {probe_letter} does not exist')
+        return None
+    # load the data
+    path = f'{path}/probe{probe_letter}_lfp.nwb'
+    io = NWBHDF5IO(path, mode="r") # type: ignore
+    nwbfile = io.read()
+    return nwbfile
+
+def nwb_to_xarray(nwb):
+    """
+    Reading from the provided .nwb file and converting it to xarray DataArray.
+
+    input:
+    nwb: NWBFile object
+
+    output:
+    lfp: xarray DataArray, LFP data
+        attributes: timestamps - time points for each LFP recording
+                    channels - channel ids for each channel 
+    """
+    if nwb is None:
+        return None
+    else:
+        probe_id = nwb.identifier
+        data = nwb.acquisition[f'probe_{probe_id}_lfp'].electrical_series[f'probe_{probe_id}_lfp_data']
+        lfp = np.array(data.data)/2
+        timestamps = np.array(data.timestamps)
+        electrodes = nwb.electrodes.to_dataframe()
+        channels = electrodes.index.values
+        return xr.DataArray(lfp, coords=[timestamps, channels], dims=['time', 'channel']) # type: ignore
 
 class probe:
     def __init__(self, session, time_0, time_1):
@@ -7,7 +70,8 @@ class probe:
         self.session_id = session.id
         self.target_area = 'VISp'
         self.session = session
-        probe_table = pd.read_csv(r"Y:\buzsakilab\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
+        # probe_table = pd.read_csv(r"Z:\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
+        probe_table = pd.read_csv(r"F:\vbn_s3_cache\visual-behavior-neuropixels-0.5.0\project_metadata\probes.csv")
         session_probes = probe_table[probe_table['ecephys_session_id'] == self.session_id]
         qualified_probes = []
         for probe_id in session_probes.ecephys_probe_id.values:
