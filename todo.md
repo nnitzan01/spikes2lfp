@@ -18,7 +18,7 @@
 3. ~~add early stopping~~
 4. ~~and gaussian noise to training data~~
 5. ~~Try more complicated models~~
-6. Use spontaneous trials as second tests
+6. ~~Use spontaneous trials as second tests~~
 
 ## TODO - Side quests
 1. ~~keep trying with training~~
@@ -29,4 +29,4 @@
 6. ~~save the code and the results~~
 7. ~~compare the results~~
 8. ~~seqlen 20-2000 and compare how they differ in channel 5, broadband~~
-9. use the original code to try a new session
+9. ~~use the original code to try a new session~~
