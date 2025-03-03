@@ -104,7 +104,7 @@ def multi(models_chani, X_attr, bands, filename):
     # each list will be passed to calculate_attr() automatically
     data = []
     filenames = []
-    for bandi in range(len(bands)-2):
+    for bandi in range(len(bands)+1):
         mdl = models_chani[bandi].model.train().to('cpu')
         integrated_gradients = IntegratedGradients(mdl)
         filename_bandi = f'{filename}_band{bandi}.bl2' 
