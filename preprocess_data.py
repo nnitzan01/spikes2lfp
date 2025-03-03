@@ -100,7 +100,7 @@ class pre_process_training_data:
     def get_training_data(self):
         return self.X_train, self.y_train, self.X_test, self.y_test
 
-def generate_training_data(lfp_obj, spikes_obj, seqlength, test_size=0.2):
+def generate_training_data(lfp_obj, spikes_obj, seqlength, test_size=0.2, make_val=False, val_size=0.5):
     lfp = lfp_obj.lfpMat[::5,:,:]
     if lfp.shape[0] > spikes_obj.spkMat.shape[0]:
         lfp = lfp[:spikes_obj.spkMat.shape[0],:,:]
@@ -111,15 +111,22 @@ def generate_training_data(lfp_obj, spikes_obj, seqlength, test_size=0.2):
     y = y.reshape(num_trials, seqlength, y.shape[1], y.shape[2])
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
-    # X_test, X_val, y_test, y_val = train_test_split(X_test, y_test, test_size=0.5, random_state=42)
     X_train = torch.Tensor(X_train).float()
-    X_test = torch.Tensor(X_test).float()
     y_train = torch.Tensor(y_train).float()
-    y_test = torch.Tensor(y_test).float()
-    # X_val = torch.Tensor(X_val).float()
-    # y_val = torch.Tensor(y_val).float()
-    X_train = torch.reshape(X_train, (X_train.shape[0]*X_train.shape[1], X_train.shape[2]))
-    X_test = torch.reshape(X_test, (X_test.shape[0]*X_test.shape[1], X_test.shape[2]))
-    y_train = torch.reshape(y_train, (y_train.shape[0]*y_train.shape[1], y_train.shape[2], y_train.shape[3]))
-    y_test = torch.reshape(y_test, (y_test.shape[0]*y_test.shape[1], y_test.shape[2], y_test.shape[3]))
-    return X_train, y_train, X_test, y_test #, X_val, y_val
+
+    # X_train = torch.reshape(X_train, (X_train.shape[0]*X_train.shape[1], X_train.shape[2]))
+    # X_test = torch.reshape(X_test, (X_test.shape[0]*X_test.shape[1], X_test.shape[2]))
+    # y_train = torch.reshape(y_train, (y_train.shape[0]*y_train.shape[1], y_train.shape[2], y_train.shape[3]))
+    # y_test = torch.reshape(y_test, (y_test.shape[0]*y_test.shape[1], y_test.shape[2], y_test.shape[3]))
+    
+    if make_val:
+        X_test, X_val, y_test, y_val = train_test_split(X_test, y_test, test_size=val_size, random_state=42)
+        X_test = torch.Tensor(X_test).float()
+        y_test = torch.Tensor(y_test).float()    
+        X_val = torch.Tensor(X_val).float()
+        y_val = torch.Tensor(y_val).float()
+        return X_train, y_train, X_test, y_test, X_val, y_val
+    else:
+        X_test = torch.Tensor(X_test).float()
+        y_test = torch.Tensor(y_test).float()
+        return X_train, y_train, X_test, y_test
