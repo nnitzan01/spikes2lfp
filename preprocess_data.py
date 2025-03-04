@@ -8,11 +8,12 @@ import tqdm
 import torch
 
 class pre_process_spikes:
-    def __init__(self, units, spike_times, bin_size=0.004, sigma=1):
+    def __init__(self, units, spike_times, seqlength = 750, bin_size=0.004, sigma=1):
         self.units = units
         self.spike_times = spike_times
         self.bin_size = bin_size
         self.sigma  = sigma
+        self.seqlength = seqlength
         self.spkMat = []
         self.timestamps = []
         
@@ -24,6 +25,9 @@ class pre_process_spikes:
         self.spkMat = np.zeros((bin_count, len(self.units)))
         for i, unit in enumerate(tqdm.tqdm(self.units.index)):
             self.spkMat[:, i] = np.histogram(self.spike_times[unit], bins=bins)[0].tolist()
+        
+        num_trials = int(bin_count / self.seqlength)
+        self.spkMat = self.spkMat[:num_trials * self.seqlength, :]
 
     def convolve_with_gaussian(self):
         self.spkMat = gaussian_filter1d(self.spkMat, self.sigma, axis=0)/self.bin_size
@@ -31,12 +35,12 @@ class pre_process_spikes:
     def zscore(self):
         self.spkMat = (self.spkMat - self.spkMat.mean(axis=0))/self.spkMat.std(axis=0)
         
-
 class pre_process_lfp:
-    def __init__(self, session_id, channels, start_time, stop_time, output_dir):
+    def __init__(self, session_id, channels, start_time, stop_time, output_dir, seqlength = 750):
         chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
         self.channels = chans
         self.data = lfp
+        self.seqlength = seqlength
         self.lfpMat = []
         self.sampling_rate = 1250
 
@@ -57,7 +61,47 @@ class pre_process_lfp:
     
     def downsample_lfp(self, factor):
         self.lfpMat = self.lfpMat[::factor,:,:]
+        num_trials = int(self.lfpMat.shape[0] / self.seqlength)
+        self.lfpMat = self.lfpMat[:num_trials * self.seqlength, :, :]
     
     def align_lfp(self, length):
         if self.lfpMat.shape[0] > length:
             self.lfpMat = self.lfpMat[:length,:,:]
+            
+def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
+    """
+    Chunks the spike and LFP data into equal segments, reshapes them,
+    and splits them into training and testing sets.
+
+    Args:
+        spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
+        lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
+             If LFP is single channel, should be (num_timepoints, 1).
+        seqlength: The length of each chunk (window size).
+        test_size: The proportion of data to use for the test set.
+        random_state: The random state for the train_test_split function.
+
+    Returns:
+        X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
+                                         for the spikes (X) and LFP (y) data.
+    """
+
+    if len(lfp.shape) == 1:
+        lfp = lfp[:, np.newaxis]
+    
+    num_trials = int(lfp.shape[0] / seqlength)
+
+    # # Truncate spikes and LFP data to be multiples of seqlength
+    # spikes = spikes[:num_trials * seqlength, :]
+    # lfp = lfp[:num_trials * seqlength, :]
+
+    # Reshape the data into trials
+    X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
+    lfp_reshaped = np.reshape(lfp, (num_trials, seqlength, lfp.shape[1]))
+
+    # Split into training and testing sets at the trial level
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
+    )
+
+    return X_train, X_test, y_train, y_test
