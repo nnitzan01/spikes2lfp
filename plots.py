@@ -92,12 +92,10 @@ def plot_lfp_prediction(models, X, y, chani, bands, start_time = None, end_time 
     fig_name: str, name of the plot
     """
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(16, 16))
+    if len(X.shape) == 3:
+        X = torch.reshape(X, (X.shape[0]*X.shape[1], X.shape[2]))
     for bandi in range(len(bands)+1):
         yHat = models[chani, bandi].evaluate(X)
-        if len(X.shape) == 3:
-            X = torch.reshape(X, (X.shape[0]*X.shape[1], X.shape[2]))
-            yHat = torch.reshape(yHat, (yHat.shape[0]*yHat.shape[1], yHat.shape[2], yHat.shape[3]))
-            y = torch.reshape(y, (y.shape[0]*y.shape[1], y.shape[2], y.shape[3]))
         if start_time != None and end_time != None:
             start_idx = int(start_time * fs)
             end_idx = int(end_time * fs)
@@ -164,31 +162,42 @@ def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True,
     if save_fig:
         save_plot(fig, output_dir, session_id, fig_name)
 
-def temp2(models, session_obj, spikes, lfp, chani, bands, trial_type=None, ):
-    abs_error = np.zeros((spikes.shape[0]*spikes.shape[1], len(bands)+1))
+def temp2(models, session_obj, spikes_obj, lfp, chani, bands, snippet_length=0.75, show_plot=True,
+        save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+    spikes = spikes_obj.spkMat
+    timestamps = spikes_obj.timestamps
+    #temporary fix, not needed for the final version
+    seqlen = 750
+    trials = spikes.shape[0]//seqlen
+    spikes = spikes[:trials*seqlen, :]
+    timestamps = timestamps[:trials*seqlen]
+    lfp = lfp[:trials*seqlen, :, :]
+
+    abs_error = np.zeros((spikes.shape[0], len(bands)+1))
     for bandi in range(len(bands)+1):
         yHat = models[chani, bandi].evaluate(torch.tensor(spikes).float())
         abs_error[:,bandi] = np.abs(yHat - lfp[:, bandi, chani])
-    
-    stim_starts = session_obj.
+    # if trial_type == 'active':
+    start_times = session_obj.active.start_time.values
+    change = np.array(session_obj.active.is_change.values, dtype=bool)
 
-    stim_st  = behavior.stimulus_presentations.start_time[behavior.stimulus_presentations.active].values
-    change   = behavior.stimulus_presentations.is_change[behavior.stimulus_presentations.active] 
-
-    nbins = int(0.75/bin_size)
+    fs = 250
+    nbins = int(snippet_length*fs)
     t = np.linspace(-0.25, 0.5, nbins)
-    error_snippets = np.zeros((len(stim_st), nbins, len(bands)+1))
-
-    for i in range(len(stim_st)):
-        start = np.argmin(np.abs(spikes_obj.timestamps - (stim_st[i]-.25)))
+    error_snippets = np.zeros((len(start_times), nbins, len(bands)+1))
+    for i in range(len(start_times)):
+        start = np.argmin(np.abs(timestamps - (start_times[i]-.25)))
+        if start > timestamps[-1]: continue
         error_snippets[i,:,:] = abs_error[start:start+nbins,:]
 
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(30, 30))
+    error_snippets_changed = error_snippets[change]
+    error_snippets_nochange = error_snippets[~change]
 
     for bandi in range(len(bands)+1):
-        ax.flat[bandi].imshow(error_snippets[:,:,bandi], aspect='auto', cmap='bwr', extent=[-0.25, 0.5, 0, len(stim_st)],vmin=0, vmax=2)
-        avr_change = np.mean(error_snippets[change == True,:,bandi], axis=0)
-        avr_nochange = np.mean(error_snippets[change == False,:,bandi], axis=0)
+        ax.flat[bandi].imshow(error_snippets[:, :,bandi], aspect='auto', cmap='bwr') #, extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2)
+        avr_change = np.mean(error_snippets_changed[:, :,bandi], axis=0)
+        avr_nochange = np.mean(error_snippets_nochange[:, :,bandi], axis=0)
         ax.flat[bandi].plot(t, 2000 + avr_change * 800,   'm', label='change', linewidth=3)
         ax.flat[bandi].plot(t, 2000 + avr_nochange * 800, 'k', label='no change', linewidth=3)
         ax.flat[bandi].set_xlabel('Time from change (s)')
@@ -201,14 +210,19 @@ def temp2(models, session_obj, spikes, lfp, chani, bands, trial_type=None, ):
             ax.flat[bandi].set_title('Band: ' + str(bands[bandi-1]) + ' Hz')
 
     # add colorbar to the last subplot
-    ax.flat[-1].imshow(np.zeros((1,1)), cmap='bwr', extent=[-0.25, 0.5, 0, len(stim_st)],vmin=0, vmax=2)
+    ax.flat[-1].imshow(np.zeros((1,1)), cmap='bwr', extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2)
     # turn off the axis
     ax.flat[-1].axis('off')
     # add colorbar
     cbar = fig.colorbar(ax.flat[-1].images[0], ax=ax.flat[-1])
     # fig.delaxes(ax.flat[-1])
     # plt.tight_layout()
-
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
 
 def temp3():
     raise NotImplementedError
