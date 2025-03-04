@@ -116,6 +116,62 @@ class process_model:
         y_hat = y_hat[:L]
         return y_hat
     
+    # def evaluate(self, x_data, overlap_factor=0.5):
+    #     self.model.eval()
+    #     L = x_data.shape[0]
+    #     y_hat = np.zeros(L)
+    #     hop_length = int(self.seqlength * (1 - overlap_factor))
+
+    #     with torch.no_grad():
+    #         for timei in range(0, L - self.seqlength + 1, hop_length):
+    #             if type(self.model) is SpikingTransformer:
+    #                 current_seq = x_data[timei:timei+self.seqlength, :].unsqueeze(0).to(self.device)
+    #             elif type(self.model) is LSTMnet:
+    #                 current_seq = x_data[timei:timei+self.seqlength, :].unsqueeze(1).to(self.device)
+
+    #             # Check if the sequence needs padding (at the beginning)
+    #             if current_seq.shape[0] < self.seqlength:
+    #                 pad_length = self.seqlength - current_seq.shape[0]
+    #                 if type(self.model) is SpikingTransformer:
+    #                     pad_shape = (current_seq.shape[0], pad_length, current_seq.shape[2])
+    #                     padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
+    #                     current_seq = torch.cat((padding, current_seq), dim=1)
+    #                 elif type(self.model) is LSTMnet:
+    #                     pad_shape = (pad_length, current_seq.shape[1], current_seq.shape[2])
+    #                     padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
+    #                     current_seq = torch.cat((padding, current_seq), dim=0)
+
+    #             yy = self.model(current_seq)
+                
+    #             # Assign predictions to y_hat with overlap handling
+    #             if type(self.model) is SpikingTransformer:
+    #                 y_hat[timei:timei+self.seqlength] = yy.cpu().numpy()
+    #             elif type(self.model) is LSTMnet:
+    #                 y_hat[timei:timei+self.seqlength] = yy[:,0,0].cpu().numpy()
+                
+    #         # handle the last chunk
+    #         if timei + self.seqlength < L:
+    #             if type(self.model) is SpikingTransformer:
+    #                 current_seq = x_data[timei:L, :].unsqueeze(0).to(self.device)
+    #                 pad_length = self.seqlength - current_seq.shape[1]
+    #                 pad_shape = (current_seq.shape[0], pad_length, current_seq.shape[2])
+    #                 padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
+    #                 current_seq = torch.cat((current_seq, padding), dim=1)
+    #             elif type(self.model) is LSTMnet:
+    #                 current_seq = x_data[timei:L, :].unsqueeze(1).to(self.device)
+    #                 pad_length = self.seqlength - current_seq.shape[0]
+    #                 pad_shape = (pad_length, current_seq.shape[1], current_seq.shape[2])
+    #                 padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
+    #                 current_seq = torch.cat((current_seq, padding), dim=0)
+                    
+    #             yy = self.model(current_seq)
+                
+    #             if type(self.model) is SpikingTransformer:
+    #                 y_hat[timei:L] = yy[:L-timei].cpu().numpy()
+    #             elif type(self.model) is LSTMnet:
+    #                 y_hat[timei:L] = yy[:L-timei,0,0].cpu().numpy()
+    #     return y_hat
+    
     def save_model(self, filename):
         torch.save(self.model.state_dict(), filename)
         
