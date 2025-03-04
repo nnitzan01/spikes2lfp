@@ -59,37 +59,39 @@ class pre_process_lfp:
         if self.lfpMat.shape[0] > length:
             self.lfpMat = self.lfpMat[:length,:,:]
 
-def generate_training_data(lfp_obj, spikes_obj, seqlength, test_size=0.2, make_val=False, val_size=0.5):
-    lfp = lfp_obj.lfpMat[::5,:,:]
-    if lfp.shape[0] > spikes_obj.spkMat.shape[0]:
-        lfp = lfp[:spikes_obj.spkMat.shape[0],:,:]
-    num_trials = int(lfp.shape[0] / seqlength)
-    X = spikes_obj.spkMat[:num_trials * seqlength, :]
-    X = X.reshape(num_trials, seqlength, X.shape[1])
-    y = lfp[:num_trials * seqlength, :,:]
-    y = y.reshape(num_trials, seqlength, y.shape[1], y.shape[2])
+def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
+    """
+    Chunks the spike and LFP data into equal segments, reshapes them,
+    and splits them into training and testing sets.
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
-    X_train = torch.Tensor(X_train).float()
-    y_train = torch.Tensor(y_train).float()
+    Args:
+        spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
+        lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
+             If LFP is single channel, should be (num_timepoints, 1).
+        seqlength: The length of each chunk (window size).
+        test_size: The proportion of data to use for the test set.
+        random_state: The random state for the train_test_split function.
 
-    X_train = torch.reshape(X_train, (X_train.shape[0]*X_train.shape[1], X_train.shape[2]))
-    y_train = torch.reshape(y_train, (y_train.shape[0]*y_train.shape[1], y_train.shape[2], y_train.shape[3]))
+    Returns:
+        X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
+                                         for the spikes (X) and LFP (y) data.
+    """
+    if len(lfp.shape) == 1:
+        lfp = lfp[:, np.newaxis]
     
-    if make_val:
-        X_test, X_val, y_test, y_val = train_test_split(X_test, y_test, test_size=val_size, random_state=42)
-        X_test = torch.Tensor(X_test).float()
-        y_test = torch.Tensor(y_test).float()    
-        X_val = torch.Tensor(X_val).float()
-        y_val = torch.Tensor(y_val).float()
-        X_test = torch.reshape(X_test, (X_test.shape[0]*X_test.shape[1], X_test.shape[2]))
-        y_test = torch.reshape(y_test, (y_test.shape[0]*y_test.shape[1], y_test.shape[2], y_test.shape[3]))
-        X_val = torch.reshape(X_val, (X_val.shape[0]*X_val.shape[1], X_val.shape[2]))
-        y_val = torch.reshape(y_val, (y_val.shape[0]*y_val.shape[1], y_val.shape[2], y_val.shape[3]))
-        return X_train, y_train, X_test, y_test, X_val, y_val
-    else:
-        X_test = torch.Tensor(X_test).float()
-        y_test = torch.Tensor(y_test).float()
-        X_test = torch.reshape(X_test, (X_test.shape[0]*X_test.shape[1], X_test.shape[2]))
-        y_test = torch.reshape(y_test, (y_test.shape[0]*y_test.shape[1], y_test.shape[2], y_test.shape[3]))
-        return X_train, y_train, X_test, y_test
+    num_trials = int(lfp.shape[0] / seqlength)
+
+    # Truncate spikes and LFP data to be multiples of seqlength
+    spikes = spikes[:num_trials * seqlength, :]
+    lfp = lfp[:num_trials * seqlength, :]
+
+    # Reshape the data into trials
+    X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
+    lfp_reshaped = np.reshape(lfp, (num_trials, seqlength, lfp.shape[1]))
+
+    # Split into training and testing sets at the trial level
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
+    )
+
+    return X_train, X_test, y_train, y_test

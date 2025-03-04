@@ -6,12 +6,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 
 class LSTMnet(nn.Module):
-    def __init__(self, input_size, num_hidden, num_layers, print=False):
+    def __init__(self, input_size, num_hidden, num_layers, seqlength, print=False):
         super().__init__()
         self.print = print
         self.input_size = input_size
         self.num_hidden = num_hidden
         self.num_layers = num_layers
+        self.seqlength = seqlength
         self.lstm = nn.LSTM(input_size, num_hidden, num_layers, batch_first=False)
         self.batchnorm = nn.BatchNorm1d(num_hidden)
         self.out = nn.Linear(num_hidden, 1)
@@ -43,11 +44,11 @@ class LSTMnet(nn.Module):
     
     
 class process_model:
-    def __init__(self, model, seqlength, criterion, device):
+    def __init__(self, model, criterion, device):
         self.model = model
         self.criterion = criterion
         self.device = device
-        self.seqlength = seqlength
+        self.seqlength = model.seqlength
         self.trained = False
             
     def train(self, train_dataloader, test_dataloader, numepochs, lr=.001, weight_decay=0.001):
@@ -187,20 +188,21 @@ class LinearRegressionModel:
     
     
 class SpikingTransformer(nn.Module):
-    def __init__(self, input_size, embedding_dim, num_heads, num_layers, dropout=0.1):
+    def __init__(self, input_size, seqlength = 750, embedding_dim = 64, num_heads = 8, num_layers = 4, dropout=0.1):
         super(SpikingTransformer, self).__init__()
 
         self.input_size = input_size
         self.embedding_dim = embedding_dim
         self.num_heads = num_heads
         self.num_layers = num_layers
+        self.seqlength = seqlength
 
         # Embedding Layer:  Maps spike counts to a higher-dimensional space
         self.embedding = nn.Linear(input_size, embedding_dim)
         self.embedding_bn = nn.BatchNorm1d(embedding_dim) # Batchnorm after embedding
 
         # Positional Encoding (Learnable)
-        self.positional_embedding = nn.Embedding(750, embedding_dim)  # Window size is 750
+        self.positional_embedding = nn.Embedding(self.seqlength, embedding_dim)  # Window size is 750
 
         # Transformer Encoder Layers
         self.transformer_encoder_layer = nn.TransformerEncoderLayer(

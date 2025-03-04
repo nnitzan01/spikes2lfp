@@ -4,8 +4,7 @@ import xarray as xr
 import pandas as pd
 from pynwb import NWBHDF5IO
 
-# base_path = 'Z:/Buzsakilabspace/LabShare/NoamNitzan/Open_Access/Allen_2022/data/'
-base_path = 'F:/vbn_s3_cache/visual-behavior-neuropixels-0.5.0/behavior_ecephys_sessions'
+base_path = 'Y:/buzsakilab/Buzsakilabspace/LabShare/NoamNitzan/Open_Access/Allen_2022/data/'
 
 def load_nwb(session_id, probe_letter):
     """
@@ -70,8 +69,7 @@ class probe:
         self.session_id = session.id
         self.target_area = 'VISp'
         self.session = session
-        # probe_table = pd.read_csv(r"Z:\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
-        probe_table = pd.read_csv(r"F:\vbn_s3_cache\visual-behavior-neuropixels-0.5.0\project_metadata\probes.csv")
+        probe_table = pd.read_csv(r"Y:\buzsakilab\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
         session_probes = probe_table[probe_table['ecephys_session_id'] == self.session_id]
         qualified_probes = []
         for probe_id in session_probes.ecephys_probe_id.values:
