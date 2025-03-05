@@ -1,0 +1,5 @@
+LSTMnet.py
+pre_process_spikes.py
+spike_to_lfp_lstm_V2.ipynb
+spike_to_lfp_seq2seq.ipynb
+transformer_test.ipynb
