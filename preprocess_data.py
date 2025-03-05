@@ -13,7 +13,6 @@ class pre_process_spikes:
         self.spike_times = spike_times
         self.bin_size = bin_size
         self.sigma  = sigma
-        self.seqlength = seqlength
         self.spkMat = []
         self.timestamps = []
         
@@ -25,9 +24,11 @@ class pre_process_spikes:
         self.spkMat = np.zeros((bin_count, len(self.units)))
         for i, unit in enumerate(tqdm.tqdm(self.units.index)):
             self.spkMat[:, i] = np.histogram(self.spike_times[unit], bins=bins)[0].tolist()
-        
-        num_trials = int(bin_count / self.seqlength)
-        self.spkMat = self.spkMat[:num_trials * self.seqlength, :]
+
+    def truncate(self, seqlength):
+        num_trials = int(self.spkMat.shape[0] / seqlength)
+        self.spkMat = self.spkMat[:num_trials * seqlength, :]
+        self.timestamps = self.timestamps[:num_trials * seqlength]
 
     def convolve_with_gaussian(self):
         self.spkMat = gaussian_filter1d(self.spkMat, self.sigma, axis=0)/self.bin_size
@@ -36,11 +37,10 @@ class pre_process_spikes:
         self.spkMat = (self.spkMat - self.spkMat.mean(axis=0))/self.spkMat.std(axis=0)
         
 class pre_process_lfp:
-    def __init__(self, session_id, channels, start_time, stop_time, output_dir, seqlength = 750):
+    def __init__(self, session_id, channels, start_time, stop_time, output_dir):
         chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
         self.channels = chans
         self.data = lfp
-        self.seqlength = seqlength
         self.lfpMat = []
         self.sampling_rate = 1250
 
@@ -61,8 +61,10 @@ class pre_process_lfp:
     
     def downsample_lfp(self, factor):
         self.lfpMat = self.lfpMat[::factor,:,:]
-        num_trials = int(self.lfpMat.shape[0] / self.seqlength)
-        self.lfpMat = self.lfpMat[:num_trials * self.seqlength, :, :]
+        
+    def truncate(self, seqlength):
+        num_trials = int(self.lfpMat.shape[0] / seqlength)
+        self.lfpMat = self.lfpMat[:num_trials * seqlength, :, :]
     
     def align_lfp(self, length):
         if self.lfpMat.shape[0] > length:
@@ -91,9 +93,10 @@ def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
     
     num_trials = int(lfp.shape[0] / seqlength)
 
-    # # Truncate spikes and LFP data to be multiples of seqlength
-    # spikes = spikes[:num_trials * seqlength, :]
-    # lfp = lfp[:num_trials * seqlength, :]
+    # Truncate spikes and LFP data to be multiples of seqlength
+    if spikes.shape[0] % seqlength != 0:
+        spikes = spikes[:-(spikes.shape[0] % seqlength), :]
+        lfp = lfp[:-(lfp.shape[0] % seqlength), :]
 
     # Reshape the data into trials
     X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
