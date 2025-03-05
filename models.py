@@ -98,7 +98,8 @@ class process_model:
     
     def evaluate(self, x_data):
         self.model.eval()
-
+        self.model.to(self.device)
+        
         # check if the data is a tensor
         if not torch.is_tensor(x_data):
             x_data = torch.tensor(x_data, dtype=torch.float32, device=self.device)
