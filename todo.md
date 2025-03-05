@@ -10,7 +10,10 @@
 1. ~~check Xtrain test etc~~
 2. ~~check attribution score calc results (with the same attributions)~~
 3. ~~Add options to choose units from specific regions~~
-4. 
+4. Finish working on the plots
+5. Write a separate script that calculates yHat as well as the weights
+6. Update and adapt the plot functions to take pre-calculated yHat and loss instead of calculating again and again
+7. Incorporate the unit table in the session obj to filter out the units
 
 ## TODO - LSTM
 1. ~~add an val set~~

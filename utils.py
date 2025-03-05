@@ -27,7 +27,7 @@ def save_models(models, output_dir, session_id):
             filename = output_dir / 'models' / str(session_id) / f'lstm_model_chan{chan}_band{band}.pt'
             torch.save(models[chan, band].model.state_dict(), filename)
 
-def load_models(output_dir, session_id, probe_obj, args):
+def load_models(output_dir, session_id, bands, chans, args):
     """
     Load .pt files from the output directory and return the LSTM models.
 
@@ -41,7 +41,7 @@ def load_models(output_dir, session_id, probe_obj, args):
     models: dict, LSTM models, keys are (channel, band) pairs
     """
     models = {}
-    num_channels, bands = probe_obj.chans.shape[0], probe_obj.bands
+    num_channels = len(chans)
     input_size, hidden_size, num_layers, seqlength, device = args
     criterion = torch.nn.MSELoss()
     for chani in range(num_channels):
