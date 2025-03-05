@@ -1,10 +1,11 @@
 import pandas as pd
 from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorNeuropixelsProjectCache
-output_dir = r'Y:\buzsakilab\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022'
-cache = VisualBehaviorNeuropixelsProjectCache.from_s3_cache(output_dir)
 
 class session:
-    def __init__(self, session_id, target_areas=None):
+    def __init__(self, session_id, df, output_dir, target_areas=None):
+        
+        cache = VisualBehaviorNeuropixelsProjectCache.from_s3_cache(output_dir)
+        
         self.id = session_id
         self.session = cache.get_ecephys_session(session_id)
         self.probes = self.session.probes
@@ -13,10 +14,7 @@ class session:
         # add relevent units
         units_raw = self.session.get_units()
         units = units_raw.merge(self.channels, left_on='peak_channel_id', right_index=True)
-        units = units[(units.isi_violations < 0.5) &
-                        (units.presence_ratio > 0.9) &
-                        (units.amplitude_cutoff < 0.1) &
-                        (units.firing_rate > 0.1)]
+        units = units[units.index.isin(df.unit_id)]
         # if target_areas are not specified, all units are added
         if target_areas is not None:
             units = units[units.structure_acronym.isin(target_areas)]
