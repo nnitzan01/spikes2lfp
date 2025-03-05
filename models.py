@@ -13,7 +13,7 @@ class LSTMnet(nn.Module):
         self.num_hidden = num_hidden
         self.num_layers = num_layers
         self.seqlength = seqlength
-        self.lstm = nn.LSTM(input_size, num_hidden, num_layers, batch_first=False)
+        self.lstm = nn.LSTM(input_size, num_hidden, num_layers, batch_first=True)
         self.batchnorm = nn.BatchNorm1d(num_hidden)
         self.out = nn.Linear(num_hidden, 1)
 
@@ -27,15 +27,16 @@ class LSTMnet(nn.Module):
             print(f'RNN-cell: {list(hidden[1].shape)}')
         
         # Reshape for batch normalization
-        batch_size = y.shape[1]  # Assuming batch_first=False
-        seq_len = y.shape[0]
-        y_reshaped = y.view(seq_len * batch_size, -1)
+        batch_size = x.shape[0]  # Assuming batch_first=False
+        seq_len    = x.shape[1]
+        # y_reshaped = y.view(seq_len * batch_size, -1)
+        y_reshaped = y.reshape(seq_len * batch_size, -1)
 
         # Apply batch normalization
         y_normalized = self.batchnorm(y_reshaped)
         
         # Reshape back to original shape
-        y_normalized = y_normalized.view(seq_len, batch_size, -1)
+        y_normalized = y_normalized.view(batch_size,seq_len,-1)
         
         o = self.out(y_normalized)
         if self.print:
@@ -104,32 +105,24 @@ class process_model:
         else:
             x_data = x_data.to(self.device)
         
-        L = x_data.shape[0]
-        if L % self.seqlength != 0:
-            x_data = x_data[:-(L % self.seqlength), :]
-        L = x_data.shape[0]
+        # if the data is a 2D tensor, add an extra dimension for batch_size otherwise assume it is already 3D
+        if len(x_data.shape) == 2:
+            L = x_data.shape[0]
+            if L % self.seqlength != 0:
+                x_data = x_data[:-(L % self.seqlength), :]
+            L = x_data.shape[0]
 
-        num_trials = int(L / self.seqlength)
-        input_size = x_data.shape[1]
-        
-        # Reshape based on model type
-        if type(self.model) is LSTMnet:
-            x_data = torch.reshape(x_data, (num_trials, self.seqlength, input_size))
-            x_data = x_data.permute(1,0,2).contiguous() #permute to have seq_length first
-        elif type(self.model) is SpikingTransformer:
+            num_trials = int(L / self.seqlength)
+            input_size = x_data.shape[1]
             x_data = torch.reshape(x_data, (num_trials, self.seqlength, input_size))
         else:
-            raise ValueError(f"Unsupported model type: {type(self.model)}")
-
+            L = x_data.shape[0] * x_data.shape[1]
+      
         with torch.no_grad():
             yHat = self.model(x_data)
 
         # Reshape the output back to (L,)
-        if type(self.model) is LSTMnet:
-            yHat = yHat.permute(1,0,2).contiguous() #permute back to batch_size first
-            yHat = torch.reshape(yHat, (L,))
-        elif type(self.model) is SpikingTransformer:
-            yHat = torch.reshape(yHat, (L,)) # as we are going from (batch_size, seq_length) to (batch_size*seq_length,)
+        yHat = torch.reshape(yHat, (L,)) # as we are going from (batch_size, seq_length) to (batch_size*seq_length,)
         
         return yHat.cpu().numpy()
     
