@@ -94,27 +94,65 @@ class process_model:
         # flag model as "trained"
         self.trained = True
         return train_losses, test_losses
-
-    def evaluate(self,x_data):
+    
+    def evaluate(self, x_data):
         self.model.eval()
+
+        # check if the data is a tensor
+        if not torch.is_tensor(x_data):
+            x_data = torch.tensor(x_data, dtype=torch.float32, device=self.device)
+        else:
+            x_data = x_data.to(self.device)
+        
         L = x_data.shape[0]
-        N = L - np.mod(L, self.seqlength)
-        if N < L:
-            # pad the data to be a multiple of the sequence length
-            pad_shape = (L-N, x_data.shape[1])
-            padding = torch.zeros(pad_shape, dtype=x_data.dtype, device=x_data.device)
-            x_data = torch.cat((x_data, padding), dim=0)
-            
+        if L % self.seqlength != 0:
+            x_data = x_data[:-(L % self.seqlength), :]
+        L = x_data.shape[0]
+
+        num_trials = int(L / self.seqlength)
         input_size = x_data.shape[1]
-        y_hat = np.zeros(x_data.shape[0])
+        
+        # Reshape based on model type
+        if type(self.model) is LSTMnet:
+            x_data = torch.reshape(x_data, (num_trials, self.seqlength, input_size))
+            x_data = x_data.permute(1,0,2).contiguous() #permute to have seq_length first
+        elif type(self.model) is SpikingTransformer:
+            x_data = torch.reshape(x_data, (num_trials, self.seqlength, input_size))
+        else:
+            raise ValueError(f"Unsupported model type: {type(self.model)}")
+
         with torch.no_grad():
-            for timei in range(0, x_data.shape[0], self.seqlength):
-                # Corrected Reshape:
-                X = x_data[timei:timei+self.seqlength, :].unsqueeze(1).to(self.device) #add an extra dimension for batch_size
-                yy = self.model(X)
-                y_hat[timei:timei+self.seqlength] = np.squeeze(yy.cpu().numpy())
-        y_hat = y_hat[:L]
-        return y_hat
+            yHat = self.model(x_data)
+
+        # Reshape the output back to (L,)
+        if type(self.model) is LSTMnet:
+            yHat = yHat.permute(1,0,2).contiguous() #permute back to batch_size first
+            yHat = torch.reshape(yHat, (L,))
+        elif type(self.model) is SpikingTransformer:
+            yHat = torch.reshape(yHat, (L,)) # as we are going from (batch_size, seq_length) to (batch_size*seq_length,)
+        
+        return yHat.cpu().numpy()
+    
+    # def evaluate(self,x_data):
+    #     self.model.eval()
+    #     L = x_data.shape[0]
+    #     N = L - np.mod(L, self.seqlength)
+    #     if N < L:
+    #         # pad the data to be a multiple of the sequence length
+    #         pad_shape = (L-N, x_data.shape[1])
+    #         padding = torch.zeros(pad_shape, dtype=x_data.dtype, device=x_data.device)
+    #         x_data = torch.cat((x_data, padding), dim=0)
+            
+    #     input_size = x_data.shape[1]
+    #     y_hat = np.zeros(x_data.shape[0])
+    #     with torch.no_grad():
+    #         for timei in range(0, x_data.shape[0], self.seqlength):
+    #             # Corrected Reshape:
+    #             X = x_data[timei:timei+self.seqlength, :].unsqueeze(1).to(self.device) #add an extra dimension for batch_size
+    #             yy = self.model(X)
+    #             y_hat[timei:timei+self.seqlength] = np.squeeze(yy.cpu().numpy())
+    #     y_hat = y_hat[:L]
+    #     return y_hat
     
     # def evaluate(self, x_data, overlap_factor=0.5):
     #     self.model.eval()
