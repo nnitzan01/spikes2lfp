@@ -66,7 +66,7 @@ def set_single_process():
     torch.set_num_threads(1)
     # torch.set_num_interop_threads(1)
 
-def calculate_attr(X_attr, integrated_gradients):
+def calculate_attr(X_test, integrated_gradients):
     """
     calculate the attribution scores, used for each process in multi
 
@@ -79,13 +79,15 @@ def calculate_attr(X_attr, integrated_gradients):
     """
     set_single_process()
     attributions = []
-    for i in tqdm(range(0, X_attr.shape[0], 100)):
-        attributions.append(integrated_gradients.attribute(X_attr[i:i+100,:].contiguous(),target=0,n_steps=50))
+    for i in tqdm(range(0, X_test.shape[0])):
+        trial = X_test[i].unsqueeze(0)
+        trial = trial.to('cpu')
+        attributions.append(integrated_gradients.attribute(trial,target=0,n_steps=50).unsqueeze(0))
     attributions = torch.cat(attributions).to(torch.float32)
     attributions = attributions.cpu().detach()
     return attributions
 
-def multi(models_chani, X_attr, bands, filename):
+def multi(models_chani, X_test, bands, filename):
     """
     middle function to handle the multiprocessing
 
@@ -108,7 +110,7 @@ def multi(models_chani, X_attr, bands, filename):
         mdl = models_chani[bandi].model.train().to('cpu')
         integrated_gradients = IntegratedGradients(mdl)
         filename_bandi = f'{filename}_band{bandi}.bl2' 
-        data.append([X_attr, integrated_gradients])
+        data.append([X_test, integrated_gradients])
         filenames.append(filename_bandi)
     # starting the multiprocessing, 9 processes, one for each band
     # this might be changed because having too many processes slows down the process significantly
@@ -116,7 +118,7 @@ def multi(models_chani, X_attr, bands, filename):
         results = pool.starmap(calculate_attr, data)
     return [results, filenames]
 
-def divide_task_for_attr(models, session_id, output_dir, spikes_obj, bin_size, probe_obj, dur = 720):
+def divide_task_for_attr(models, session_id, output_dir, X_test , bands):
     """
     highest level function to prepare the data for multiprocessing
 
@@ -133,9 +135,7 @@ def divide_task_for_attr(models, session_id, output_dir, spikes_obj, bin_size, p
     output:
     none, saves the attribution scores as .bl2 files
     """
-    num_channels, bands = probe_obj.chans.shape[0], probe_obj.bands
-    X_attr = spikes_obj.spkMat[:int(dur/bin_size), :] # first 720 seconds of data
-    X_attr = torch.tensor(X_attr).float()
+    num_channels = int(len(models.keys()) / (len(bands) + 1))
     bands_len = len(bands)+1 # including broadband
     path_name = output_dir / 'attrs' / str(session_id)
     if not path_name.exists():
@@ -144,6 +144,6 @@ def divide_task_for_attr(models, session_id, output_dir, spikes_obj, bin_size, p
     for chani in range(num_channels):
         models_chani = [models[chani, i] for i in range(bands_len)]
         filename = output_dir / 'attrs' / str(session_id) / f'attribution_scores_chan{chani}'
-        results = multi(models_chani, X_attr, bands, filename)
+        results = multi(models_chani, X_test, bands, filename)
         assert len(results) == 2
         multi_save(results[0], results[1])
