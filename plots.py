@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import torch
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -23,7 +24,7 @@ def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     os.makedirs(session_path, exist_ok=True)
     fig.savefig(file_path)
 
-def plot_r2(scoresTest, channels, bands, data_type='active', show_plot=True, 
+def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', show_plot=True, 
             save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
     """
     Make and/or save a plot of the R2 scores for the models.
@@ -53,7 +54,7 @@ def plot_r2(scoresTest, channels, bands, data_type='active', show_plot=True,
     ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')
     cbar = fig.colorbar(cax)
     cbar.set_label('R2')
-    cax.set_clim(-.4, .7);
+    cax.set_clim(clim[0], clim[1])
     if show_plot:
         plt.show()
     else:
@@ -82,6 +83,11 @@ def plot_lfp_prediction(y, yHat, chani, bands, start_time = None, end_time = Non
     session_id: int, session_id
     fig_name: str, name of the plot
     """
+    # if not already on the cpu, move it there
+    if isinstance(y, torch.Tensor):
+        y = y.cpu().detach().numpy()
+
+       
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(16, 16))
     for bandi in range(len(bands)+1):
         if start_time != None and end_time != None:
@@ -94,7 +100,7 @@ def plot_lfp_prediction(y, yHat, chani, bands, start_time = None, end_time = Non
             end_time = y.shape[0]/fs
             start_idx = 0
             end_idx = y.shape[0]
-        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), y_test.cpu().detach().numpy()[0:int(end_idx-start_idx), chani, bandi],'k',label='LFP')
+        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), y_test[0:int(end_idx-start_idx), chani, bandi],'k',label='LFP')
         ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), yHat_test[0:int(end_idx-start_idx)],'r',label='LSTM')
         if bandi == 0:
             ax.flat[bandi].set_title('Channel ' + str(chani) + ' Broadband')
@@ -148,13 +154,16 @@ def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True,
     if save_fig:
         save_plot(fig, output_dir, session_id, fig_name)
 
-def plot_abs_error_change(y, yHat, session_obj, timestamps, chani, bands,
+def plot_abs_error_change(y, yHat, session_obj, timestamps, chan2use, bands,
                    snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
     abs_error = np.zeros((y.shape[0], len(bands)+1))
     for bandi in range(len(bands)+1):
-        abs_error[:, bandi] = np.abs(yHat[:, bandi] - y[:, chani, bandi])
+        abs_error[:, bandi] = np.abs(yHat[:,chan2use, bandi] - y[:, chan2use, bandi])
     start_times = session_obj.active.start_time.values
+    start_times = start_times[start_times < timestamps[-1]-snippet_length]
     change = np.array(session_obj.active.is_change.values, dtype=bool)
+    change = change[:len(start_times)]
+    
     bin_size = 0.004
     nbins = int(snippet_length/bin_size)
     t = np.linspace(-0.25, 0.5, nbins)
@@ -163,14 +172,17 @@ def plot_abs_error_change(y, yHat, session_obj, timestamps, chani, bands,
     for i in range(len(start_times)):
         start = np.argmin(np.abs(timestamps - (start_times[i]-.25)))
         error_snippets[i,:,:] = abs_error[start:start+nbins,:]
-        lfp_snippets[i,:,:] = y[start:start+nbins,chani,:]
+        lfp_snippets[i,:,:] = y[start:start+nbins,chan2use,:]
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(30, 30))
     for bandi in range(len(bands)+1):
         ax.flat[bandi].imshow(error_snippets[:, :,bandi], aspect='auto', cmap='bwr', extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2, alpha=0.9)
         avr_condition = np.mean(error_snippets[change, :,bandi], axis=0)
         avr_nochange = np.mean(error_snippets[~change, :,bandi], axis=0)
-        ax.flat[bandi].plot(t, len(start_times)//2 + avr_condition * len(start_times)//5,   'm', label='change', linewidth=3)
-        ax.flat[bandi].plot(t, len(start_times)//2 + avr_nochange * len(start_times)//5, 'k', label='no change', linewidth=3)
+        ax2 = ax.flat[bandi].twinx()
+        ax2.plot(t, avr_condition ,   'm', label='change', linewidth=3)
+        ax2.plot(t, avr_nochange, 'k', label='no change', linewidth=3)
+        # ax.flat[bandi].plot(t, len(start_times)//2 + avr_condition * len(start_times)//5,   'm', label='change', linewidth=3)
+        # ax.flat[bandi].plot(t, len(start_times)//2 + avr_nochange * len(start_times)//5, 'k', label='no change', linewidth=3)
         ax.flat[bandi].set_xlabel('Time from change (s)')
         if bandi==0:
             ax.flat[bandi].set_ylabel('Trial')
