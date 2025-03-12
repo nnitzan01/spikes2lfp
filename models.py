@@ -31,6 +31,7 @@ class LSTMnet(nn.Module):
         seq_len    = x.shape[1]
         # y_reshaped = y.view(seq_len * batch_size, -1)
         y_reshaped = y.reshape(seq_len * batch_size, -1)
+        print(f'BatchNorm-in: {list(y_reshaped.shape)}') if self.print else None
 
         # Apply batch normalization
         y_normalized = self.batchnorm(y_reshaped)
