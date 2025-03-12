@@ -38,8 +38,8 @@ class pre_process_spikes:
         self.spkMat = (self.spkMat - self.spkMat.mean(axis=0))/self.spkMat.std(axis=0)
         
 class pre_process_lfp:
-    def __init__(self, session_id, channels, start_time, stop_time, output_dir):
-        chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
+    def __init__(self, session_id, channels, start_time, stop_time, output_dir, area):
+        chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time, area)
         self.channels = chans
         self.data = lfp
         self.lfpMat = []
@@ -94,6 +94,9 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, t
     """
     if len(lfp.shape) == 1:
         lfp = lfp[:, np.newaxis]
+
+    # only keep trials that are same as/longer than 250ms
+    trials_df = trials_df[trials_df.end_time - trials_df.start_time >= 0.250]
     
     # 0.25 gray screen * 2 + 0.25 stimulus = 0.75s
     # multipled by 10000 and convert to int to avoid floating point precision errors
@@ -121,7 +124,7 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, t
     # Get the start times of each chunk (first stimulus + 250ms gray screen)
     stim_starts = trials_df.start_time.values
     chunk_starts = stim_starts[::num_stimuli_per_chunk] - 0.25
-    assert len(chunk_starts) == num_chunk
+    chunk_starts = chunk_starts[:num_chunk]
 
     # Remove the last chunk if it goes beyond the end of the data
     # Using while loop in case multiple chunks need to be removed, happens when m=1
@@ -129,17 +132,20 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, t
         chunk_starts = chunk_starts[:-1]
         num_chunk -= 1
 
-    X = np.zeros((num_chunk, seqlength, spikes.shape[1]))
-    y = np.zeros((num_chunk, seqlength, lfp.shape[1]))    
-
-    for idx, start in enumerate(chunk_starts):
+    in_chunk = np.zeros(spikes.shape[0], dtype=bool)
+    for start in chunk_starts:
         start_idx = np.searchsorted(timestamps, start)
-        X[idx] = spikes[start_idx:start_idx+seqlength, :]
-        y[idx] = lfp[start_idx:start_idx+seqlength, :]
+        in_chunk[start_idx:start_idx+seqlength] = True
+
+    # Filter the data to only include the chunks
+    spikes = spikes[in_chunk, :]
+    lfp = lfp[in_chunk, :]
+    spikes = np.reshape(spikes, (num_chunk, seqlength, spikes.shape[1]))
+    lfp = np.reshape(lfp, (num_chunk, seqlength, lfp.shape[1]))
 
     # Split into training and testing sets at the trial level
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state
+        spikes, lfp, test_size=test_size, random_state=random_state
     )
 
     return X_train, X_test, y_train, y_test
