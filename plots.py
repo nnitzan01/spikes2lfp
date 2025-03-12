@@ -1,9 +1,13 @@
 import os
 import numpy as np
 import torch
+from scipy.signal import welch
+from scipy.stats import zscore
+from scipy import signal 
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import seaborn as sns
 
 def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     """
@@ -239,3 +243,388 @@ def plot_abs_error_omission(lfp, yHat, session_obj, timestamps, chani, bands,
         plt.close(fig)
     if save_fig:
         save_plot(fig, output_dir, session_id, fig_name)
+        
+def plot_psd(y, yHat, chani, show_plot=True, save_fig=False, 
+             output_dir=None, session_id=None, fig_name='default_name.png'):
+
+    f, Pxx = welch(y[:,chani, 0], 250, nperseg=64)
+    f, Pxx_hat = welch(yHat[:,chani, 0], 250, nperseg=64)
+
+    fig, ax = plt.subplots(1,1,figsize=(5,5))
+    ax.plot(f, np.log10(Pxx), 'r', label='LFP')
+    ax.plot(f, np.log10(Pxx_hat), 'g', label='model')
+    ax.set_xlabel('Frequency (Hz)')
+    ax.set_ylabel('log10(PSD)')
+    ax.set_title('Power spectral density of LFP and model prediction')
+    ax.set_xlim([0, 120])
+    ax.legend()
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+        
+def plot_attr_corrmat(attr,session_obj, show_plot=True, save_fig=False, 
+                      output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    locs = session_obj.units['structure_acronym']
+    sidx = np.argsort(locs.values)
+    sorted_locs = locs.values[sidx]
+
+    # for each area, find the first and last unit
+    areas = np.unique(sorted_locs)
+    first = []
+    last  = []
+    for area in areas:
+        ind = sorted_locs == area
+        first.append(np.where(ind)[0][0])
+        last.append(np.where(ind)[0][-1])
+    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
+    
+    attr = attr[:, sidx]
+    corrmat = np.corrcoef(attr.T)
+    fig, ax = plt.subplots(1,1,figsize=(8,8))
+    ax.imshow(np.corrcoef(corrmat), vmin=-.2, vmax=.2, cmap='bwr')
+    ax.set_xticks(middle)
+    ax.set_xticklabels(areas, rotation=45, ha='right')
+    ax.set_yticks(middle)
+    ax.set_yticklabels(areas, rotation=45, ha='right')
+    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.026, pad=0.04)
+    cbar.set_label('Correlation')
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+def plot_attr_density_plots(mean_attribution, session_obj, bands, area, show_plot=True, save_fig=False, 
+                            output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    exp   = np.ceil(np.log10(np.abs(np.median(mean_attribution))))
+
+    fig, ax = plt.subplots(1,1,figsize=(5,5))
+    
+    for bandi in range(len(bands)+1):
+        if bandi == 0:
+            plt.hist(np.abs(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()), 
+            bins=50, range = (0, 10 ** exp), density=False, histtype = 'step', label='Broadband',
+            weights=np.ones(len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten())) / len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()))
+        else:
+            plt.hist(np.abs(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()), 
+            bins=50, range = (0, 10 ** exp), density=False, histtype = 'step', label=f'{bands[bandi-1][0]}-{bands[bandi-1][1]} Hz',
+            weights=np.ones(len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten())) / len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()))
+
+    ax.set_xlabel('Attribution')
+    ax.set_ylabel('Probability')
+    ax.set_xlim([- 10 ** (exp-2), 10 ** exp])
+    # set the y-axis to be log scale
+    # ax.set_yscale('log')
+    ax.legend(loc='upper right', frameon=False)
+
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+        
+def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot=True, save_fig=False, 
+                         output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    num_channels = len(lfp_obj.channels)
+    areas = sorted(session_obj.units['structure_acronym'].unique())
+    exp   = np.ceil(np.log10(np.abs(np.median(mean_attr_areas))))
+
+    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2,figsize=(10,20))
+    for bandi in range(len(bands)+1):
+        ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]) , aspect='auto', vmin=0, vmax=10 **exp, cmap='bwr')
+        # set the xticks to be the channel depths
+        ax.flat[bandi].set_xticks(range(num_channels))
+        ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int), 
+                                    rotation=45, ha='right')
+        ax.flat[bandi].set_xlabel('dorsal ventral ccf coordinate')
+
+        # set the yticks to be the area names
+        ax.flat[bandi].set_yticks(range(len(areas)))
+        ax.flat[bandi].set_yticklabels(areas)
+        ax.flat[bandi].set_ylabel('Area')
+        if bandi == 0:
+            ax.flat[bandi].set_title('Broadband')
+        else:
+            ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
+            
+        cbar = fig.colorbar(ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]), 
+                                                aspect='auto', vmin=0, vmax=10 **exp, cmap='bwr'), 
+                            ax=ax.flat[bandi])
+
+    # tight layout
+    plt.tight_layout()
+    fig.delaxes(ax.flat[-1])
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+
+def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2use, show_plot=True, save_fig=False, 
+                         output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    area_idx = session_obj.units.index[session_obj.units['structure_acronym'].str.contains(area)]
+    pyr  = np.intersect1d(df.unit_id[df.pyr == 1], area_idx)
+    intn = np.intersect1d(df.unit_id[df.pyr == 0], area_idx)
+
+    attr_pyr = mean_attribution[:, :,session_obj.units.index.isin(pyr)]
+    attr_int = mean_attribution[:, :,session_obj.units.index.isin(intn)]
+
+    # for each band, plot boxplots of the mean attribution for pyramidal cells and interneurons
+    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(5,8))
+
+    for bandi in range(len(bands)+1):
+        ax.flat[bandi].boxplot([np.abs(attr_pyr[chan2use, bandi,:]), np.abs(attr_int[chan2use, bandi,:])], showfliers=False)
+        if bandi == 0:
+            ax.flat[bandi].set_title('Broadband')
+        else:
+            ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
+        ax.flat[bandi].set_xticklabels(['pyr', 'int'])
+        ax.flat[bandi].set_ylabel('Mean attribution')
+        
+    # tight layout
+    plt.tight_layout()
+    fig.delaxes(ax.flat[-1])
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+        
+def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004, show_plot=True, save_fig=False):
+    
+    exp   = np.ceil(np.log10(np.abs(np.median(attr.flatten()))))
+
+    stim_st = session_obj.stimulus_presentation.start_time
+    stim_st = stim_st[(stim_st > time_win[0]) & (stim_st < time_win[1])]
+    stim_st = stim_st.values
+    
+    locs = session_obj.units['structure_acronym']
+    sidx = np.argsort(locs.values)
+    sorted_locs = locs.values[sidx]
+
+    # for each area, find the first and last unit
+    areas = np.unique(sorted_locs)
+    first = []
+    last  = []
+    for area in areas:
+        ind = sorted_locs == area
+        first.append(np.where(ind)[0][0])
+        last.append(np.where(ind)[0][-1])
+    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
+    
+    st = int((time_win[0] - timestamps[0]) / bin_size)
+    en = int((time_win[1] - timestamps[0]) / bin_size)
+    
+    # visualize the attribution we just loaded for the broadband model
+    fig, ax = plt.subplots(1,1,figsize=(15,5))
+    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-10 ** (exp+1.5), vmax=10 ** (exp+1.5),
+            extent = [time_win[0], time_win[1], len(session_obj.units), 0])
+    if plot_stim:
+        for st in stim_st:
+            ax.axvline(st,     color='k', linestyle='--')
+            ax.axvline(st+.25, color='k', linestyle='--')
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('Unit') 
+    ax.set_yticks(middle)
+    ax.set_yticklabels(areas, rotation=45, ha='right')
+    plt.show()
+        
+    
+def plot_attr_lfp_corr(attr, lfp, session_obj, sorting = "max", bin_size = 0.004,
+                        show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    locs = session_obj.units['structure_acronym']
+    sidx = np.argsort(locs.values)
+    sorted_locs = locs.values[sidx]
+
+    # for each area, find the first and last unit
+    areas = np.unique(sorted_locs)
+    first = []
+    last  = []
+    for area in areas:
+        ind = sorted_locs == area
+        first.append(np.where(ind)[0][0])
+        last.append(np.where(ind)[0][-1])
+    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
+    
+    if len(lfp.shape) == 1:
+        lfp = lfp[:, np.newaxis]
+        
+    cross_corr = np.zeros((attr.shape[1], lfp.shape[0]))
+    for i in range(attr.shape[1]):
+        cross_corr[i,:] = signal.correlate(lfp.flatten(), attr[:,i], mode='same')
+        
+    corr_norm = cross_corr / (np.std(attr, axis=0)[:, np.newaxis] * np.std(lfp) * len(lfp))
+    lags = signal.correlation_lags(lfp.size, lfp.size, mode="same")
+    
+    midx = np.argsort(np.mean(corr_norm[:,int(lfp.shape[0]/2)-200:int(lfp.shape[0]/2)+200], axis=1))
+    
+    fig, ax = plt.subplots(1,1,figsize=(8,8))
+    if sorting == "max":
+        ax.imshow(corr_norm[midx,:], aspect='auto', cmap='bwr',
+          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=-0.1, vmax=0.1)
+    else:
+       ax.imshow(corr_norm[sidx,:], aspect='auto', cmap='bwr',
+          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=-0.1, vmax=0.1)
+       ax.set_yticks(middle)
+       ax.set_yticklabels(areas, rotation=45, ha='right')
+        
+    ax.plot([0, 0], [0, corr_norm.shape[0]], '--k')
+    ax.set_xlabel('Lag relative to LFP (s)')
+    ax.set_ylabel('Unit')
+    ax.set_xlim([-1, 1])
+    ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')
+    ax.set_ylabel('Unit')
+
+    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.026, pad=0.04)
+    cbar.set_label('Correlation')
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+
+def plot_mean_attr_clusters(mean_attr_clusters, lfp_obj, bands, show_plot=True, save_fig=False, 
+                         output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    num_channels = len(lfp_obj.channels) 
+    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2,figsize=(10,20)) 
+    
+    for bandi in range(len(bands)+1):
+        ax.flat[bandi].imshow( np.abs(mean_attr_clusters[:,bandi,:]) , aspect='auto',cmap='bwr')
+        # set the xticks to be the channel depths
+        ax.flat[bandi].set_xticks(range(num_channels))
+        ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int) , rotation=45, ha='right')
+        ax.flat[bandi].set_xlabel('dorsal ventral ccf coordinate')
+        ax.flat[bandi].set_ylim([.5,5.5])
+        if bandi == 0:
+            ax.flat[bandi].set_title('Broadband')
+        else:
+            ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
+        # set the yticks to be the cluster ids
+        ax.flat[bandi].set_yticks(range(1,6,1))
+        ax.flat[bandi].set_yticklabels(range(1,6,1))
+        ax.flat[bandi].set_ylabel('Cluster ID')
+        cbar = fig.colorbar(ax.flat[bandi].imshow(np.abs(mean_attr_clusters[:,bandi,:]), aspect='auto', cmap='bwr'), ax=ax.flat[bandi])
+        
+    # tight layout
+    plt.tight_layout()
+    fig.delaxes(ax.flat[-1])
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+        
+        
+def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size = 0.004, show_plot=True, save_fig=False, 
+                         output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    t = np.arange(time_win[0], time_win[1], bin_size)
+
+    stim_st = session_obj.stimulus_presentation.start_time
+    stim_st = stim_st[((stim_st - np.abs(time_win[0])) > timestamps[0]) & ((stim_st + np.abs(time_win[1])) < timestamps[-1])]
+    stim_st = stim_st.values
+    
+    areas = sorted(session_obj.units['structure_acronym'].unique())
+    
+    attr_snippets = np.zeros((len(stim_st), len(t), attr.shape[1]))
+    lfp_snippets = np.zeros((len(stim_st), len(t)))
+    
+    for i in range(len(stim_st)):
+        start = np.argmin(np.abs(timestamps - (stim_st[i]- np.abs(time_win[0])  )))
+        attr_snippets[i,:,:] = attr[start:start+len(t),:]
+        lfp_snippets[i,:]    = lfp[start:start+len(t)]
+    
+    attr_snippets = zscore(attr_snippets, axis=1)
+    mean_lfp = np.mean(lfp_snippets, axis=0)
+    
+    fig, ax = plt.subplots(int(np.ceil(len(areas)/2)) ,2,figsize=(16,16))
+    for areai in range(len(areas)):
+        # get mean across neurons for each area 
+        tmp = np.mean(attr_snippets[:, :, session_obj.units['structure_acronym'] == areas[areai]], axis=2)
+        # num_neurons = np.sum(session_obj.units['structure_acronym'] == areas[areai])
+        # plot mean and sem
+        ax.flat[areai].plot(t, np.mean(tmp, axis=0), 'r', label='mean')
+        ax.flat[areai].fill_between(t, np.mean(tmp, axis=0) - np.std(tmp, axis=0)/np.sqrt(len(stim_st)), 
+                                 np.mean(tmp, axis=0) + np.std(tmp, axis=0)/np.sqrt(len(stim_st)), color='r', alpha=0.5)
+        ax2 = ax.flat[areai].twinx()
+        ax2.plot(t, mean_lfp, 'k')
+        ax.flat[areai].set_ylabel('Mean attribution')
+        ax2.set_ylabel('Mean LFP')
+        ax.flat[areai].set_xlim([-0.25, 0.5])
+        corr = np.corrcoef(mean_lfp, np.mean(tmp, axis=0))[0,1]
+        ax.flat[areai].set_title(areas[areai] + ' Corr: ' + str(np.round(corr,2)))
+    
+    if len(areas) % 2 != 0:
+       fig.delaxes(ax.flat[-1]) 
+    plt.tight_layout()
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+    
+    return attr_snippets, lfp_snippets, t
+    
+    
+    
+def plot_unit_attr_fr_corr(unit_attr_fr_corr, session_obj, bands, show_plot=True, save_fig=False, 
+                         output_dir=None, session_id=None, fig_name='default_name.png'):
+    
+    num_channels = unit_attr_fr_corr.shape[1]
+    num_bands    = unit_attr_fr_corr.shape[2]
+    
+    locs = session_obj.units['structure_acronym']
+    sidx = np.argsort(locs.values)
+    sorted_locs = locs.values[sidx]
+
+    # for each area, find the first and last unit
+    areas = np.unique(sorted_locs)
+    first = []
+    last  = []
+    for area in areas:
+        ind = sorted_locs == area
+        first.append(np.where(ind)[0][0])
+        last.append(np.where(ind)[0][-1])
+    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
+    
+    fig, ax = plt.subplots(int(np.ceil(num_channels/2)) ,2,figsize=(10,40))
+    
+    for chani in range(num_channels):
+        ax.flat[chani].imshow(unit_attr_fr_corr[sidx,chani,:], aspect='auto', cmap='bwr',
+          extent=[0, num_bands, unit_attr_fr_corr.shape[0],0], vmin=-.1, vmax=.1, interpolation='none' )
+        # ax.flat[chani].set_yticks(middle)
+        # ax.flat[chani].set_yticklabels(areas, rotation=45, ha='right')
+        ax.flat[chani].set_xticks(range(num_bands))
+        ax.flat[chani].set_xticklabels(['Broadband'] + [str(bands[i]) for i in range(len(bands))], rotation=45, ha='center')
+        ax.flat[chani].set_title('Channel ' + str(chani))
+        
+    plt.tight_layout()
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)   
+    
+    
