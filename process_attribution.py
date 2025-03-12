@@ -42,7 +42,7 @@ def bl2_load(path):
         print('File does not exist')
         return None
     else:
-        return blosc2.load_tensor(path, mode='r')
+        return blosc2.load_tensor(path)
 
 def multi_save(data, filenames):
     """
@@ -81,7 +81,7 @@ def calculate_attr(X_test, integrated_gradients):
     attributions = []
     for i in tqdm(range(0, X_test.shape[0])):
         trial = X_test[i].unsqueeze(0)
-        trial = trial.to('cpu')
+        # trial = trial.to('cpu')
         attributions.append(integrated_gradients.attribute(trial,target=0,n_steps=50).unsqueeze(0))
     attributions = torch.cat(attributions).to(torch.float32)
     attributions = attributions.cpu().detach()
@@ -137,13 +137,15 @@ def divide_task_for_attr(models, session_id, output_dir, X_test , bands):
     """
     num_channels = int(len(models.keys()) / (len(bands) + 1))
     bands_len = len(bands)+1 # including broadband
-    path_name = output_dir / 'attrs' / str(session_id)
+    path_name = output_dir / 'attrs' 
     if not path_name.exists():
         path_name.mkdir(parents=True)
     # for each channel, divide the task into 9 processes, one for each band
     for chani in range(num_channels):
         models_chani = [models[chani, i] for i in range(bands_len)]
-        filename = output_dir / 'attrs' / str(session_id) / f'attribution_scores_chan{chani}'
+        filename = output_dir / 'attrs' / f'attribution_scores_chan{chani}'
         results = multi(models_chani, X_test, bands, filename)
         assert len(results) == 2
         multi_save(results[0], results[1])
+        
+      
