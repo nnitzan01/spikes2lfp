@@ -71,7 +71,8 @@ class pre_process_lfp:
         if self.lfpMat.shape[0] > length:
             self.lfpMat = self.lfpMat[:length,:,:]
             
-def chunk_and_reshape(spikes, lfp, timestamps, trials_df, m = 2, test_size=0.2, random_state=42):
+def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, test_size=0.2, random_state=42):
+    from copy import deepcopy
     """
     Chunks the spike and LFP data into equal segments, reshapes them,
     and splits them into training and testing sets.
@@ -80,10 +81,10 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, m = 2, test_size=0.2, 
         spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
         lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
              If LFP is single channel, should be (num_timepoints, 1).
-        seqlength: The length of each chunk (window size).
         trials_df: DataFrame, contains the stimulus start and stop times. Can be obtained from the session object.
              e.g. session_obj.active, session_obj.passive etc.
-        m: int, multiple of the seqlength (375) to chunk the data into. Default is 2 -> 750 bins, or 3s
+        seqlength: The length of each chunk (window size).
+        bin_size: The size of each bin in seconds.
         test_size: The proportion of data to use for the test set.
         random_state: The random state for the train_test_split function.
 
@@ -94,10 +95,27 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, m = 2, test_size=0.2, 
     if len(lfp.shape) == 1:
         lfp = lfp[:, np.newaxis]
     
-    seqlength = int(375 * m)
+    # 0.25 gray screen * 2 + 0.25 stimulus = 0.75s
+    # multipled by 10000 and convert to int to avoid floating point precision errors
+    minimal_time_length = int(0.25*3*10000)
+    bin_size_int = int(bin_size*10000)
+    minimal_time_length_copy = deepcopy(minimal_time_length)
+
+    # find the minimal length that is divisible by the given bin size
+    while minimal_time_length % bin_size_int != 0:
+        minimal_time_length += minimal_time_length_copy
+    minimal_seqlength = int(minimal_time_length / 10000 / bin_size)
+    if seqlength < minimal_seqlength:
+        raise ValueError(f"Seqlength is too short. Minimal seqlength is {minimal_seqlength}")
+    if seqlength % minimal_seqlength != 0:
+        closest_multiple = int(np.round(seqlength / minimal_seqlength) * minimal_seqlength)
+        raise ValueError(f"Current seqlength cannot correctly divide the data. Closest value is {closest_multiple}")
+
     # Convert total stimulus number to number of chunks
     num_stimmuli = len(trials_df)
-    num_stimuli_per_chunk = m * 2
+    seq_time = seqlength * bin_size
+    # a single stimulus + gray screen is 0.75s
+    num_stimuli_per_chunk = int(seq_time / 0.25 / 3)
     num_chunk = num_stimmuli // num_stimuli_per_chunk
     
     # Get the start times of each chunk (first stimulus + 250ms gray screen)

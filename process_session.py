@@ -19,6 +19,11 @@ class session:
         if target_areas is not None:
             units = units[units.structure_acronym.isin(target_areas)]
         self.units = units
+        
+        # group together MG and LG subregions
+        self.units['structure_acronym'][self.units['structure_acronym'].str.contains('MG')] = 'MG'
+        self.units['structure_acronym'][self.units['structure_acronym'].str.contains('LG')] = 'LG'
+
         self.spike_times = self.session.spike_times
         
         # add stimulus presentation and start/stop times
