@@ -6,6 +6,7 @@ from scipy.stats import zscore
 import process_probe as pp
 import tqdm
 import torch
+from torch.utils.data import DataLoader, TensorDataset
 
 class pre_process_spikes:
     def __init__(self, units, spike_times, seqlength = 750, bin_size=0.004, sigma=1):
@@ -37,8 +38,8 @@ class pre_process_spikes:
         self.spkMat = (self.spkMat - self.spkMat.mean(axis=0))/self.spkMat.std(axis=0)
         
 class pre_process_lfp:
-    def __init__(self, session_id, channels, start_time, stop_time, output_dir):
-        chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
+    def __init__(self, session_id, channels, start_time, stop_time, output_dir, area):
+        chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time, area)
         self.channels = chans
         self.data = lfp
         self.lfpMat = []
@@ -70,7 +71,8 @@ class pre_process_lfp:
         if self.lfpMat.shape[0] > length:
             self.lfpMat = self.lfpMat[:length,:,:]
             
-def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
+def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, test_size=0.2, random_state=42):
+    from copy import deepcopy
     """
     Chunks the spike and LFP data into equal segments, reshapes them,
     and splits them into training and testing sets.
@@ -79,7 +81,10 @@ def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
         spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
         lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
              If LFP is single channel, should be (num_timepoints, 1).
+        trials_df: DataFrame, contains the stimulus start and stop times. Can be obtained from the session object.
+             e.g. session_obj.active, session_obj.passive etc.
         seqlength: The length of each chunk (window size).
+        bin_size: The size of each bin in seconds.
         test_size: The proportion of data to use for the test set.
         random_state: The random state for the train_test_split function.
 
@@ -87,24 +92,184 @@ def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
         X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
                                          for the spikes (X) and LFP (y) data.
     """
-
     if len(lfp.shape) == 1:
         lfp = lfp[:, np.newaxis]
+
+    # only keep trials that are same as/longer than 250ms
+    trials_df = trials_df[trials_df.end_time - trials_df.start_time >= 0.250]
     
-    num_trials = int(lfp.shape[0] / seqlength)
+    # 0.25 gray screen * 2 + 0.25 stimulus = 0.75s
+    # multipled by 10000 and convert to int to avoid floating point precision errors
+    minimal_time_length = int(0.25*3*10000)
+    bin_size_int = int(bin_size*10000)
+    minimal_time_length_copy = deepcopy(minimal_time_length)
 
-    # Truncate spikes and LFP data to be multiples of seqlength
-    if spikes.shape[0] % seqlength != 0:
-        spikes = spikes[:-(spikes.shape[0] % seqlength), :]
-        lfp = lfp[:-(lfp.shape[0] % seqlength), :]
+    # find the minimal length that is divisible by the given bin size
+    while minimal_time_length % bin_size_int != 0:
+        minimal_time_length += minimal_time_length_copy
+    minimal_seqlength = int(minimal_time_length / 10000 / bin_size)
+    if seqlength < minimal_seqlength:
+        raise ValueError(f"Seqlength is too short. Minimal seqlength is {minimal_seqlength}")
+    if seqlength % minimal_seqlength != 0:
+        closest_multiple = int(np.round(seqlength / minimal_seqlength) * minimal_seqlength)
+        raise ValueError(f"Current seqlength cannot correctly divide the data. Closest value is {closest_multiple}")
 
-    # Reshape the data into trials
-    X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
-    lfp_reshaped = np.reshape(lfp, (num_trials, seqlength, lfp.shape[1]))
+    # Convert total stimulus number to number of chunks
+    num_stimmuli = len(trials_df)
+    seq_time = seqlength * bin_size
+    # a single stimulus + gray screen is 0.75s
+    num_stimuli_per_chunk = int(seq_time / 0.25 / 3)
+    num_chunk = num_stimmuli // num_stimuli_per_chunk
+    
+    # Get the start times of each chunk (first stimulus + 250ms gray screen)
+    stim_starts = trials_df.start_time.values
+    chunk_starts = stim_starts[::num_stimuli_per_chunk] - 0.25
+    chunk_starts = chunk_starts[:num_chunk]
+
+    # Remove the last chunk if it goes beyond the end of the data
+    # Using while loop in case multiple chunks need to be removed, happens when m=1
+    while np.searchsorted(timestamps, chunk_starts[-1]) + seqlength > spikes.shape[0]:
+        chunk_starts = chunk_starts[:-1]
+        num_chunk -= 1
+
+    in_chunk = np.zeros(spikes.shape[0], dtype=bool)
+    for start in chunk_starts:
+        start_idx = np.searchsorted(timestamps, start)
+        in_chunk[start_idx:start_idx+seqlength] = True
+
+    # Filter the data to only include the chunks
+    spikes = spikes[in_chunk, :]
+    lfp = lfp[in_chunk, :]
+    spikes = np.reshape(spikes, (num_chunk, seqlength, spikes.shape[1]))
+    lfp = np.reshape(lfp, (num_chunk, seqlength, lfp.shape[1]))
 
     # Split into training and testing sets at the trial level
     X_train, X_test, y_train, y_test = train_test_split(
-        X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
+        spikes, lfp, test_size=test_size, random_state=random_state
     )
 
     return X_train, X_test, y_train, y_test
+
+
+def get_data_loaders(X_train, X_test, y_train, y_test, batch_size, device):
+    
+    # Convert to PyTorch tensors and move to GPU
+    X_train = torch.from_numpy(X_train).float().to(device)
+    X_test = torch.from_numpy(X_test).float().to(device)
+    y_train = torch.from_numpy(y_train).float().to(device)
+    y_test = torch.from_numpy(y_test).float().to(device)
+
+    # Create DataLoader for batching
+    train_dataset = TensorDataset(X_train, y_train)
+    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+
+    test_dataset = TensorDataset(X_test, y_test)
+    test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    
+    return train_dataloader, test_dataloader
+
+# def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
+#     """
+#     Chunks the spike and LFP data into equal segments, reshapes them,
+#     and splits them into training and testing sets.
+
+#     Args:
+#         spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
+#         lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
+#              If LFP is single channel, should be (num_timepoints, 1).
+#         seqlength: The length of each chunk (window size).
+#         test_size: The proportion of data to use for the test set.
+#         random_state: The random state for the train_test_split function.
+
+#     Returns:
+#         X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
+#                                          for the spikes (X) and LFP (y) data.
+#     """
+
+#     if len(lfp.shape) == 1:
+#         lfp = lfp[:, np.newaxis]
+    
+#     num_trials = int(lfp.shape[0] / seqlength)
+
+#     # Truncate spikes and LFP data to be multiples of seqlength
+#     if spikes.shape[0] % seqlength != 0:
+#         spikes = spikes[:-(spikes.shape[0] % seqlength), :]
+#         lfp = lfp[:-(lfp.shape[0] % seqlength), :]
+
+#     # Reshape the data into trials
+#     X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
+#     lfp_reshaped = np.reshape(lfp, (num_trials, seqlength, lfp.shape[1]))
+
+#     # Split into training and testing sets at the trial level
+#     X_train, X_test, y_train, y_test = train_test_split(
+#         X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
+#     )
+
+#     return X_train, X_test, y_train, y_test
+
+
+# def chunk_and_reshape_sliding_window(spikes, lfp, seqlength, overlap_factor=0.5, test_size=0.2, random_state=42):
+#     """
+#     Chunks the spike and LFP data into overlapping segments for training,
+#     reshapes them, and splits them into training and testing sets.
+#     Testing data is not expanded.
+
+#     Args:
+#         spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
+#         lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
+#              If LFP is single channel, should be (num_timepoints, 1).
+#         seqlength: The length of each chunk (window size).
+#         overlap_factor: The proportion of overlap between consecutive chunks (0 to <1).
+#         test_size: The proportion of data to use for the test set.
+#         random_state: The random state for the train_test_split function.
+
+#     Returns:
+#         X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
+#                                          for the spikes (X) and LFP (y) data.
+#     """
+#     if len(lfp.shape) == 1:
+#         lfp = lfp[:, np.newaxis]
+
+#     # 1. Initial Reshape into Trials
+#     num_trials = int(lfp.shape[0] / seqlength)
+#     # Truncate spikes and LFP data to be multiples of seqlength
+#     if spikes.shape[0] % seqlength != 0:
+#         spikes = spikes[:-(spikes.shape[0] % seqlength), :]
+#         lfp = lfp[:-(lfp.shape[0] % seqlength), :]
+    
+#     X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
+#     lfp_reshaped = np.reshape(lfp, (num_trials, seqlength, lfp.shape[1]))
+
+#     # 2. Train/Test Split
+#     X_train_trials, X_test, y_train_trials, y_test = train_test_split(
+#         X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
+#     )
+
+#     # 3. Reshape Training Data for Expansion
+#     X_train = X_train_trials.reshape(-1, X_train_trials.shape[-1])
+#     y_train = y_train_trials.reshape(-1, y_train_trials.shape[-1])
+
+#     # 4. Sliding Window Expansion (Training Data Only)
+#     hop_length = int(seqlength * (1 - overlap_factor))
+#     X_expanded = []
+#     y_expanded = []
+    
+#     # Get the number of timepoints
+#     num_timepoints = y_train.shape[0]
+#     # Iterate through the number of time points, using a hop_length
+#     for j in range(0, num_timepoints - seqlength + 1, hop_length):
+#         start_idx = j 
+#         end_idx = j + seqlength
+#         X_expanded.append(X_train[start_idx:end_idx, :])
+#         y_expanded.append(y_train[start_idx:end_idx, :])
+
+#     X_train = np.array(X_expanded)
+#     y_train = np.array(y_expanded)
+
+#     # 6. Reshape Expanded Training Data into Trials
+#     num_trials_expanded = X_train.shape[0]
+#     X_train = np.reshape(X_train, (num_trials_expanded, seqlength, X_train.shape[2]))
+#     y_train = np.reshape(y_train, (num_trials_expanded, seqlength, y_train.shape[2]))
+    
+#     # 7. Return
+#     return X_train, X_test, y_train, y_test
