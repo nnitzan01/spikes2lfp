@@ -2,6 +2,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import butter, filtfilt, hilbert
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import MinMaxScaler
 from scipy.stats import zscore
 import process_probe as pp
 import tqdm
@@ -37,6 +38,10 @@ class pre_process_spikes:
     def zscore(self):
         self.spkMat = (self.spkMat - self.spkMat.mean(axis=0))/self.spkMat.std(axis=0)
         
+    def minmax(self):
+        scaler = MinMaxScaler()
+        self.spkMat = scaler.fit_transform(self.spkMat.T).T
+        
 class pre_process_lfp:
     def __init__(self, session_id, channels, start_time, stop_time, output_dir):
         chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
@@ -45,7 +50,7 @@ class pre_process_lfp:
         self.lfpMat = []
         self.sampling_rate = 1250
 
-    def filter_lfp(self, bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)]):
+    def filter_lfp(self, bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)], power = False):
         self.lfpMat = np.zeros((self.data.shape[0], self.data.shape[1], len(bands)+1))
         # first entry is the raw signal
         self.lfpMat[:, :, 0] = zscore(self.data, axis=0)
@@ -55,9 +60,11 @@ class pre_process_lfp:
             b, a = butter(3, [low, high], btype='bandpass')
             # Apply the filter
             filt  = filtfilt(b, a, self.data.astype(np.float64), axis=0)
-            power = np.abs(hilbert(filt, axis=0))**2 
-            # z-score the power
-            self.lfpMat[:, :, i+1] = zscore(power, axis=0)
+            if power:
+                power = np.abs(hilbert(filt, axis=0))**2
+                self.lfpMat[:, :, i+1] = zscore(power, axis=0)
+            else:
+                self.lfpMat[:, :, i+1] = zscore(filt, axis=0)
         del self.data
     
     def downsample_lfp(self, factor):
@@ -71,8 +78,7 @@ class pre_process_lfp:
         if self.lfpMat.shape[0] > length:
             self.lfpMat = self.lfpMat[:length,:,:]
             
-def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, test_size=0.2, random_state=42):
-    from copy import deepcopy
+def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, prediction_lag = 0, random_state=42):
     """
     Chunks the spike and LFP data into equal segments, reshapes them,
     and splits them into training and testing sets.
@@ -81,10 +87,7 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, t
         spikes: NumPy array of shape (num_timepoints, num_neurons) representing spiking data.
         lfp: NumPy array of shape (num_timepoints, num_lfp_channels) representing LFP data.
              If LFP is single channel, should be (num_timepoints, 1).
-        trials_df: DataFrame, contains the stimulus start and stop times. Can be obtained from the session object.
-             e.g. session_obj.active, session_obj.passive etc.
         seqlength: The length of each chunk (window size).
-        bin_size: The size of each bin in seconds.
         test_size: The proportion of data to use for the test set.
         random_state: The random state for the train_test_split function.
 
@@ -92,54 +95,33 @@ def chunk_and_reshape(spikes, lfp, timestamps, trials_df, seqlength, bin_size, t
         X_train, X_test, y_train, y_test: NumPy arrays representing the training and testing sets
                                          for the spikes (X) and LFP (y) data.
     """
+
     if len(lfp.shape) == 1:
         lfp = lfp[:, np.newaxis]
     
-    # 0.25 gray screen * 2 + 0.25 stimulus = 0.75s
-    # multipled by 10000 and convert to int to avoid floating point precision errors
-    minimal_time_length = int(0.25*3*10000)
-    bin_size_int = int(bin_size*10000)
-    minimal_time_length_copy = deepcopy(minimal_time_length)
+    # shift the LFP if prediction_lag is not 0
+    if prediction_lag > 0:
+        lfp_shifted = np.roll(lfp, -prediction_lag, axis=0)
+        lfp_shifted = lfp_shifted[:-prediction_lag, :]
+        spikes = spikes[:-prediction_lag, :]
+    else:
+        lfp_shifted = lfp
+    # The last time points can not be predicted and should be removed
 
-    # find the minimal length that is divisible by the given bin size
-    while minimal_time_length % bin_size_int != 0:
-        minimal_time_length += minimal_time_length_copy
-    minimal_seqlength = int(minimal_time_length / 10000 / bin_size)
-    if seqlength < minimal_seqlength:
-        raise ValueError(f"Seqlength is too short. Minimal seqlength is {minimal_seqlength}")
-    if seqlength % minimal_seqlength != 0:
-        closest_multiple = int(np.round(seqlength / minimal_seqlength) * minimal_seqlength)
-        raise ValueError(f"Current seqlength cannot correctly divide the data. Closest value is {closest_multiple}")
+    num_trials = int(lfp_shifted.shape[0] / seqlength)
 
-    # Convert total stimulus number to number of chunks
-    num_stimmuli = len(trials_df)
-    seq_time = seqlength * bin_size
-    # a single stimulus + gray screen is 0.75s
-    num_stimuli_per_chunk = int(seq_time / 0.25 / 3)
-    num_chunk = num_stimmuli // num_stimuli_per_chunk
-    
-    # Get the start times of each chunk (first stimulus + 250ms gray screen)
-    stim_starts = trials_df.start_time.values
-    chunk_starts = stim_starts[::num_stimuli_per_chunk] - 0.25
-    assert len(chunk_starts) == num_chunk
+    # Truncate spikes and LFP data to be multiples of seqlength
+    if spikes.shape[0] % seqlength != 0:
+        spikes = spikes[:-(spikes.shape[0] % seqlength), :]
+        lfp_shifted = lfp_shifted[:-(lfp_shifted.shape[0] % seqlength), :]
 
-    # Remove the last chunk if it goes beyond the end of the data
-    # Using while loop in case multiple chunks need to be removed, happens when m=1
-    while np.searchsorted(timestamps, chunk_starts[-1]) + seqlength > spikes.shape[0]:
-        chunk_starts = chunk_starts[:-1]
-        num_chunk -= 1
-
-    X = np.zeros((num_chunk, seqlength, spikes.shape[1]))
-    y = np.zeros((num_chunk, seqlength, lfp.shape[1]))    
-
-    for idx, start in enumerate(chunk_starts):
-        start_idx = np.searchsorted(timestamps, start)
-        X[idx] = spikes[start_idx:start_idx+seqlength, :]
-        y[idx] = lfp[start_idx:start_idx+seqlength, :]
+    # Reshape the data into trials
+    X_reshaped = np.reshape(spikes, (num_trials, seqlength, spikes.shape[1]))
+    lfp_reshaped = np.reshape(lfp_shifted, (num_trials, seqlength, lfp_shifted.shape[1]))
 
     # Split into training and testing sets at the trial level
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=random_state
+        X_reshaped, lfp_reshaped, test_size=test_size, random_state=random_state
     )
 
     return X_train, X_test, y_train, y_test
