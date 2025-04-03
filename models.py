@@ -6,44 +6,42 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 
 class LSTMnet(nn.Module):
-    def __init__(self, input_size, num_hidden, num_layers, seqlength, print=False):
+    def __init__(self, input_size, num_hidden, num_layers, seqlength, batchNorm = False , print=False):
         super().__init__()
         self.print = print
+        self.batchNorm = batchNorm
         self.input_size = input_size
         self.num_hidden = num_hidden
         self.num_layers = num_layers
         self.seqlength = seqlength
         self.lstm = nn.LSTM(input_size, num_hidden, num_layers, batch_first=True)
-        self.batchnorm = nn.BatchNorm1d(num_hidden)
+        self.batchnorm = nn.BatchNorm1d(input_size)
         self.out = nn.Linear(num_hidden, 1)
 
     def forward(self, x):
         if self.print:
             print(f'Input: {list(x.shape)}')
+            
+        if self.batchNorm:
+            # Reshape for batch normalization
+            batch_size = x.shape[0]  # Assuming batch_first=False
+            seq_len    = x.shape[1]
+            x_reshaped = x.view(batch_size * seq_len, -1)
+            x_normalized = self.batchnorm(x_reshaped)
+            x = x_normalized.view(batch_size, seq_len, -1)    
+        
         y, hidden = self.lstm(x)
+        
         if self.print:
             print(f'RNN-out: {list(y.shape)}')
             print(f'RNN-hidden: {list(hidden[0].shape)}')
             print(f'RNN-cell: {list(hidden[1].shape)}')
-        
-        # Reshape for batch normalization
-        batch_size = x.shape[0]  # Assuming batch_first=False
-        seq_len    = x.shape[1]
-        # y_reshaped = y.view(seq_len * batch_size, -1)
-        y_reshaped = y.reshape(seq_len * batch_size, -1)
-        print(f'BatchNorm-in: {list(y_reshaped.shape)}') if self.print else None
 
-        # Apply batch normalization
-        y_normalized = self.batchnorm(y_reshaped)
+        o = self.out(y)
         
-        # Reshape back to original shape
-        y_normalized = y_normalized.view(batch_size,seq_len,-1)
-        
-        o = self.out(y_normalized)
         if self.print:
             print(f'Output: {list(o.shape)}')
         return o
-    
     
 class process_model:
     def __init__(self, model, criterion, device):
