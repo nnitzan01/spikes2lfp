@@ -66,16 +66,14 @@ def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', 
     if save_fig:
         save_plot(fig, output_dir, session_id, fig_name)
 
-def plot_lfp_prediction(y, yHat, chani, bands, start_time = None, end_time = None, fs=250, show_plot=True,
+def plot_lfp_prediction(y, yHat, chan2use, bands, start_time = None, end_time = None, fs=250, show_plot=True,
                         save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
     """
     Plot the LFP prediction for the given channel and bands.
 
     input:
-    y: torch.Tensor, target data, assume shape is (#trial, seqlength, #units)
-                                will be reshaped to (#trial*seqlength, #units)
-    yHat: torch.Tensor, predicted data, assume shape is (#trial, seqlength, #units)
-                                will be reshaped to (#trial*seqlength, #units)
+    y: torch.Tensor, target data
+    yHat: torch.Tensor, predicted data
     chani: int, channel index
     bands: list, frequency bands
     start_time: float, in seconds, start time for the plot, assume 0 is the start of X
@@ -90,6 +88,10 @@ def plot_lfp_prediction(y, yHat, chani, bands, start_time = None, end_time = Non
     # if not already on the cpu, move it there
     if isinstance(y, torch.Tensor):
         y = y.cpu().detach().numpy()
+        
+    if len(yHat.shape) == 2:
+        chan2use = 0
+        yHat = yHat[:, np.newaxis]
 
        
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(16, 16))
@@ -98,18 +100,18 @@ def plot_lfp_prediction(y, yHat, chani, bands, start_time = None, end_time = Non
             start_idx = int(start_time * fs)
             end_idx = int(end_time * fs)
             y_test = y[start_idx:end_idx]
-            yHat_test = yHat[start_idx:end_idx, chani, bandi]
+            yHat_test = yHat[start_idx:end_idx]
         else:
             start_time = 0
             end_time = y.shape[0]/fs
             start_idx = 0
             end_idx = y.shape[0]
-        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), y_test[0:int(end_idx-start_idx), chani, bandi],'k',label='LFP')
-        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), yHat_test[0:int(end_idx-start_idx)],'r',label='LSTM')
+        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), y_test[0:int(end_idx-start_idx), chan2use, bandi],'k',label='LFP')
+        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), yHat_test[0:int(end_idx-start_idx), chan2use, bandi],'r',label='LSTM')
         if bandi == 0:
-            ax.flat[bandi].set_title('Channel ' + str(chani) + ' Broadband')
+            ax.flat[bandi].set_title('Channel ' + str(chan2use) + ' Broadband')
         else:
-            ax.flat[bandi].set_title('Channel ' + str(chani) + ' Band: ' + str(bands[bandi-1]) + ' Hz')
+            ax.flat[bandi].set_title('Channel ' + str(chan2use) + ' Band: ' + str(bands[bandi-1]) + ' Hz')
     fig.delaxes(ax.flat[-1])
     if show_plot:
         plt.show()
@@ -337,11 +339,12 @@ def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot
     
     num_channels = len(lfp_obj.channels)
     areas = sorted(session_obj.units['structure_acronym'].unique())
-    exp   = np.ceil(np.log10(np.abs(np.median(mean_attr_areas))))
-
+    
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2,figsize=(10,20))
     for bandi in range(len(bands)+1):
-        ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]) , aspect='auto', vmin=0, vmax=10 **exp, cmap='bwr')
+        exp   = np.ceil(np.log10(np.abs(np.median(mean_attr_areas[:,bandi,:].flatten()))))
+        
+        ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]) , aspect='auto', vmin=0, vmax= 5 * 10 ** (exp), cmap='bwr')
         # set the xticks to be the channel depths
         ax.flat[bandi].set_xticks(range(num_channels))
         ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int), 
@@ -358,7 +361,7 @@ def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot
             ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
             
         cbar = fig.colorbar(ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]), 
-                                                aspect='auto', vmin=0, vmax=10 **exp, cmap='bwr'), 
+                                                aspect='auto', vmin=0, vmax= 5 * 10 **(exp), cmap='bwr'), 
                             ax=ax.flat[bandi])
 
     # tight layout
@@ -474,13 +477,16 @@ def plot_attr_lfp_corr(attr, lfp, session_obj, sorting = "max", bin_size = 0.004
     
     midx = np.argsort(np.mean(corr_norm[:,int(lfp.shape[0]/2)-200:int(lfp.shape[0]/2)+200], axis=1))
     
+    # for clim use the 5th and 95th percentile
+    clim = np.percentile(corr_norm.flatten(), [5, 95])
+    
     fig, ax = plt.subplots(1,1,figsize=(8,8))
     if sorting == "max":
         ax.imshow(corr_norm[midx,:], aspect='auto', cmap='bwr',
-          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=-0.1, vmax=0.1)
+          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=clim[0], vmax=clim[1])
     else:
        ax.imshow(corr_norm[sidx,:], aspect='auto', cmap='bwr',
-          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=-0.1, vmax=0.1)
+          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=clim[0], vmax=clim[1])
        ax.set_yticks(middle)
        ax.set_yticklabels(areas, rotation=45, ha='right')
         
@@ -546,7 +552,7 @@ def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size =
     
     areas = sorted(session_obj.units['structure_acronym'].unique())
     
-    attr_snippets = np.zeros((len(stim_st), len(t), attr.shape[1]))
+    attr_snippets = np.zeros((len(stim_st), len(t), attr.shape[1])) # trials x time x neurons
     lfp_snippets = np.zeros((len(stim_st), len(t)))
     
     for i in range(len(stim_st)):
@@ -559,19 +565,20 @@ def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size =
     
     fig, ax = plt.subplots(int(np.ceil(len(areas)/2)) ,2,figsize=(16,16))
     for areai in range(len(areas)):
-        # get mean across neurons for each area 
-        tmp = np.mean(attr_snippets[:, :, session_obj.units['structure_acronym'] == areas[areai]], axis=2)
+        # get mean across trials
+        num_neurons = np.sum(session_obj.units['structure_acronym'] == areas[areai])
+        tmp = np.mean(attr_snippets[:, :, session_obj.units['structure_acronym'] == areas[areai]], axis=0)
         # num_neurons = np.sum(session_obj.units['structure_acronym'] == areas[areai])
         # plot mean and sem
-        ax.flat[areai].plot(t, np.mean(tmp, axis=0), 'r', label='mean')
-        ax.flat[areai].fill_between(t, np.mean(tmp, axis=0) - np.std(tmp, axis=0)/np.sqrt(len(stim_st)), 
-                                 np.mean(tmp, axis=0) + np.std(tmp, axis=0)/np.sqrt(len(stim_st)), color='r', alpha=0.5)
+        ax.flat[areai].plot(t, np.mean(tmp, axis=1), 'r', label='mean')
+        ax.flat[areai].fill_between(t, np.mean(tmp, axis=1) - np.std(tmp, axis=1)/np.sqrt(num_neurons), 
+                                 np.mean(tmp, axis=1) + np.std(tmp, axis=1)/np.sqrt(num_neurons), color='r', alpha=0.5)
         ax2 = ax.flat[areai].twinx()
         ax2.plot(t, mean_lfp, 'k')
         ax.flat[areai].set_ylabel('Mean attribution')
         ax2.set_ylabel('Mean LFP')
         ax.flat[areai].set_xlim([-0.25, 0.5])
-        corr = np.corrcoef(mean_lfp, np.mean(tmp, axis=0))[0,1]
+        corr = np.corrcoef(mean_lfp, np.mean(tmp, axis=1))[0,1]
         ax.flat[areai].set_title(areas[areai] + ' Corr: ' + str(np.round(corr,2)))
     
     if len(areas) % 2 != 0:
