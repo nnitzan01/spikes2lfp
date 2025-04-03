@@ -50,7 +50,7 @@ class pre_process_lfp:
         self.lfpMat = []
         self.sampling_rate = 1250
 
-    def filter_lfp(self, bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)], power = False):
+    def filter_lfp(self, bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)], take_power = False):
         self.lfpMat = np.zeros((self.data.shape[0], self.data.shape[1], len(bands)+1))
         # first entry is the raw signal
         self.lfpMat[:, :, 0] = zscore(self.data, axis=0)
@@ -60,7 +60,7 @@ class pre_process_lfp:
             b, a = butter(3, [low, high], btype='bandpass')
             # Apply the filter
             filt  = filtfilt(b, a, self.data.astype(np.float64), axis=0)
-            if power:
+            if take_power:
                 power = np.abs(hilbert(filt, axis=0))**2
                 self.lfpMat[:, :, i+1] = zscore(power, axis=0)
             else:
