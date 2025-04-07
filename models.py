@@ -18,7 +18,7 @@ class LSTMnet(nn.Module):
         self.batchnorm = nn.BatchNorm1d(input_size)
         self.out = nn.Linear(num_hidden, 1)
 
-    def forward(self, x):
+    def forward(self, x, c = None, h = None):
         if self.print:
             print(f'Input: {list(x.shape)}')
             
@@ -30,7 +30,10 @@ class LSTMnet(nn.Module):
             x_normalized = self.batchnorm(x_reshaped)
             x = x_normalized.view(batch_size, seq_len, -1)    
         
-        y, hidden = self.lstm(x)
+        if (c is None) and (h is None):
+            y, hidden = self.lstm(x)
+        else:
+            y, hidden = self.lstm(x, (h, c))
         
         if self.print:
             print(f'RNN-out: {list(y.shape)}')
@@ -41,7 +44,7 @@ class LSTMnet(nn.Module):
         
         if self.print:
             print(f'Output: {list(o.shape)}')
-        return o
+        return o, hidden
     
 class process_model:
     def __init__(self, model, criterion, device):
@@ -69,6 +72,9 @@ class process_model:
                 y = y.to(self.device)
                 # forward pass and loss
                 yHat = self.model(X)
+                # if yHat is a tuple, take the first element
+                if isinstance(yHat, tuple):
+                    yHat = yHat[0]
                 loss = lossfun(torch.squeeze(y), torch.squeeze(yHat))
                 optimizer.zero_grad()
                 loss.backward()
@@ -87,6 +93,8 @@ class process_model:
                     X = X.to(self.device)
                     y = y.to(self.device)
                     yHat = self.model(X)
+                    if isinstance(yHat, tuple):
+                        yHat = yHat[0]
                     loss = lossfun(torch.squeeze(y), torch.squeeze(yHat))
                     batchlosses.append(loss.item())
             test_losses[epochi] = np.mean(batchlosses)
@@ -95,7 +103,7 @@ class process_model:
         self.trained = True
         return train_losses, test_losses
     
-    def evaluate(self, x_data):
+    def evaluate(self, x_data, return_hidden=False):
         self.model.eval()
         self.model.to(self.device)
         
@@ -119,12 +127,20 @@ class process_model:
             L = x_data.shape[0] * x_data.shape[1]
       
         with torch.no_grad():
-            yHat = self.model(x_data)
+            if return_hidden and isinstance(self.model, LSTMnet):
+                yHat, hidden = self.model(x_data)
+            elif (not return_hidden) and isinstance(self.model, LSTMnet):
+                yHat, _ = self.model(x_data)
+            else:
+                yHat = self.model(x_data)
 
         # Reshape the output back to (L,)
         yHat = torch.reshape(yHat, (L,)) # as we are going from (batch_size, seq_length) to (batch_size*seq_length,)
         
-        return yHat.cpu().numpy()
+        if return_hidden:
+            return yHat, hidden
+        else:
+            return yHat
     
     # def evaluate(self,x_data):
     #     self.model.eval()
