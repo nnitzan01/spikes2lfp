@@ -18,7 +18,7 @@ class LSTMnet(nn.Module):
         self.batchnorm = nn.BatchNorm1d(input_size)
         self.out = nn.Linear(num_hidden, 1)
 
-    def forward(self, x, c = None, h = None):
+    def forward(self, x, h = None, c = None):
         if self.print:
             print(f'Input: {list(x.shape)}')
             
