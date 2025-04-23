@@ -46,6 +46,46 @@ class LSTMnet(nn.Module):
             print(f'Output: {list(o.shape)}')
         return o, hidden
     
+class GRUnet(nn.Module):
+    def __init__(self, input_size, num_hidden, num_layers, seqlength, batchNorm = False , print=False):
+        super().__init__()
+        self.print = print
+        self.batchNorm = batchNorm
+        self.input_size = input_size
+        self.num_hidden = num_hidden
+        self.num_layers = num_layers
+        self.seqlength = seqlength
+        self.gru = nn.GRU(input_size, num_hidden, num_layers, batch_first=True)
+        self.batchnorm = nn.BatchNorm1d(input_size)
+        self.out = nn.Linear(num_hidden, 1)
+
+    def forward(self, x, h = None):
+        if self.print:
+            print(f'Input: {list(x.shape)}')
+            
+        if self.batchNorm:
+            # Reshape for batch normalization
+            batch_size = x.shape[0]  # Assuming batch_first=False
+            seq_len    = x.shape[1]
+            x_reshaped = x.view(batch_size * seq_len, -1)
+            x_normalized = self.batchnorm(x_reshaped)
+            x = x_normalized.view(batch_size, seq_len, -1)    
+        
+        if (h is None):
+            y, hidden = self.gru(x)
+        else:
+            y, hidden = self.gru(x, h)
+        
+        if self.print:
+            print(f'RNN-out: {list(y.shape)}')
+            print(f'RNN-hidden: {list(hidden.shape)}')
+
+        o = self.out(y)
+        
+        if self.print:
+            print(f'Output: {list(o.shape)}')
+        return o, hidden
+    
 class process_model:
     def __init__(self, model, criterion, device):
         self.model = model
@@ -127,9 +167,9 @@ class process_model:
             L = x_data.shape[0] * x_data.shape[1]
       
         with torch.no_grad():
-            if return_hidden and isinstance(self.model, LSTMnet):
+            if return_hidden and (isinstance(self.model, LSTMnet) | isinstance(self.model, GRUnet)):
                 yHat, hidden = self.model(x_data)
-            elif (not return_hidden) and isinstance(self.model, LSTMnet):
+            elif (not return_hidden) and (isinstance(self.model, LSTMnet) | isinstance(self.model, GRUnet)):
                 yHat, _ = self.model(x_data)
             else:
                 yHat = self.model(x_data)
