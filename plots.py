@@ -288,7 +288,7 @@ def plot_attr_corrmat(attr,session_obj, show_plot=True, save_fig=False,
     attr = attr[:, sidx]
     corrmat = np.corrcoef(attr.T)
     fig, ax = plt.subplots(1,1,figsize=(8,8))
-    ax.imshow(np.corrcoef(corrmat), vmin=-.2, vmax=.2, cmap='bwr')
+    ax.imshow(corrmat, vmin=-.1, vmax=.1, aspect='auto', cmap='bwr')
     ax.set_xticks(middle)
     ax.set_xticklabels(areas, rotation=45, ha='right')
     ax.set_yticks(middle)
@@ -344,7 +344,7 @@ def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot
     for bandi in range(len(bands)+1):
         exp   = np.ceil(np.log10(np.abs(np.median(mean_attr_areas[:,bandi,:].flatten()))))
         
-        ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]) , aspect='auto', vmin=0, vmax= 5 * 10 ** (exp), cmap='bwr')
+        ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]) , aspect='auto', cmap='bwr')
         # set the xticks to be the channel depths
         ax.flat[bandi].set_xticks(range(num_channels))
         ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int), 
@@ -361,7 +361,7 @@ def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot
             ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
             
         cbar = fig.colorbar(ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]), 
-                                                aspect='auto', vmin=0, vmax= 5 * 10 **(exp), cmap='bwr'), 
+                                                aspect='auto', cmap='bwr'), 
                             ax=ax.flat[bandi])
 
     # tight layout
@@ -410,7 +410,7 @@ def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2
         
 def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004, show_plot=True, save_fig=False):
     
-    exp   = np.ceil(np.log10(np.abs(np.median(attr.flatten()))))
+    exp   = np.ceil(np.log10(np.abs(np.median(attr[attr!=0]))))
 
     stim_st = session_obj.stimulus_presentation.start_time
     stim_st = stim_st[(stim_st > time_win[0]) & (stim_st < time_win[1])]
@@ -435,7 +435,7 @@ def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False,
     
     # visualize the attribution we just loaded for the broadband model
     fig, ax = plt.subplots(1,1,figsize=(15,5))
-    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-10 ** (exp+1.5), vmax=10 ** (exp+1.5),
+    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.00003, vmax=0.00003,
             extent = [time_win[0], time_win[1], len(session_obj.units), 0])
     if plot_stim:
         for st in stim_st:
@@ -443,6 +443,7 @@ def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False,
             ax.axvline(st+.25, color='k', linestyle='--')
     ax.set_xlabel('Time (s)')
     ax.set_ylabel('Unit') 
+    ax.set_xlim([time_win[0], time_win[1]])
     ax.set_yticks(middle)
     ax.set_yticklabels(areas, rotation=45, ha='right')
     plt.show()
@@ -560,14 +561,18 @@ def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size =
         attr_snippets[i,:,:] = attr[start:start+len(t),:]
         lfp_snippets[i,:]    = lfp[start:start+len(t)]
     
-    attr_snippets = zscore(attr_snippets, axis=1)
+    attr_snippets_avr  = np.nanmean(attr_snippets, axis=0)
+    attr_snippets_norm = zscore(attr_snippets_avr, axis=0)
+    keep = ~np.any(np.isnan(attr_snippets_norm),axis=0)
+    
     mean_lfp = np.mean(lfp_snippets, axis=0)
     
     fig, ax = plt.subplots(int(np.ceil(len(areas)/2)) ,2,figsize=(16,16))
     for areai in range(len(areas)):
         # get mean across trials
-        num_neurons = np.sum(session_obj.units['structure_acronym'] == areas[areai])
-        tmp = np.mean(attr_snippets[:, :, session_obj.units['structure_acronym'] == areas[areai]], axis=0)
+        inarea = session_obj.units['structure_acronym'].values == areas[areai]
+        num_neurons = np.sum(inarea)
+        tmp = attr_snippets_norm[:, inarea & keep]
         # num_neurons = np.sum(session_obj.units['structure_acronym'] == areas[areai])
         # plot mean and sem
         ax.flat[areai].plot(t, np.mean(tmp, axis=1), 'r', label='mean')
