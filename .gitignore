@@ -23,3 +23,5 @@ __pycache__/models.cpython-39.pyc
 __pycache__/preprocess_data.cpython-39.pyc
 __pycache__/process_probe.cpython-39.pyc
 __pycache__/process_session.cpython-39.pyc
+.vscode/launch.json
+spikes2lfp.code-workspace
