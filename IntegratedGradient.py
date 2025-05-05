@@ -5,10 +5,11 @@ from captum.attr._utils.common import (
     _validate_input,
 )
 import numpy as np
+from tqdm import tqdm
 import torch
 
 class IntegratedGradient():
-    def __init__(self, forward_func, method='moving_window', window_size=None, weight=False, tau=None, fs=250):
+    def __init__(self, forward_func, method='moving window', window_size=None, weight=False, tau=None, fs=250):
         self.forward_func = forward_func
         self.method = method # 'last time point' or 'moving window'
         self.window_size = window_size # window size for moving window method
@@ -16,6 +17,56 @@ class IntegratedGradient():
         self.tau = tau # time constant of the exponential function for moving window method
         self.fs = fs # sampling frequency for moving window method, default is 250 Hz
         self.exp_func = None # exponential function for moving window method
+
+    def run(self, 
+            inputs, 
+            baselines = None, 
+            n_steps: int = 50,
+            method: str = "gausslegendre"):
+        r"""
+        A wrapper function to run the integrated gradients method.
+
+        Args:
+
+            inputs:     tensor, Total input of a batch.
+                        shape (total_length, input_size).
+                        If method is "last time point", it will be reshaped to (total_length//750, 750, input_size)
+            baselines:  (1) int, the value of input that signifies no information. 
+                        In the case of this project, it should be 0 for no neuron's firing state.
+                        (2) tuple, If inputs has been z-scored for each feature, baselines should be the z-scored value
+                        corresponding to the state of no-firing. Length of tuple should be equal to the number of features.
+            n_steps:    int, number of steps for approximation.
+            method:     str, approximation method to calculate the weights. Defaults to `gausslegendre`.
+        
+        Out:
+
+            attrs:      tensor, Attributions of the input.
+                        shape (total_length, input_size) if method is "last time point"
+                        shape (total_length - window_size + 1, input_size) if method is "moving window"
+        
+        """
+        if self.method == 'moving window':
+            length = inputs.shape[0]
+            if self.window_size is None:
+                self.window_size = 50
+            attrs = torch.zeros(length-self.window_size+1, inputs.shape[1])
+            n_slides = length - self.window_size + 1
+            for i in tqdm(range(n_slides)):
+                inputs_slice = inputs[i:i+self.window_size, :].unsqueeze(0)
+                attrs[i, :] = torch.mean(self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0),axis=0)
+            return attrs
+        else:
+            # assume input is of shape (n_batch, seq_length, input_size)
+            if len(inputs.shape) == 2:
+                print("Reshaping using default seqlength=750")
+                num_trials = inputs.shape[0]//750
+                inputs = inputs[:num_trials*750].reshape(num_trials, 750, inputs.shape[1])
+            attrs = torch.zeros_like(inputs)
+            for i in tqdm(range(inputs.shape[0])):
+                inputs_slice = inputs[i, :, :]
+                attrs[i, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
+            attrs = attrs.reshape(attrs.shape[0]*attrs.shape[1], attrs.shape[2])
+            return attrs
 
     # MODIFIED from captum/_utils/gradient.py
     def _run_forward(self, inputs, h_c = None):
@@ -38,7 +89,10 @@ class IntegratedGradient():
                         ((n_steps, 1, hidden_size), (n_steps, 1, hidden_size)).
         """
         if h_c is not None:
-            outputs, h_c = self.forward_func(inputs, h_c[0], h_c[1])
+            if len(h_c) == 2:
+                outputs, h_c = self.forward_func(inputs, h_c[0], h_c[1])
+            else:
+                outputs, h_c = self.forward_func(inputs, h_c)
         else:
             outputs, h_c = self.forward_func(inputs)        
         return outputs, h_c
