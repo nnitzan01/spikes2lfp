@@ -435,7 +435,7 @@ def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False,
     
     # visualize the attribution we just loaded for the broadband model
     fig, ax = plt.subplots(1,1,figsize=(15,5))
-    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.00003, vmax=0.00003,
+    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.03, vmax=0.03,
             extent = [time_win[0], time_win[1], len(session_obj.units), 0])
     if plot_stim:
         for st in stim_st:
