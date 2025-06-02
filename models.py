@@ -6,42 +6,62 @@ from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
 
 class LSTMnet(nn.Module):
-    def __init__(self, input_size, num_hidden, num_layers, seqlength, batchNorm = False , print=False):
+    def __init__(self, input_size, num_hidden, num_layers, seqlength,
+                 batchNorm=False, conv=False, kernel_size=3, out_channels=16, #Added flags
+                 print=False):
         super().__init__()
         self.print = print
         self.batchNorm = batchNorm
+        self.conv = conv #added conv attribute
         self.input_size = input_size
         self.num_hidden = num_hidden
         self.num_layers = num_layers
         self.seqlength = seqlength
-        self.lstm = nn.LSTM(input_size, num_hidden, num_layers, batch_first=True)
-        self.batchnorm = nn.BatchNorm1d(input_size)
+
+        # Convolutional Layer (Optional)
+        if self.conv: # Added conditional to load layer only if used
+            self.conv1d = nn.Conv1d(in_channels=input_size, out_channels=out_channels, kernel_size=kernel_size, padding='same')
+            self.input_size = out_channels #New input size is equal to channels
+
+        self.lstm = nn.LSTM(self.input_size, num_hidden, num_layers, batch_first=True) #uses updated input size
+        self.batchnorm = nn.BatchNorm1d(self.input_size) # uses updated input size
         self.out = nn.Linear(num_hidden, 1)
 
-    def forward(self, x, h = None, c = None):
+    def forward(self, x, h=None, c=None):
         if self.print:
             print(f'Input: {list(x.shape)}')
-            
+
+        # Convolutional Layer (if enabled)
+        if self.conv:
+            # Swap dimensions for Conv1D
+            x = x.permute(0, 2, 1)  # (batch_size, input_size, seq_len)
+            if self.print:
+                print(f'Input for Conv1d: {list(x.shape)}')
+            x = self.conv1d(x) # output should be  (batch_size, out_channels, seq_len)
+            x = x.permute(0, 2, 1)  # Back to (batch_size, seq_len, out_channels)
+            if self.print:
+                print(f'Output for Conv1d: {list(x.shape)}')
+
         if self.batchNorm:
             # Reshape for batch normalization
             batch_size = x.shape[0]  # Assuming batch_first=False
             seq_len    = x.shape[1]
             x_reshaped = x.view(batch_size * seq_len, -1)
             x_normalized = self.batchnorm(x_reshaped)
-            x = x_normalized.view(batch_size, seq_len, -1)    
-        
+            x = x_normalized.view(batch_size, seq_len, -1)
+
         if (c is None) and (h is None):
             y, hidden = self.lstm(x)
         else:
             y, hidden = self.lstm(x, (h, c))
-        
+
         if self.print:
             print(f'RNN-out: {list(y.shape)}')
             print(f'RNN-hidden: {list(hidden[0].shape)}')
             print(f'RNN-cell: {list(hidden[1].shape)}')
 
         o = self.out(y)
-        
+
         if self.print:
             print(f'Output: {list(o.shape)}')
         return o, hidden
