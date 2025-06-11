@@ -351,7 +351,8 @@ class LinearRegressionModel:
     
     
 class SpikingTransformer(nn.Module):
-    def __init__(self, input_size, seqlength = 750, embedding_dim = 64, num_heads = 8, num_layers = 4, dropout=0.1):
+    def __init__(self, input_size, seqlength = 750, embedding_dim = 64, num_heads = 8, num_layers = 4, dropout=0.1,
+                 use_conv=False, conv_kernel_size=3, conv_out_channels=16):  # Added parameters for Conv1d
         super(SpikingTransformer, self).__init__()
 
         self.input_size = input_size
@@ -359,17 +360,27 @@ class SpikingTransformer(nn.Module):
         self.num_heads = num_heads
         self.num_layers = num_layers
         self.seqlength = seqlength
+        self.use_conv = use_conv   # Store whether to use conv1d
+        self.conv_kernel_size = conv_kernel_size
+        self.conv_out_channels = conv_out_channels
 
         # Embedding Layer:  Maps spike counts to a higher-dimensional space
         self.embedding = nn.Linear(input_size, embedding_dim)
         self.embedding_bn = nn.BatchNorm1d(embedding_dim) # Batchnorm after embedding
 
+        # Convolutional Layer (Optional) - Must come after input layer
+        if self.use_conv:
+            self.conv1d = nn.Conv1d(in_channels=embedding_dim, out_channels=conv_out_channels,
+                                     kernel_size=conv_kernel_size, padding='same')
+             # Update embedding dim to be conv_out_channels
+            self.embedding_dim = conv_out_channels
+
         # Positional Encoding (Learnable)
-        self.positional_embedding = nn.Embedding(self.seqlength, embedding_dim)  # Window size is 750
+        self.positional_embedding = nn.Embedding(self.seqlength, self.embedding_dim)  # Window size is 750 now uses updated size
 
         # Transformer Encoder Layers
         self.transformer_encoder_layer = nn.TransformerEncoderLayer(
-            d_model=embedding_dim,
+            d_model=self.embedding_dim,   #Use updated version
             nhead=num_heads,
             dropout=dropout,
             batch_first=True # Important for PyTorch >= 1.9
@@ -380,7 +391,7 @@ class SpikingTransformer(nn.Module):
         )
 
         # Regression Head
-        self.regression_head = nn.Linear(embedding_dim, 1)  # Predicts a single LFP value
+        self.regression_head = nn.Linear(self.embedding_dim, 1)  # Predicts a single LFP value  #Updated value
 
         self.dropout = nn.Dropout(dropout)
 
@@ -400,6 +411,12 @@ class SpikingTransformer(nn.Module):
         embedded = self.embedding_bn(embedded)
         embedded = embedded.permute(0,2,1)
         embedded = self.dropout(embedded)
+
+        #Apply Convolution Layer before, but only if it is true
+        if self.use_conv:
+            embedded = embedded.permute(0, 2, 1)
+            embedded = self.conv1d(embedded)
+            embedded = embedded.permute(0, 2, 1)
 
         # Positional Encoding
         positions = torch.arange(0, seq_len, device=x.device).unsqueeze(0).expand(batch_size, seq_len)  # (batch_size, sequence_length)
