@@ -127,21 +127,21 @@ def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, prediction_lag = 0,
     return X_train, X_test, y_train, y_test
 
 
-def get_data_loaders(X_train, X_test, y_train, y_test, batch_size, device):
+def get_data_loaders(X_train, X_test, y_train, y_test, batch_size=32):
     
-    # Convert to PyTorch tensors and move to GPU
-    X_train = torch.from_numpy(X_train).float().to(device)
-    X_test = torch.from_numpy(X_test).float().to(device)
-    y_train = torch.from_numpy(y_train).float().to(device)
-    y_test = torch.from_numpy(y_test).float().to(device)
+    # # Convert to PyTorch tensors
+    X_train = torch.from_numpy(X_train).float()
+    X_test = torch.from_numpy(X_test).float()
+    y_train = torch.from_numpy(y_train).float()
+    y_test = torch.from_numpy(y_test).float()
 
     # Create DataLoader for batching
     train_dataset = TensorDataset(X_train, y_train)
-    train_dataloader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
     test_dataset = TensorDataset(X_test, y_test)
-    test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
-    
+    test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+
     return train_dataloader, test_dataloader
 
 # def chunk_and_reshape(spikes, lfp, seqlength, test_size=0.2, random_state=42):
