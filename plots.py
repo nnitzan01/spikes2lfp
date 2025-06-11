@@ -639,4 +639,91 @@ def plot_unit_attr_fr_corr(unit_attr_fr_corr, session_obj, bands, show_plot=True
     if save_fig:
         save_plot(fig, output_dir, session_id, fig_name)   
     
-    
+def visualize_filters(model, num_neurons):
+    """Visualizes the filters of the first convolutional layer in the model,
+    arranged in a square grid.
+
+    Args:
+        model: Trained PyTorch model with a convolutional layer.
+
+    """
+    # Set model to evaluation mode
+    model.eval()
+
+    # Access the convolutional layer
+    conv_layer = model.conv1d
+
+    # Extract the filters
+    filters = conv_layer.weight.data
+
+    # Get the number of filters, input channels, and kernel size
+    out_channels, in_channels, kernel_size = filters.shape
+    print (f"Channels: {out_channels} in: {in_channels}, kernel {kernel_size}")
+
+    # Calculate the number of rows and columns for a square grid
+    num_filters = out_channels
+    num_cols = int(np.ceil(np.sqrt(num_filters)))
+    num_rows = int(np.ceil(num_filters / num_cols))
+
+    # Create the subplots for the grid
+    fig, axs = plt.subplots(num_rows, num_cols, figsize=(3 * num_cols, 3 * num_rows), layout='constrained') # set scaling factor manually to fit
+    fig.suptitle("Heat Maps of Convolutional Layer Filters", fontsize=16)
+
+    # Iterate and plot each heatmap. Ensure out_channels and in_channels are not too large.
+    for i in range(num_filters):
+        # Get the row and column index of the current filter
+        row_idx = i // num_cols
+        col_idx = i % num_cols
+
+        # Get single filter
+        currentFilter = filters[i,:,:]
+
+        # convert to numpy
+        currentFilter = currentFilter.cpu().numpy()
+
+        # Normalize if it is exploding
+        currentMax = np.max(np.abs(currentFilter))
+        if (currentMax > 100):
+            currentFilter = currentFilter/currentMax
+
+        # Plot Heatmap
+        if num_rows == 1:
+           im = axs[col_idx].imshow(currentFilter, cmap='viridis', aspect = "auto")
+           axs[col_idx].set_title(f"Filt {i}")
+
+           # Remove all ticks and labels
+           axs[col_idx].set_xticks([])
+           axs[col_idx].set_yticks([])
+        elif num_cols == 1:
+            im = axs[row_idx].imshow(currentFilter, cmap='viridis', aspect = "auto")
+            axs[row_idx].set_title(f"Filt {i}")
+
+           # Remove all ticks and labels
+            axs[row_idx].set_xticks([])
+            axs[row_idx].set_yticks([])
+        else:
+           im = axs[row_idx, col_idx].imshow(currentFilter, cmap='viridis', aspect = "auto")
+
+            # Set Heatmap title
+           axs[row_idx, col_idx].set_title(f"Filt {i}")
+
+            # Remove all ticks and labels
+           axs[row_idx, col_idx].set_xticks([])
+           axs[row_idx, col_idx].set_yticks([])
+
+        # fig.colorbar(im, ax=axs[-1,0]) # always puts the colorbar in same location
+
+    # If num_filters is not a perfect square, then the final plots will show the heat map.
+    for i in range(num_filters,num_rows * num_cols):
+        row_idx = i // num_cols
+        col_idx = i % num_cols
+
+        if num_rows == 1:
+            axs[col_idx].axis("off")
+        elif num_cols == 1:
+            axs[row_idx].axis("off")
+        else:
+            axs[row_idx,col_idx].axis("off")
+
+    # Display plots
+    plt.show()
