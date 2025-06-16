@@ -1,44 +1,142 @@
+import os
+import sys
 import torch
-import utils
-from pathlib import Path
-import preprocess_data as ppd
-from process_session import session as ss
-import process_probe as pp
-import process_attribution as pa
+import argparse
 import numpy as np
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+from plots import *
+import pandas as pd
+from tqdm import tqdm
+import models as models
+from pathlib import Path
+from preprocess_data import *
+import preprocess_data as ppd
+from process_attribution import *
+from sklearn.metrics import r2_score
+from process_session import session as ps
+from IntegratedGradient import IntegratedGradient
 
-def start(session_id):
-    # Session obj contains stimulus, channel, and unit information
-    session_obj = ss(session_id)
-    # Spikes obj contains Spike matrix
-    spikes_obj = ppd.pre_process_spikes(session_obj.units, session_obj.spike_times, bin_size=0.004, sigma=3)
-    spikes_obj.getSpkMat(session_obj.active_times[0], session_obj.active_times[1])
-    spikes_obj.convolve_with_gaussian()
-    spikes_obj.zscore()
-    # Probe obj contains LFP data
-    # Getting LFP just for active trials
-    probe_obj = pp.probe(session_obj, session_obj.active_times[0], session_obj.active_times[1])
-    lfp_obj = ppd.pre_process_lfp(probe_obj.lfp, 1250)
-    lfp_obj.filter_lfp(probe_obj.bands)
-    # Training hyperparameters
-    input_size = spikes_obj.spkMat.shape[1]
+def start(output_dir, session_id):
+    print(f"Processing session {session_id}.")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    df = pd.read_csv(output_dir / 'units_info.csv')
+
+    print("Obtaining session, spikes, and LFP data.")
+    session_obj = ps(session_id, df, output_dir)
+
+    # model hyperparameters
+    input_size = len(session_obj.units)
     hidden_size = 50
     num_layers = 1
     seqlength = 750
     num_epochs = 15
-    X_train, y_train, X_test, y_test = ppd.generate_training_data(lfp_obj, spikes_obj, seqlength)
-    # np.savez_compressed('F:/temp_compare/data_modular.npz', X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test)
-    models, lossesAll = utils.train_models(probe_obj, input_size, hidden_size, num_layers, seqlength, device, num_epochs, X_train, y_train)
-    output_dir = Path('E:/vbn_s3_cache')
-    # Saving model weights
-    utils.save_models(models, output_dir, session_id)
-    # Loading model weights
-    output_dir = Path(r"Z:\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022")
-    args = [input_size, hidden_size, num_layers, seqlength, device]
-    models = utils.load_models(output_dir, session_id, probe_obj, args)
-    # Calculating attribution scores
-    output_dir = Path(r'F:\vbn_s3_cache')
-    dur = 720
-    bin_size = 0.004
-    pa.divide_task_for_attr(models, session_id, output_dir, spikes_obj, bin_size, probe_obj, dur)
+    bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100), (100, 200), (200, 400)]
+    criterion  = torch.nn.MSELoss()
+    batch_size = 32
+    bin_size=0.004
+
+    spikes_obj = ppd.pre_process_spikes(session_obj.units, session_obj.spike_times, bin_size=bin_size, sigma=3)
+    spikes_obj.getSpkMat(session_obj.active_times[0], session_obj.active_times[1])
+    spikes_obj.truncate(seqlength)
+    spikes_obj.minmax()
+
+    lfp_obj = ppd.pre_process_lfp(session_id, session_obj.channels, session_obj.active_times[0],
+                                session_obj.active_times[1], output_dir) 
+    lfp_obj.filter_lfp(take_power = True)
+    lfp_obj.downsample_lfp(5)
+    lfp_obj.truncate(seqlength)
+    lfp_obj.align_lfp(spikes_obj.spkMat.shape[0])
+    num_channels = len(lfp_obj.channels)
+
+    print("Training")
+    lossesTrain, lossesTest = (np.zeros((len(lfp_obj.channels), num_epochs, len(bands)+1)) for _ in range(2))
+    R2_train, R2_test       = (np.zeros((len(lfp_obj.channels), len(bands)+1)) for _ in range(2))
+    all_models = {}
+    for bandi in tqdm(range(len(bands)+1), desc="Bands", position=0):
+        X_train, X_test, y_train, y_test  = chunk_and_reshape(spikes_obj.spkMat, lfp_obj.lfpMat[:,:,bandi], 
+                                                        seqlength, test_size=0.2, random_state=42)
+        for chani in tqdm(range(len(lfp_obj.channels)), desc="Channels", position=1, leave=False):
+            train_dataloader, test_dataloader = get_data_loaders(X_train, X_test, y_train[:,:,chani], y_test[:,:,chani], batch_size , device)            
+            model = models.process_model(models.LSTMnet(input_size, hidden_size, num_layers,seqlength), criterion, device)
+            train_loss, test_loss = model.train(train_dataloader,
+                                            test_dataloader , num_epochs)
+            lossesTrain[chani,:, bandi] = train_loss
+            lossesTest[chani,:, bandi] = test_loss
+            yHat = model.evaluate(test_dataloader.dataset.tensors[0])
+            R2_test[chani, bandi] = r2_score(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), np.array(yHat.to('cpu')))
+            yHat = model.evaluate(train_dataloader.dataset.tensors[0])
+            R2_train[chani, bandi] = r2_score(train_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), np.array(yHat.to('cpu')))
+            all_models[chani, bandi] = model
+    yHat_active = np.zeros((lfp_obj.lfpMat.shape[0], lfp_obj.lfpMat.shape[1], len(bands)+1))
+    for bandi in range(len(bands)+1):
+        for chani in range(len(lfp_obj.channels)):
+            yHat_active[:,chani,bandi] = np.array(all_models[chani, bandi].evaluate(torch.tensor(spikes_obj.spkMat).float().to(device)).to('cpu'))
+    print("Training completed")
+
+    print("Plotting results")
+    output_dir_plots = output_dir / 'spikes2lfp' # '/plots' is created in the plots.py
+    os.makedirs(output_dir_plots, exist_ok=True)
+    plot_r2(R2_test, lfp_obj.channels, bands, 
+            show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name='r2_scores.png')
+    for bandi in range(len(bands)+1):
+        plot_all_channel_loss(lfp_obj.channels, bands, bandi, lossesTest, 
+                            show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'all_channel_loss_band{bandi}.png')
+    for chani in range(len(lfp_obj.channels)):
+        plot_lfp_prediction(lfp_obj.lfpMat, yHat_active, chani, bands, start_time = 20, end_time = 30,
+                            show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'lfp_prediction_band{bandi}.png')
+        plot_abs_error_change(lfp_obj.lfpMat, yHat_active, session_obj, spikes_obj.timestamps, chani, bands,
+                              show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'abs_error_change_chan{chani}.png')
+        plot_psd(lfp_obj.lfpMat, yHat_active, chani,
+                 show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'psd_chan{chani}.png')
+
+    output_dir_models = output_dir / 'spikes2lfp' / 'models' / str(session_id)
+    os.makedirs(output_dir_models, exist_ok=True)    
+    print("Models are saved in: ", output_dir_models)
+    for idx in range(len(all_models.keys())):
+        chan = list(all_models.keys())[idx][0]
+        band = list(all_models.keys())[idx][1]
+        filename = output_dir_models / f'lstm_model_chan{chan}_band{band}.pt'
+        torch.save(all_models[chan, band].model.state_dict(), filename)
+    
+    print("Calculating and saving attribution scores")
+    attr_dur = 720
+    X_attr = torch.tensor(spikes_obj.spkMat[:int(attr_dur/bin_size),:]).float().to(device)
+    num_trials = int(int(attr_dur/bin_size)/seqlength)
+    X_attr = X_attr.reshape(num_trials, seqlength, X_attr.shape[1])
+    X_attr_flat = torch.tensor(spikes_obj.spkMat[:int(attr_dur/bin_size),:]).float().to('cpu')
+    mean_attribution = np.zeros((num_channels, len(bands)+1 , spikes_obj.spkMat.shape[1]))
+    output_dir_attrs = output_dir / 'spikes2lfp' / 'attrs' / str(session_id)
+    os.makedirs(output_dir_attrs, exist_ok=True)
+
+    for bandi in tqdm(range(len(bands)+1), desc="Bands", position=0):
+        for chani in tqdm(range(num_channels), desc="Channels", position=1, leave=False):
+            model = all_models[chani, bandi]
+            ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
+            attrs = ig.run(X_attr, baselines = 0, n_steps = 50)
+            if device == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
+            attrs = attrs.reshape(num_trials * seqlength, input_size).cpu()
+            attrs = attrs / (X_attr_flat + 1e-10)
+            attrs = np.array(attrs)
+            filename = output_dir_attrs / f'attribution_scores_chan{chani}_band{bandi}.npy'
+            np.save(filename, attrs.astype('float32'), allow_pickle=True)
+            mean_attribution[chani, bandi, :] = np.mean(np.abs(attrs), axis=0)
+    filename = output_dir_attrs / f'mean_abs_attribution_scores.npy'
+    np.save(filename, mean_attribution.astype('float32'), allow_pickle=True)
+    print("Attribution scores are saved in: ", output_dir_attrs)
+    print("Session complete.")
+
+def main():
+    dir = Path(args.dir)
+    if not dir.exists():
+        print(f"Directory {dir} does not exist.")
+        sys.exit(1)
+    print(f"Root dir is set to: {dir}")
+    sample_id = 1119946360 # TESTING CODE  
+    start(dir, sample_id) # TESTING CODE
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dir", type=str, help="Path to the root dir: ")
+    args = parser.parse_args()
+    main(args)
