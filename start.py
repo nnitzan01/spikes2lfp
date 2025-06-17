@@ -5,17 +5,14 @@ import argparse
 import numpy as np
 from plots import *
 import pandas as pd
-from tqdm import tqdm
 import models as models
 from pathlib import Path
 from preprocess_data import *
-import preprocess_data as ppd
-from process_attribution import *
 from sklearn.metrics import r2_score
 from process_session import session as ps
-from IntegratedGradient_local import IntegratedGradient
-# from IntegratedGradient import IntegratedGradient
 from scipy.sparse import coo_matrix, save_npz
+# from IntegratedGradient import IntegratedGradient
+from IntegratedGradient_local import IntegratedGradient
 
 def start(output_dir, session_id):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -26,7 +23,7 @@ def start(output_dir, session_id):
 
     # model hyperparameters
     input_size = len(session_obj.units)
-    hidden_size = 50
+    hidden_size = 50 
     num_layers = 1
     seqlength = 750
     num_epochs = 15
@@ -35,12 +32,12 @@ def start(output_dir, session_id):
     batch_size = 32
     bin_size=0.004
 
-    spikes_obj = ppd.pre_process_spikes(session_obj.units, session_obj.spike_times, bin_size=bin_size, sigma=3)
+    spikes_obj = pre_process_spikes(session_obj.units, session_obj.spike_times, bin_size=bin_size, sigma=3)
     spikes_obj.getSpkMat(session_obj.active_times[0], session_obj.active_times[1])
     spikes_obj.truncate(seqlength)
     spikes_obj.minmax()
 
-    lfp_obj = ppd.pre_process_lfp(session_id, session_obj.channels, session_obj.active_times[0],
+    lfp_obj = pre_process_lfp(session_id, session_obj.channels, session_obj.active_times[0],
                                 session_obj.active_times[1], output_dir) 
     lfp_obj.filter_lfp(take_power = True)
     lfp_obj.downsample_lfp(5)
@@ -52,14 +49,13 @@ def start(output_dir, session_id):
     lossesTrain, lossesTest = (np.zeros((len(lfp_obj.channels), num_epochs, len(bands)+1)) for _ in range(2))
     R2_train, R2_test       = (np.zeros((len(lfp_obj.channels), len(bands)+1)) for _ in range(2))
     all_models = {}
-    for bandi in tqdm(range(len(bands)+1), desc="Bands", position=0):
+    for bandi in range(len(bands)+1):
         X_train, X_test, y_train, y_test  = chunk_and_reshape(spikes_obj.spkMat, lfp_obj.lfpMat[:,:,bandi], 
                                                         seqlength, test_size=0.2, random_state=42)
-        for chani in tqdm(range(len(lfp_obj.channels)), desc="Channels", position=1, leave=False):
-            train_dataloader, test_dataloader = get_data_loaders(X_train, X_test, y_train[:,:,chani], y_test[:,:,chani], batch_size , device)            
+        for chani in range(len(lfp_obj.channels)):
+            train_dataloader, test_dataloader = get_data_loaders(X_train, X_test, y_train[:,:,chani], y_test[:,:,chani], batch_size)          
             model = models.process_model(models.LSTMnet(input_size, hidden_size, num_layers,seqlength), criterion, device)
-            train_loss, test_loss = model.train(train_dataloader,
-                                            test_dataloader , num_epochs)
+            train_loss, test_loss = model.train(train_dataloader, test_dataloader, num_epochs)
             lossesTrain[chani,:, bandi] = train_loss
             lossesTest[chani,:, bandi] = test_loss
             yHat = model.evaluate(test_dataloader.dataset.tensors[0])
@@ -72,6 +68,7 @@ def start(output_dir, session_id):
     for bandi in range(len(bands)+1):
         for chani in range(len(lfp_obj.channels)):
             yHat_active[:,chani,bandi] = np.array(all_models[chani, bandi].evaluate(torch.tensor(spikes_obj.spkMat).float().to(device)).to('cpu'))
+            
     print("Training completed")
 
     print("Plotting results")
@@ -109,8 +106,8 @@ def start(output_dir, session_id):
     output_dir_attrs = output_dir / 'spikes2lfp' / 'attrs' / str(session_id)
     os.makedirs(output_dir_attrs, exist_ok=True)
 
-    for bandi in tqdm(range(len(bands)+1), desc="Bands", position=0):
-        for chani in tqdm(range(num_channels), desc="Channels", position=1, leave=False):
+    for bandi in range(len(bands)+1):
+        for chani in range(num_channels):
             model = all_models[chani, bandi]
             ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
             attrs = ig.run(X_attr, baselines = 0, n_steps = 50)
@@ -138,7 +135,7 @@ def main(args):
     session_id = int(os.path.basename(dir))
     root_dir = dir.parent.parent.parent
     print(f"Root dir is set to: {root_dir}")
-    print(f"Session ID is set to: {session_id}")
+    print(f"Session ID is set to: {session_id}")    
     start(root_dir, session_id)
 
 if __name__ == "__main__":
