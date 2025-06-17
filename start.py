@@ -13,10 +13,11 @@ import preprocess_data as ppd
 from process_attribution import *
 from sklearn.metrics import r2_score
 from process_session import session as ps
-from IntegratedGradient import IntegratedGradient
+from IntegratedGradient_local import IntegratedGradient
+# from IntegratedGradient import IntegratedGradient
+from scipy.sparse import coo_matrix, save_npz
 
 def start(output_dir, session_id):
-    print(f"Processing session {session_id}.")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     df = pd.read_csv(output_dir / 'units_info.csv')
 
@@ -66,6 +67,7 @@ def start(output_dir, session_id):
             yHat = model.evaluate(train_dataloader.dataset.tensors[0])
             R2_train[chani, bandi] = r2_score(train_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), np.array(yHat.to('cpu')))
             all_models[chani, bandi] = model
+            
     yHat_active = np.zeros((lfp_obj.lfpMat.shape[0], lfp_obj.lfpMat.shape[1], len(bands)+1))
     for bandi in range(len(bands)+1):
         for chani in range(len(lfp_obj.channels)):
@@ -87,7 +89,7 @@ def start(output_dir, session_id):
                               show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'abs_error_change_chan{chani}.png')
         plot_psd(lfp_obj.lfpMat, yHat_active, chani,
                  show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'psd_chan{chani}.png')
-
+        
     output_dir_models = output_dir / 'spikes2lfp' / 'models' / str(session_id)
     os.makedirs(output_dir_models, exist_ok=True)    
     print("Models are saved in: ", output_dir_models)
@@ -118,22 +120,26 @@ def start(output_dir, session_id):
             attrs = attrs.reshape(num_trials * seqlength, input_size).cpu()
             attrs = attrs / (X_attr_flat + 1e-10)
             attrs = np.array(attrs)
-            filename = output_dir_attrs / f'attribution_scores_chan{chani}_band{bandi}.npy'
-            np.save(filename, attrs.astype('float32'), allow_pickle=True)
+            filename = output_dir_attrs / f'attribution_scores_chan{chani}_band{bandi}.npz'
+            attrs_sparse = coo_matrix(attrs)
+            save_npz(filename, attrs_sparse, compressed=True)
             mean_attribution[chani, bandi, :] = np.mean(np.abs(attrs), axis=0)
+            
     filename = output_dir_attrs / f'mean_abs_attribution_scores.npy'
-    np.save(filename, mean_attribution.astype('float32'), allow_pickle=True)
+    np.save(filename, mean_attribution)
     print("Attribution scores are saved in: ", output_dir_attrs)
     print("Session complete.")
 
-def main():
+def main(args):
     dir = Path(args.dir)
     if not dir.exists():
         print(f"Directory {dir} does not exist.")
         sys.exit(1)
-    print(f"Root dir is set to: {dir}")
-    sample_id = 1119946360 # TESTING CODE  
-    start(dir, sample_id) # TESTING CODE
+    session_id = int(os.path.basename(dir))
+    root_dir = dir.parent.parent.parent
+    print(f"Root dir is set to: {root_dir}")
+    print(f"Session ID is set to: {session_id}")
+    start(root_dir, session_id)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
