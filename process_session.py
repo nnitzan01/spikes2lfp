@@ -8,7 +8,7 @@ class session:
         
         self.id = session_id
         self.session = cache.get_ecephys_session(session_id)
-        self.probes = self.session.probes
+        self.probes = self.session.probes # DONE
         self.channels = self.session.get_channels()
         
         # add relevent units

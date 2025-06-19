@@ -4,9 +4,8 @@ from captum_utils import (
     _reshape_and_sum,
     _validate_input,
 )
-import numpy as np
-from tqdm import tqdm
 import torch
+import numpy as np
 from models import SpikingTransformer
 
 class IntegratedGradient():
