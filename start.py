@@ -16,7 +16,12 @@ from IntegratedGradient_local import IntegratedGradient
 
 def start(output_dir, session_id):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    df = pd.read_csv(output_dir / 'units_info.csv')
+    if os.path.exists('./units_info.csv'):
+        print("Loading units_info.csv from the repo.")
+        df = pd.read_csv('./units_info.csv')
+    else:
+        print("units_info.csv not found in the repo.")
+        exit(1)
 
     print("Obtaining session, spikes, and LFP data.")
     session_obj = ps(session_id, df, output_dir)
