@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import torch
+from pathlib import Path
 from scipy.signal import welch
 from scipy.stats import zscore
 from scipy import signal 
@@ -23,8 +24,8 @@ def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     file structure:
     output_dir/plot.png
     """
-    session_path = f"{output_dir}/plots/{session_id}"
-    file_path = f"{session_path}/{plot_name}"
+    session_path = Path(output_dir / "plots" / session_id)
+    file_path = Path(session_path / plot_name)
     os.makedirs(session_path, exist_ok=True)
     fig.savefig(file_path)
 

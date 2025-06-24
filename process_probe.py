@@ -25,21 +25,18 @@ def load_nwb(nwb_dir, session_id, probe_letter):
     nwb_dir/session_id/probeA_lfp.nwb
     """
     probe_letter = probe_letter.upper()
-    # path = f'{nwb_dir}/data/session_{session_id}/'
-    path = f'{nwb_dir}/visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/{session_id}/'
+    session_path = Path(Path(nwb_dir) /"visual-behavior-neuropixels-0.4.0"/"behavior_ecephys_sessions"/session_id)
     # session folder does not exist
-    if not os.path.exists(path): 
+    if not os.path.exists(session_path): 
         print(f'Session {session_id} does not exist')
         return None
     # probe does not exist
-    # if not os.path.exists(f'{path}/probe{probe_letter}_lfp.nwb'):
-    if not os.path.exists(f'{path}/probe_probe{probe_letter}_lfp.nwb'):
+    probe_nwb_path = Path(session_path / f'probe_probe{probe_letter}_lfp.nwb')
+    if not os.path.exists(probe_nwb_path):
         print(f'Probe {probe_letter} does not exist')
         return None
     # load the data
-    # path = f'{path}/probe{probe_letter}_lfp.nwb'
-    path = f'{path}/probe_probe{probe_letter}_lfp.nwb'
-    io = NWBHDF5IO(path, mode="r") # type: ignore
+    io = NWBHDF5IO(probe_nwb_path, mode="r") # type: ignore
     nwbfile = io.read()
     return nwbfile
 
@@ -79,7 +76,8 @@ def load_lfp(output_dir, id, channels, start_time, stop_time):
     chans: DataFrame, VISp channels
     lfp_sliced: xarray DataArray, LFP data for the qualified channels
     """
-    probe_table = pd.read_csv(rf"{output_dir}\visual-behavior-neuropixels-0.4.0\project_metadata\probes.csv")
+    probe_table_dir = Path(output_dir / "visual-behavior-neuropixels-0.4.0" / "project_metadata" / "probes.csv")
+    probe_table = pd.read_csv(probe_table_dir)
     session_probes = probe_table[probe_table['ecephys_session_id'] == id]
     qualified_probes = []
     for probe_id in session_probes.ecephys_probe_id.values:
