@@ -77,7 +77,7 @@ def start(output_dir, session_id):
     print("Training completed")
 
     print("Plotting results")
-    output_dir_plots = output_dir / 'spikes2lfp' # '/plots' is created in the plots.py
+    output_dir_plots = Path(output_dir / 'spikes2lfp') # '/plots' is created in the plots.py
     os.makedirs(output_dir_plots, exist_ok=True)
     plot_r2(R2_test, lfp_obj.channels, bands, 
             show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name='r2_scores.png')
@@ -92,13 +92,13 @@ def start(output_dir, session_id):
         plot_psd(lfp_obj.lfpMat, yHat_active, chani,
                  show_plot=False, save_fig=True, output_dir=output_dir_plots, session_id=session_id, fig_name=f'psd_chan{chani}.png')
         
-    output_dir_models = output_dir / 'spikes2lfp' / 'models' / str(session_id)
+    output_dir_models = Path(output_dir / 'spikes2lfp' / 'models' / str(session_id))
     os.makedirs(output_dir_models, exist_ok=True)    
     print("Models are saved in: ", output_dir_models)
     for idx in range(len(all_models.keys())):
         chan = list(all_models.keys())[idx][0]
         band = list(all_models.keys())[idx][1]
-        filename = output_dir_models / f'lstm_model_chan{chan}_band{band}.pt'
+        filename = Path(output_dir_models / f'lstm_model_chan{chan}_band{band}.pt')
         torch.save(all_models[chan, band].model.state_dict(), filename)
     
     print("Calculating and saving attribution scores")
@@ -108,7 +108,7 @@ def start(output_dir, session_id):
     X_attr = X_attr.reshape(num_trials, seqlength, X_attr.shape[1])
     X_attr_flat = torch.tensor(spikes_obj.spkMat[:int(attr_dur/bin_size),:]).float().to('cpu')
     mean_attribution = np.zeros((num_channels, len(bands)+1 , spikes_obj.spkMat.shape[1]))
-    output_dir_attrs = output_dir / 'spikes2lfp' / 'attrs' / str(session_id)
+    output_dir_attrs = Path(output_dir / 'spikes2lfp' / 'attrs' / str(session_id))
     os.makedirs(output_dir_attrs, exist_ok=True)
 
     for bandi in range(len(bands)+1):
@@ -122,12 +122,12 @@ def start(output_dir, session_id):
             attrs = attrs.reshape(num_trials * seqlength, input_size).cpu()
             attrs = attrs / (X_attr_flat + 1e-10)
             attrs = np.array(attrs)
-            filename = output_dir_attrs / f'attribution_scores_chan{chani}_band{bandi}.npz'
+            filename = Path(output_dir_attrs / f'attribution_scores_chan{chani}_band{bandi}.npz')
             attrs_sparse = coo_matrix(attrs)
             save_npz(filename, attrs_sparse, compressed=True)
             mean_attribution[chani, bandi, :] = np.mean(np.abs(attrs), axis=0)
             
-    filename = output_dir_attrs / f'mean_abs_attribution_scores.npy'
+    filename = Path(output_dir_attrs / f'mean_abs_attribution_scores.npy')
     np.save(filename, mean_attribution)
     print("Attribution scores are saved in: ", output_dir_attrs)
     print("Session complete.")

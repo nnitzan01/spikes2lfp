@@ -5,11 +5,12 @@ class session:
     def __init__(self, session_id, df, output_dir, target_areas=None):
         
         cache = VisualBehaviorNeuropixelsProjectCache.from_s3_cache(output_dir)
-        
+        cache.load_manifest("visual-behavior-neuropixels_project_manifest_v0.4.0.json")
+
         self.id = session_id
         self.session = cache.get_ecephys_session(session_id)
         self.probes = self.session.probes # DONE
-        self.channels = self.session.get_channels()
+        self.channels = self.session.get_channels() # DONE
         
         # add relevent units
         units_raw = self.session.get_units()
@@ -18,7 +19,7 @@ class session:
         # if target_areas are not specified, all units are added
         if target_areas is not None:
             units = units[units.structure_acronym.isin(target_areas)]
-        self.units = units
+        self.units = units # DONE
         
         # group together MG and LG subregions
         self.units['structure_acronym'][self.units['structure_acronym'].str.contains('MG')] = 'MG'
