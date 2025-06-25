@@ -1,14 +1,14 @@
 import os
-import numpy as np
 import torch
+import numpy as np
+import seaborn as sns
+from scipy import signal 
 from pathlib import Path
+import matplotlib.cm as cm
 from scipy.signal import welch
 from scipy.stats import zscore
-from scipy import signal 
-import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
-import seaborn as sns
 
 def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     """
@@ -24,7 +24,7 @@ def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     file structure:
     output_dir/plot.png
     """
-    session_path = Path(output_dir / "plots" / session_id)
+    session_path = Path(output_dir / "plots" / str(session_id))
     file_path = Path(session_path / plot_name)
     os.makedirs(session_path, exist_ok=True)
     fig.savefig(file_path)

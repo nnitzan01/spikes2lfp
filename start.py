@@ -23,7 +23,7 @@ def start(output_dir, session_id):
         print("units_info.csv not found in the repo.")
         exit(1)
 
-    print("Obtaining session, spikes, and LFP data.")
+    print("Obtaining session, spikes, and LFP data.", flush=True)
     session_obj = ps(session_id, df, output_dir)
 
     # model hyperparameters
@@ -50,7 +50,7 @@ def start(output_dir, session_id):
     lfp_obj.align_lfp(spikes_obj.spkMat.shape[0])
     num_channels = len(lfp_obj.channels)
 
-    print("Training")
+    print("Training", flush=True)
     lossesTrain, lossesTest = (np.zeros((len(lfp_obj.channels), num_epochs, len(bands)+1)) for _ in range(2))
     R2_train, R2_test       = (np.zeros((len(lfp_obj.channels), len(bands)+1)) for _ in range(2))
     all_models = {}
@@ -74,7 +74,7 @@ def start(output_dir, session_id):
         for chani in range(len(lfp_obj.channels)):
             yHat_active[:,chani,bandi] = np.array(all_models[chani, bandi].evaluate(torch.tensor(spikes_obj.spkMat).float().to(device)).to('cpu'))
             
-    print("Training completed")
+    print("Training completed", flush=True)
 
     print("Plotting results")
     output_dir_plots = Path(output_dir / 'spikes2lfp') # '/plots' is created in the plots.py
@@ -94,7 +94,7 @@ def start(output_dir, session_id):
         
     output_dir_models = Path(output_dir / 'spikes2lfp' / 'models' / str(session_id))
     os.makedirs(output_dir_models, exist_ok=True)    
-    print("Models are saved in: ", output_dir_models)
+    print("Models are saved in: ", output_dir_models, flush=True)
     for idx in range(len(all_models.keys())):
         chan = list(all_models.keys())[idx][0]
         band = list(all_models.keys())[idx][1]
@@ -115,7 +115,7 @@ def start(output_dir, session_id):
         for chani in range(num_channels):
             model = all_models[chani, bandi]
             ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
-            attrs = ig.run(X_attr, baselines = 0, n_steps = 50)
+            attrs = ig.run(X_attr, baselines = 0, n_batch=40, n_steps = 50)
             if device == 'cuda':
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
@@ -130,7 +130,7 @@ def start(output_dir, session_id):
     filename = Path(output_dir_attrs / f'mean_abs_attribution_scores.npy')
     np.save(filename, mean_attribution)
     print("Attribution scores are saved in: ", output_dir_attrs)
-    print("Session complete.")
+    print("Session complete.", flush=True)
 
 def main(args):
     dir = Path(args.dir)
@@ -139,8 +139,8 @@ def main(args):
         sys.exit(1)
     session_id = int(os.path.basename(dir))
     root_dir = dir.parent.parent.parent
-    print(f"Root dir is set to: {root_dir}")
-    print(f"Session ID is set to: {session_id}")    
+    print(f"Root dir is set to: {root_dir}", flush=True)
+    print(f"Session ID is set to: {session_id}", flush=True)    
     start(root_dir, session_id)
 
 if __name__ == "__main__":

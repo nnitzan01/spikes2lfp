@@ -25,7 +25,7 @@ def load_nwb(nwb_dir, session_id, probe_letter):
     nwb_dir/session_id/probeA_lfp.nwb
     """
     probe_letter = probe_letter.upper()
-    session_path = Path(Path(nwb_dir) /"visual-behavior-neuropixels-0.4.0"/"behavior_ecephys_sessions"/session_id)
+    session_path = Path(Path(nwb_dir) /"visual-behavior-neuropixels-0.4.0"/"behavior_ecephys_sessions"/str(session_id))
     # session folder does not exist
     if not os.path.exists(session_path): 
         print(f'Session {session_id} does not exist')
