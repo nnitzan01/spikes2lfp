@@ -7,9 +7,10 @@ from captum.attr._utils.common import (
 import numpy as np
 from tqdm import tqdm
 import torch
+from models import SpikingTransformer
 
 class IntegratedGradient():
-    def __init__(self, forward_func, method='moving window', window_size=None, weight=False, tau=None, fs=250):
+    def __init__(self, forward_func, method='moving window', window_size=None, weight=False, tau=None, fs=250, seqlength=750):
         self.forward_func = forward_func
         self.method = method # 'last time point' or 'moving window'
         self.window_size = window_size # window size for moving window method
@@ -17,10 +18,12 @@ class IntegratedGradient():
         self.tau = tau # time constant of the exponential function for moving window method
         self.fs = fs # sampling frequency for moving window method, default is 250 Hz
         self.exp_func = None # exponential function for moving window method
+        self.seqlength = seqlength # length of the sequence for moving window method, default is 750
 
     def run(self, 
             inputs, 
             baselines = None, 
+            n_batch: int = 10,
             n_steps: int = 50,
             method: str = "gausslegendre"):
         r"""
@@ -58,13 +61,15 @@ class IntegratedGradient():
         else:
             # assume input is of shape (n_batch, seq_length, input_size)
             if len(inputs.shape) == 2:
-                print("Reshaping using default seqlength=750")
-                num_trials = inputs.shape[0]//750
-                inputs = inputs[:num_trials*750].reshape(num_trials, 750, inputs.shape[1])
+                num_trials = inputs.shape[0]//self.seqlength 
+                inputs = inputs[:num_trials*self.seqlength ].reshape(num_trials, self.seqlength , inputs.shape[1])
             attrs = torch.zeros_like(inputs)
-            for i in tqdm(range(inputs.shape[0])):
-                inputs_slice = inputs[i, :, :]
-                attrs[i, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
+            counter = 0
+            iterations = inputs.shape[0] // n_batch
+            for i in range(iterations):
+                inputs_slice = inputs[counter:counter+n_batch, :, :]
+                attrs[counter:counter+n_batch, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
+                counter += n_batch
             attrs = attrs.reshape(attrs.shape[0]*attrs.shape[1], attrs.shape[2])
             return attrs
 
@@ -91,11 +96,18 @@ class IntegratedGradient():
         if h_c is not None:
             if len(h_c) == 2:
                 outputs, h_c = self.forward_func(inputs, h_c[0], h_c[1])
+                return outputs, h_c
             else:
                 outputs, h_c = self.forward_func(inputs, h_c)
+                return outputs, h_c
         else:
-            outputs, h_c = self.forward_func(inputs)        
-        return outputs, h_c
+            if type(self.forward_func) is SpikingTransformer:
+                outputs = self.forward_func(inputs)
+                return outputs, None
+            else:
+                outputs, h_c = self.forward_func(inputs)        
+                return outputs, h_c
+        
 
     # MODIFIED from captum/_utils/gradient.py
     def compute_gradients(self, inputs):
