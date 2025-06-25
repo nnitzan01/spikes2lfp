@@ -158,7 +158,8 @@ class IntegratedGradient():
                         # subsequent time points, use the hidden and cell states
                         outputs, h_c = self._run_forward(input_slice, h_c = h_c)
                     # compute gradients using autograd, the output is a tuple of tensors of shape (n_steps, 1, input_size)
-                    grads[:,i,:] = torch.autograd.grad(torch.unbind(outputs), input_slice)[0].squeeze()
+                    outputs = torch.sum(outputs, dim=0).squeeze()
+                    grads[:,i,:] = torch.autograd.grad(outputs, input_slice)[0].squeeze()
             else:
                 raise ValueError("Method not specificed or not supported.")
         return tuple([grads])
