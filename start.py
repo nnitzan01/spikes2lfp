@@ -115,12 +115,11 @@ def start(output_dir, session_id):
         for chani in range(num_channels):
             model = all_models[chani, bandi]
             ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
-            attrs = ig.run(X_attr, baselines = 0, n_batch=40, n_steps = 50)
+            attrs = ig.run(X_attr, baselines = 0, n_batch=40, n_steps = 50).cpu()
             if device == 'cuda':
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
-            attrs = attrs.reshape(num_trials * seqlength, input_size).cpu()
-            attrs = attrs / (X_attr_flat + 1e-10)
+            # attrs = attrs / (X_attr_flat + 1e-10)
             attrs = np.array(attrs)
             filename = Path(output_dir_attrs / f'attribution_scores_chan{chani}_band{bandi}.npz')
             attrs_sparse = coo_matrix(attrs)
