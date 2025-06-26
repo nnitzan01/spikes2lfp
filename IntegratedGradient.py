@@ -23,6 +23,7 @@ class IntegratedGradient():
     def run(self, 
             inputs, 
             baselines = None, 
+            n_batch: int = 10,
             n_steps: int = 50,
             method: str = "gausslegendre"):
         r"""
@@ -63,9 +64,12 @@ class IntegratedGradient():
                 num_trials = inputs.shape[0]//self.seqlength 
                 inputs = inputs[:num_trials*self.seqlength ].reshape(num_trials, self.seqlength , inputs.shape[1])
             attrs = torch.zeros_like(inputs)
-            for i in tqdm(range(inputs.shape[0])):
-                inputs_slice = inputs[i, :, :]
-                attrs[i, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
+            counter = 0
+            iterations = inputs.shape[0] // n_batch
+            for i in range(iterations):
+                inputs_slice = inputs[counter:counter+n_batch, :, :]
+                attrs[counter:counter+n_batch, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
+                counter += n_batch
             attrs = attrs.reshape(attrs.shape[0]*attrs.shape[1], attrs.shape[2])
             return attrs
 
@@ -155,7 +159,8 @@ class IntegratedGradient():
                         # subsequent time points, use the hidden and cell states
                         outputs, h_c = self._run_forward(input_slice, h_c = h_c)
                     # compute gradients using autograd, the output is a tuple of tensors of shape (n_steps, 1, input_size)
-                    grads[:,i,:] = torch.autograd.grad(torch.unbind(outputs), input_slice)[0].squeeze()
+                    outputs = torch.sum(outputs, dim=0).squeeze()
+                    grads[:,i,:] = torch.autograd.grad(outputs, input_slice)[0].squeeze()
             else:
                 raise ValueError("Method not specificed or not supported.")
         return tuple([grads])

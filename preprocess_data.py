@@ -1,12 +1,11 @@
+import torch
 import numpy as np
+import process_probe as pp
+from scipy.stats import zscore
 from scipy.ndimage import gaussian_filter1d
+from sklearn.preprocessing import MinMaxScaler
 from scipy.signal import butter, filtfilt, hilbert
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
-from scipy.stats import zscore
-import process_probe as pp
-import tqdm
-import torch
 from torch.utils.data import DataLoader, TensorDataset
 
 class pre_process_spikes:
@@ -24,7 +23,7 @@ class pre_process_spikes:
         bins = np.linspace(start,stop,num=bin_count+1)
         self.timestamps = np.linspace(start, stop, num=bin_count)
         self.spkMat = np.zeros((bin_count, len(self.units)))
-        for i, unit in enumerate(tqdm.tqdm(self.units.index)):
+        for i, unit in enumerate(self.units.index):
             self.spkMat[:, i] = np.histogram(self.spike_times[unit], bins=bins)[0].tolist()
 
     def truncate(self, seqlength):
@@ -54,7 +53,7 @@ class pre_process_lfp:
         self.lfpMat = np.zeros((self.data.shape[0], self.data.shape[1], len(bands)+1))
         # first entry is the raw signal
         self.lfpMat[:, :, 0] = zscore(self.data, axis=0)
-        for i, band in enumerate(tqdm.tqdm(bands)):
+        for i, band in enumerate(bands):
             low  = bands[i][0] / (self.sampling_rate / 2)
             high = bands[i][1] / (self.sampling_rate / 2)
             b, a = butter(3, [low, high], btype='bandpass')
