@@ -93,3 +93,20 @@ def start(output_dir, session_id):
     r2_scores_passive_path = Path(variables_dir / 'r2_scores_passive.npy')
     np.save(r2_scores_passive_path, R2_test_passive)
     print("R2 scores saved to:", r2_scores_spont_path, r2_scores_passive_path)
+    
+def main(args):
+    dir = Path(args.dir)
+    if not dir.exists():
+        print(f"Directory {dir} does not exist.")
+        sys.exit(1)
+    session_id = int(os.path.basename(dir))
+    root_dir = dir.parent.parent.parent
+    print(f"Root dir is set to: {root_dir}", flush=True)
+    print(f"Session ID is set to: {session_id}", flush=True)
+    start(root_dir, session_id)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("dir", type=str, help="Path to the root dir: ")
+    args = parser.parse_args()
+    main(args)
