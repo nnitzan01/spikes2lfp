@@ -1,6 +1,6 @@
 # spikes2LFP project
 
-this project explores the relationship between spiking activity across visual and non-visual areas and multi-layer LFP in the primary visual cortex (VISp/V1) of the mouse brain.
+This project explores the relationship between spiking activity across visual and non-visual areas and multi-layer LFP in the primary visual cortex (VISp/V1) of the mouse brain.
 
 ## Data
 The data used for this project is from the Allen Institute Brain Observatory, although with light modifications the code can work on any similar dataset.
@@ -21,7 +21,7 @@ We use integrated gradients to estimate the contribution of each feature (neuron
 * To follow a step-by-step application of the pipeline, use start_notebook.ipynb
 * To run the model and save the results use start.py
 
-## dependencies
+## Dependencies
 + allensdk
 + pytorch
 + sklearn
