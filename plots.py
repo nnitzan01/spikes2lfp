@@ -193,7 +193,7 @@ def plot_abs_error_change(y, yHat, session_obj, timestamps, chan2use, bands,
         ax.flat[bandi].set_xlabel('Time from change (s)')
         if bandi==0:
             ax.flat[bandi].set_ylabel('Trial')
-            ax.flat[bandi].set_title('broaband')
+            ax.flat[bandi].set_title('broadband')
             ax.flat[bandi].legend(loc = 'upper left')
         else:
             ax.flat[bandi].set_title('Band: ' + str(bands[bandi-1]) + ' Hz')
