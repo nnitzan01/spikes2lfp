@@ -64,44 +64,45 @@ def start(output_dir, session_id):
     # we do this for 1 channel and the broadband model 
     
     steps = np.arange(5,100,5)
-    nperm = 100
+    nperm = 20
     
-    R2_fr   = np.zeros((len(steps), nperm))
-    R2_attr = np.zeros((len(steps), nperm))
+    R2_fr   = np.zeros((len(steps), 1))
+    R2_attr = np.zeros((len(steps), 1))
     R2_rand = np.zeros((len(steps), nperm))
     
     
-    for permi in range(nperm):
-        print(f"Permutation {permi+1} / {nperm}", flush=True)
-        for step in steps:
-            num_neurons = int((step/100) * len(session_obj.units)) # number of neurons to exclude
-            
-            # train a model excluding the top num_neurons neurons according to firing rate
-            fr_excluded = fr_idx_sorted[num_neurons:]
-            X_train_fr, X_test_fr, y_train_fr, y_test_fr  = chunk_and_reshape(spikes_obj.spkMat[:,fr_excluded], lfp_obj.lfpMat[:,chani,bandi], 
-                                                      seqlength, prediction_lag=0, test_size=0.2, random_state=42)
-            train_dataloader_fr , test_dataloader_fr = get_data_loaders(X_train_fr, X_test_fr, y_train_fr, y_test_fr, batch_size)
-            lstm_model_fr = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
-                                                 conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
-            train_loss, test_loss = lstm_model_fr.train(train_dataloader_fr,
-                                        test_dataloader_fr , num_epochs)
-            yHat_fr = lstm_model_fr.evaluate(test_dataloader_fr.dataset.tensors[0]).cpu().numpy()
-            R2_fr[np.where(steps==step)[0][0], permi] = r2_score(test_dataloader_fr.dataset.tensors[1].cpu().numpy().reshape(-1,1), yHat_fr)
+    
+        # print(f"Permutation {permi+1} / {nperm}", flush=True)
+    for step in steps:
+        num_neurons = int((step/100) * len(session_obj.units)) # number of neurons to exclude
+        
+        # train a model excluding the top num_neurons neurons according to firing rate
+        fr_excluded = fr_idx_sorted[num_neurons:]
+        X_train_fr, X_test_fr, y_train_fr, y_test_fr  = chunk_and_reshape(spikes_obj.spkMat[:,fr_excluded], lfp_obj.lfpMat[:,chani,bandi], 
+                                                    seqlength, prediction_lag=0, test_size=0.2, random_state=42)
+        train_dataloader_fr , test_dataloader_fr = get_data_loaders(X_train_fr, X_test_fr, y_train_fr, y_test_fr, batch_size)
+        lstm_model_fr = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
+                                                conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
+        train_loss, test_loss = lstm_model_fr.train(train_dataloader_fr,
+                                    test_dataloader_fr , num_epochs)
+        yHat_fr = lstm_model_fr.evaluate(test_dataloader_fr.dataset.tensors[0]).cpu().numpy()
+        R2_fr[np.where(steps==step)[0][0], 0] = r2_score(test_dataloader_fr.dataset.tensors[1].cpu().numpy().reshape(-1,1), yHat_fr)
 
-
-            # do the same for attribution-based exclusion
-            attr_excluded = attr_idx_sorted[num_neurons:]
-            X_train_attr, X_test_attr, y_train_attr, y_test_attr  = chunk_and_reshape(spikes_obj.spkMat[:,attr_excluded], lfp_obj.lfpMat[:,chani,bandi], 
-                                                      seqlength, prediction_lag=0, test_size=0.2, random_state=42)
-            train_dataloader_attr, test_dataloader_attr = get_data_loaders(X_train_attr, X_test_attr, y_train_attr, y_test_attr, batch_size)
-            lstm_model_attr = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
-                                                 conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
-            train_loss, test_loss = lstm_model_attr.train(train_dataloader_attr,
-                                        test_dataloader_attr , num_epochs)
-            yHat_attr = lstm_model_attr.evaluate(test_dataloader_attr.dataset.tensors[0]).cpu().numpy()
-            R2_attr[np.where(steps==step)[0][0], permi] = r2_score(test_dataloader_attr.dataset.tensors[1].cpu().numpy().reshape(-1,1), yHat_attr)
-
-            # do the same for random exclusion
+        # do the same for attribution-based exclusion
+        attr_excluded = attr_idx_sorted[num_neurons:]
+        X_train_attr, X_test_attr, y_train_attr, y_test_attr  = chunk_and_reshape(spikes_obj.spkMat[:,attr_excluded], lfp_obj.lfpMat[:,chani,bandi], 
+                                                    seqlength, prediction_lag=0, test_size=0.2, random_state=42)
+        train_dataloader_attr, test_dataloader_attr = get_data_loaders(X_train_attr, X_test_attr, y_train_attr, y_test_attr, batch_size)
+        lstm_model_attr = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
+                                                conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
+        train_loss, test_loss = lstm_model_attr.train(train_dataloader_attr,
+                                    test_dataloader_attr , num_epochs)
+        yHat_attr = lstm_model_attr.evaluate(test_dataloader_attr.dataset.tensors[0]).cpu().numpy()
+        R2_attr[np.where(steps==step)[0][0], 0] = r2_score(test_dataloader_attr.dataset.tensors[1].cpu().numpy().reshape(-1,1), yHat_attr)
+        
+        # do the same for random exclusion
+        for permi in range(nperm):
+            print(f"Step {step} % - Random Permutation {permi+1} / {nperm}", flush=True)    
             rand_excluded = np.random.choice(len(session_obj.units), num_neurons, replace=False)
             rand_excluded = np.setdiff1d(np.arange(len(session_obj.units)), rand_excluded)
             X_train_rand, X_test_rand, y_train_rand, y_test_rand  = chunk_and_reshape(spikes_obj.spkMat[:,rand_excluded], lfp_obj.lfpMat[:,chani,bandi], 
