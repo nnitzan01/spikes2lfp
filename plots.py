@@ -410,7 +410,7 @@ def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2
         save_plot(fig, output_dir, session_id, fig_name)
         
         
-def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004,
+def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004,
                      show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='attr_matrix.pdf'):
     
     stim_st = session_obj.stimulus_presentation.start_time
@@ -435,20 +435,28 @@ def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False,
     en = int((time_win[1] - timestamps[0]) / bin_size)
     
     # visualize the attribution we just loaded for the broadband model
-    fig, ax = plt.subplots(1,1,figsize=(15,5))
-    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.05, vmax=0.05,
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 8), 
+                               height_ratios=[1, 4])
+    ax1.plot(timestamps, lfp, 'k')
+    ax1.set_xlim([time_win[0], time_win[1]])
+    
+    ax2.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.05, vmax=0.05,
             extent = [time_win[0], time_win[1], len(session_obj.units), 0])
     if plot_stim:
         for st in stim_st:
-            ax.axvline(st,     color='k', linestyle='--')
-            ax.axvline(st+.25, color='k', linestyle='--')
-    ax.set_xlabel('Time (s)')
-    ax.set_ylabel('Unit') 
-    ax.set_xlim([time_win[0], time_win[1]])
-    ax.set_yticks(middle)
-    ax.set_yticklabels(areas, rotation=45, ha='right')
-    # add a colorbar
-    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.026, pad=0.04)
+            ax2.axvline(st,     color='k', linestyle='--')
+            ax2.axvline(st+.25, color='k', linestyle='--')
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('Unit') 
+    ax2.set_xlim([time_win[0], time_win[1]])
+    ax2.set_yticks(middle)
+    ax2.set_yticklabels(areas, rotation=45, ha='right')
+    # add a colorbar aligned with the bottom subplot only
+    fig.subplots_adjust(right=0.85)  # Make room for colorbar
+    # Get the position of ax2 to align colorbar with it
+    pos2 = ax2.get_position()
+    cbar_ax = fig.add_axes([0.87, pos2.y0, 0.03, pos2.height])  # Align with ax2
+    cbar = fig.colorbar(ax2.images[0], cax=cbar_ax)
     cbar.set_label('Attribution')
     
     # tight layout
