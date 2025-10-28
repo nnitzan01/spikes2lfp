@@ -63,8 +63,7 @@ def start_spontaneous_attribution(output_dir, session_id):
                 continue
             
             # Create model with same architecture as training
-            model = models.process_model(models.LSTMnet(input_size, hidden_size, num_layers,seqlength, 
-                                                 conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
+            model = models.process_model(models.LSTMnet(input_size, hidden_size, num_layers,seqlength), criterion, device)
 
             # Load the saved state dict
             model.model.load_state_dict(torch.load(model_file, map_location=device))
