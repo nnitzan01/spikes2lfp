@@ -24,10 +24,11 @@ def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     file structure:
     output_dir/plot.png
     """
-    session_path = Path(output_dir / "plots" / str(session_id))
-    file_path = Path(session_path / plot_name)
-    os.makedirs(session_path, exist_ok=True)
-    fig.savefig(file_path)
+    # session_path = Path(output_dir / "plots" / str(session_id))
+    # file_path = Path(session_path / plot_name)
+    file_path = Path(output_dir / plot_name)
+    # os.makedirs(output_dir, exist_ok=True)
+    fig.savefig(file_path, format = 'pdf', dpi=300, bbox_inches='tight')
 
 def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', show_plot=True, 
             save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
@@ -68,7 +69,7 @@ def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', 
         save_plot(fig, output_dir, session_id, fig_name)
 
 def plot_lfp_prediction(y, yHat, chan2use, bands, start_time = None, end_time = None, fs=250, show_plot=True,
-                        save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+                        save_fig=False, output_dir=None, session_id=None, fig_name='lfp_prediction.pdf'):
     """
     Plot the LFP prediction for the given channel and bands.
 
@@ -409,10 +410,9 @@ def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2
         save_plot(fig, output_dir, session_id, fig_name)
         
         
-def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004, show_plot=True, save_fig=False):
+def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004,
+                     show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='attr_matrix.pdf'):
     
-    exp   = np.ceil(np.log10(np.abs(np.median(attr[attr!=0]))))
-
     stim_st = session_obj.stimulus_presentation.start_time
     stim_st = stim_st[(stim_st > time_win[0]) & (stim_st < time_win[1])]
     stim_st = stim_st.values
@@ -436,7 +436,7 @@ def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False,
     
     # visualize the attribution we just loaded for the broadband model
     fig, ax = plt.subplots(1,1,figsize=(15,5))
-    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.03, vmax=0.03,
+    ax.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.05, vmax=0.05,
             extent = [time_win[0], time_win[1], len(session_obj.units), 0])
     if plot_stim:
         for st in stim_st:
@@ -447,7 +447,18 @@ def plot_attr_matrix(attr, timestamps, session_obj, time_win, plot_stim = False,
     ax.set_xlim([time_win[0], time_win[1]])
     ax.set_yticks(middle)
     ax.set_yticklabels(areas, rotation=45, ha='right')
-    plt.show()
+    # add a colorbar
+    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.026, pad=0.04)
+    cbar.set_label('Attribution')
+    
+    # tight layout
+    plt.tight_layout()
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)    
         
     
 def plot_attr_lfp_corr(attr, lfp, session_obj, sorting = "max", bin_size = 0.004,
