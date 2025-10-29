@@ -75,12 +75,16 @@ def start_spontaneous_attribution(output_dir, session_id):
     # Calculate attribution scores for spontaneous data
     print("Calculating and saving attribution scores for spontaneous times")
 
-    X_attr = torch.tensor(spikes_obj.spkMat).float().to(device)
-    num_trials = int(X_attr.shape[0] / seqlength)
+    # Reduce data size to avoid memory issues
+    max_samples = min(75000, spikes_obj.spkMat.shape[0])  # Limit to ~300s of data
+    X_attr = torch.tensor(spikes_obj.spkMat[:max_samples, :]).float().to(device)
+    num_trials = int(max_samples / seqlength)
     
     if num_trials == 0:
         print("Not enough spontaneous data for even one trial. Exiting.")
         sys.exit(1)
+    
+    print(f"Processing {num_trials} trials from spontaneous data")
     
     # Reshape for trials
     X_attr = X_attr[:num_trials * seqlength, :].reshape(num_trials, seqlength, X_attr.shape[1])
@@ -96,15 +100,21 @@ def start_spontaneous_attribution(output_dir, session_id):
                 print(f"Model for channel {chani}, band {bandi} not found. Skipping.")
                 continue
                 
-            model = all_models[chani, bandi]
-            ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
-            attrs = ig.run(X_attr, baselines=0, n_batch=40, n_steps=50).cpu()
-            
+            # Clear GPU cache before each attribution calculation
             if device == 'cuda':
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
+                
+            model = all_models[chani, bandi]
+            ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
+            # Reduce batch size  to avoid CUDA out of memory
+            attrs = ig.run(X_attr, baselines=0, n_batch=10, n_steps=50).cpu()
             
+            # Move attribution to CPU immediately and clear GPU cache
             attrs = np.array(attrs)
+            if device == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.ipc_collect()
             # convert to relative attribution
             total_attr = np.nansum(np.abs(attrs), axis=1, keepdims=True)
             attrs = attrs / (total_attr + 1e-10)  # avoid division by zero
