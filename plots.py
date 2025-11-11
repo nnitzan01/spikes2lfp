@@ -440,7 +440,7 @@ def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = F
     ax1.plot(timestamps, lfp, 'k')
     ax1.set_xlim([time_win[0], time_win[1]])
     
-    ax2.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.05, vmax=0.05,
+    ax2.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.01, vmax=0.01,
             extent = [time_win[0], time_win[1], len(session_obj.units), 0])
     if plot_stim:
         for st in stim_st:
