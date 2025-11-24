@@ -43,9 +43,10 @@ class pre_process_spikes:
         
 class pre_process_lfp:
     def __init__(self, session_id, channels, start_time, stop_time, output_dir):
-        chans, lfp = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
+        chans, lfp, timestamps = pp.load_lfp(output_dir, session_id, channels, start_time, stop_time)
         self.channels = chans
         self.data = lfp
+        self.timestamps = timestamps
         self.lfpMat = []
         self.sampling_rate = 1250
 
@@ -67,7 +68,7 @@ class pre_process_lfp:
         del self.data
     
     def downsample_lfp(self, factor):
-        self.lfpMat = self.lfpMat[::factor,:,:]
+        self.lfpMat = self.lfpMat[::factor,:,:]   
         
     def truncate(self, seqlength):
         num_trials = int(self.lfpMat.shape[0] / seqlength)

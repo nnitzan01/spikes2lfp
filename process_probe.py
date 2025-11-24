@@ -97,4 +97,4 @@ def load_lfp(output_dir, id, channels, start_time, stop_time):
     all_chans = lfp.channel.values
     chans = channels.loc[all_chans][channels.loc[all_chans]['structure_acronym'] == 'VISp']
     lfp_sliced = lfp.sel(time=slice(start_time, stop_time), channel=chans.index.values)
-    return chans, lfp_sliced.data
+    return chans, lfp_sliced.data, lfp_sliced.time.to_numpy()
