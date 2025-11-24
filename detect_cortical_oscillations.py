@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 from preprocess_data import *
 from process_session import session as ps
-
+import shutil
 
 # --- 1. DETECTION PARAMETERS (Adjust based on final tuning) ---
 FS = 1250.0                  # LFP Sampling Rate (Hz)
@@ -194,6 +194,11 @@ def plot_random_events(lfp_data: np.ndarray, detected_events: np.ndarray, fs: fl
     sigma_power = np.nanstd(power_envelope)
     # Z-score the power envelope: mean=0, std=1
     z_power_envelope = (power_envelope - mu_power) / (sigma_power + 1e-10) 
+    
+    if os.path.exists(output_dir):
+        # Remove the directory and all its contents
+        shutil.rmtree(output_dir)
+        print(f"Cleared old plots from: {output_dir}")
     
     os.makedirs(output_dir, exist_ok=True)
 
