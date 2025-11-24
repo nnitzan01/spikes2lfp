@@ -235,11 +235,11 @@ def run_detection_analysis(output_dir: str, session_id: str ):
     print(f"Found {len(detected_events)} events.")
 
     # 2. Define Output Paths
-    output_session_dir = os.path.join(output_dir, str(session_id))
-    os.makedirs(output_session_dir, exist_ok=True)
+    output_session_dir = os.path.join(output_dir, f'session_{str(session_id)}')
+    # os.makedirs(output_session_dir, exist_ok=True)
     
     # 3. Save Results (Event Indices)
-    np.save(os.path.join(output_session_dir, 'detected_events.npy'), detected_events_timestamps)
+    np.save(os.path.join(output_session_dir, 'detected_hvs_events.npy'), detected_events_timestamps)
     print(f"Events saved to {output_session_dir}")
 
     # 4. Generate Validation Plots
