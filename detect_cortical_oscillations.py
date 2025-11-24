@@ -209,7 +209,7 @@ def run_detection_analysis(output_dir: str, session_id: str ):
     FS = lfp_obj.sampling_rate
     F_RANGE = [2,6]
     
-    lfp_data = lfp_obj.lfp_data  # Shape: (N_samples, N_channels)
+    lfp_data = lfp_obj.data  # Shape: (N_samples, N_channels)
     best_channel_index = get_best_channel(lfp_data, FS, F_RANGE)
     print(f"Best channel for detection: {best_channel_index}")
     
