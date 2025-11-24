@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import butter, filtfilt, welch, hilbert
+from scipy.signal import butter, filtfilt, welch, hilbert, find_peaks
 from typing import List, Tuple
 import os
 import random
@@ -10,18 +10,18 @@ from pathlib import Path
 import pandas as pd
 from preprocess_data import *
 from process_session import session as ps
-from scipy.signal import welch
 
 
 # --- 1. DETECTION PARAMETERS (Adjust based on final tuning) ---
-FS = 1250.0                 # LFP Sampling Rate (Hz)
-F_RANGE = [2, 6]            # Target frequency band (Hz)
-WIN_SIZE_SEC = 0.5          # RMS smoothing window (seconds)
-THRESHOLD_STD = 2.5         # Primary threshold (STD)
-MIN_DURATION_SEC = 0.75     # Minimum event duration (seconds)
-MAX_GAP_SEC = 0.15          # Max gap to merge events (seconds)
+FS = 1250.0                  # LFP Sampling Rate (Hz)
+F_RANGE = [2, 6]             # Target frequency band (Hz)
+WIN_SIZE_SEC = 0.5           # RMS smoothing window (seconds)
+THRESHOLD_STD = 2.5          # Primary threshold (STD)
+MIN_DURATION_SEC = 0.75      # Minimum event duration (seconds)
+MAX_GAP_SEC = 0.15           # Max gap to merge events (seconds)
 BOUNDARY_THRESHOLD_STD = 0.5 # Low-amplitude threshold for refinement
-TIME_PADDING_SEC = 2.0      # Time window for plotting validation
+TIME_PADDING_SEC = 2.0       # Time window for plotting validation
+MIN_PEAKS = 3
 
 # ====================================================================
 # A. HELPER FUNCTIONS (CORE DETECTION LOGIC)
@@ -76,8 +76,9 @@ def refine_boundaries(start_idx: int, end_idx: int, rms_amplitude: np.ndarray, t
     else:
         return None, None 
 
+
 def detect_oscillations(lfp_data: np.ndarray, fs: float, filt_freqs: List[float]) -> np.ndarray:
-    """Detects 3-5 Hz oscillation events based on LFP amplitude thresholding and refinement."""
+    """Detects 3-5 Hz oscillation events, requiring at least 3 peaks above threshold."""
     
     fs_lfp = fs
     
@@ -103,6 +104,11 @@ def detect_oscillations(lfp_data: np.ndarray, fs: float, filt_freqs: List[float]
     if len(over_threshold_indices) == 0:
         return np.array([])
     
+    # NEW: Calculate Peak Quality Control Threshold
+    # We use the standard deviation of the ENTIRE bandpassed signal for the peak count QC
+    sigma_filtered = np.std(lfp_filtered)
+    peak_qc_threshold = THRESHOLD_STD * sigma_filtered
+    
     # 3. Merging Events
     gap_samples = int(MAX_GAP_SEC * fs_lfp)
     over_threshold_indices_diff = np.diff(over_threshold_indices)
@@ -119,14 +125,29 @@ def detect_oscillations(lfp_data: np.ndarray, fs: float, filt_freqs: List[float]
         new_start, new_end = refine_boundaries(start_idx, end_idx, rms_amplitude, low_threshold, fs_lfp, min_samples=min_duration_samples)
         
         if new_start is not None:
-            # Find the peak power index within the refined boundaries
-            event_slice = rms_amplitude[new_start:new_end]
-            peak_relative_idx = np.argmax(event_slice)
-            peak_abs_idx = new_start + peak_relative_idx
+            # --- QUALITY CHECK: Peak Count ---
+            
+            # Extract the slice of the filtered LFP within the refined boundaries
+            lfp_slice = lfp_filtered[new_start:new_end]
+            
+            # 1. Find all local maxima (peaks) in the LFP slice
+            # prominence=sigma_filtered/2 helps ignore noise
+            peaks, _ = find_peaks(lfp_slice, prominence=sigma_filtered/2)
+            
+            # 2. Count how many of these peaks exceed the instantaneous peak threshold
+            peaks_above_threshold = np.sum(lfp_slice[peaks] > peak_qc_threshold)
+            
+            # 3. Apply QC: Must have more than 2 peaks above threshold
+            if peaks_above_threshold >= MIN_PEAKS:
+                
+                # Find the peak power index within the refined boundaries
+                event_slice_rms = rms_amplitude[new_start:new_end]
+                peak_relative_idx = np.argmax(event_slice_rms)
+                peak_abs_idx = new_start + peak_relative_idx
 
-            # Append: [Start Sample, Peak Sample, End Sample]
-            final_events.append([new_start, peak_abs_idx, new_end])
-                    
+                # Append: [Start Sample, Peak Sample, End Sample]
+                final_events.append([new_start, peak_abs_idx, new_end])
+            
     return np.array(final_events)
 
 # ====================================================================
