@@ -16,7 +16,8 @@ from process_session import session as ps
 FS = 1250.0                  # LFP Sampling Rate (Hz)
 F_RANGE = [2, 6]             # Target frequency band (Hz)
 WIN_SIZE_SEC = 0.5           # RMS smoothing window (seconds)
-THRESHOLD_STD = 2.5          # Primary threshold (STD)
+THRESHOLD_STD_LOW = 1.0     # Low threshold factor 
+THRESHOLD_STD_HIGH = 2.5    # High threshold factor
 MIN_DURATION_SEC = 0.75      # Minimum event duration (seconds)
 MAX_GAP_SEC = 0.15           # Max gap to merge events (seconds)
 BOUNDARY_THRESHOLD_STD = 0.5 # Low-amplitude threshold for refinement
@@ -53,6 +54,7 @@ def bandpass_filter(data: np.ndarray, lowcut: float, highcut: float, fs: float, 
 
 def refine_boundaries(start_idx: int, end_idx: int, rms_amplitude: np.ndarray, threshold_low: float, fs: float, min_samples: int) -> Tuple[int, int]:
     """Refines event start/end indices by looking for low-amplitude threshold crossing."""
+    # Use global WIN_SIZE_SEC for search window
     search_window_samples = int(WIN_SIZE_SEC * fs) 
     
     # Refine Start Boundary (Look backward)
@@ -74,42 +76,48 @@ def refine_boundaries(start_idx: int, end_idx: int, rms_amplitude: np.ndarray, t
     if new_end_idx - new_start_idx >= min_samples:
         return new_start_idx, new_end_idx
     else:
-        return None, None 
+        return None, None
 
 
 def detect_oscillations(lfp_data: np.ndarray, fs: float, filt_freqs: List[float]) -> np.ndarray:
-    """Detects 3-5 Hz oscillation events, requiring at least 3 peaks above threshold."""
+    """
+    Detects 3-5 Hz oscillation events using bz_FindRipples style logic: 
+    Z-scored power, low threshold initial detection, and high threshold verification.
+    """
     
     fs_lfp = fs
     
     if lfp_data.ndim > 1:
         raise ValueError("detect_oscillations expects 1D LFP data")
     
-    # 1. Filtering, Power, and RMS Calculation
+    # 1. Filtering, Power, and RMS/Amplitude Calculation
     lfp_filtered = bandpass_filter(lfp_data, filt_freqs[0], filt_freqs[1], fs_lfp)
-    power = np.abs(hilbert(lfp_filtered))
+    # Amplitude Envelope (used as basis for power)
+    amplitude_envelope = np.abs(hilbert(lfp_filtered))
     
     win_size = int(WIN_SIZE_SEC * fs_lfp)
-    squared_amplitude = power**2
+    squared_amplitude = amplitude_envelope**2
     kernel = np.ones(win_size) / win_size
-    rms_amplitude = np.sqrt(np.convolve(squared_amplitude, kernel, mode='same'))
     
-    # 2. Primary Thresholding
-    mu = np.nanmean(rms_amplitude)
-    sigma = np.nanstd(rms_amplitude)
-    primary_threshold = mu + THRESHOLD_STD * sigma
-    low_threshold = mu + BOUNDARY_THRESHOLD_STD * sigma
+    # Calculate Mean Power Envelope (used for Z-scoring)
+    power_envelope = np.convolve(squared_amplitude, kernel, mode='same')
     
-    over_threshold_indices = np.where(rms_amplitude > primary_threshold)[0]
+    # 2. Z-Score Normalization (Match to MATLAB methodology)
+    mu_power = np.nanmean(power_envelope)
+    sigma_power = np.nanstd(power_envelope)
+    # Z-score the power envelope: mean=0, std=1
+    z_power_envelope = (power_envelope - mu_power) / (sigma_power + 1e-10) 
+    
+    # Define thresholds based on Z-score
+    low_threshold = THRESHOLD_STD_LOW          # e.g., 0.5 * STD
+    high_threshold_zscore = THRESHOLD_STD_HIGH # e.g., 2.5 * STD
+    
+    # 3. Initial Detection (Low Threshold Crossing)
+    over_threshold_indices = np.where(z_power_envelope > low_threshold)[0]
     if len(over_threshold_indices) == 0:
         return np.array([])
     
-    # NEW: Calculate Peak Quality Control Threshold
-    # We use the standard deviation of the ENTIRE bandpassed signal for the peak count QC
-    sigma_filtered = np.std(lfp_filtered)
-    peak_qc_threshold = THRESHOLD_STD * sigma_filtered
-    
-    # 3. Merging Events
+    # 4. Merging Events
     gap_samples = int(MAX_GAP_SEC * fs_lfp)
     over_threshold_indices_diff = np.diff(over_threshold_indices)
     break_points = np.where(over_threshold_indices_diff > gap_samples)[0]
@@ -117,32 +125,37 @@ def detect_oscillations(lfp_data: np.ndarray, fs: float, filt_freqs: List[float]
     event_starts_idx = np.insert(over_threshold_indices[break_points + 1], 0, over_threshold_indices[0])
     event_ends_idx = np.append(over_threshold_indices[break_points], over_threshold_indices[-1])
     
-    # 4. Boundary Refinement, Min Duration, and Peak Calculation
+    # 5. Verification (High Threshold & Peak Count)
     min_duration_samples = int(MIN_DURATION_SEC * fs_lfp)
     final_events = []
     
+    # Calculate the instantaneous LFP peak QC threshold based on the signal's STD
+    sigma_filtered = np.std(lfp_filtered)
+    peak_qc_threshold = high_threshold_zscore * sigma_filtered
+    
     for start_idx, end_idx in zip(event_starts_idx, event_ends_idx):
-        new_start, new_end = refine_boundaries(start_idx, end_idx, rms_amplitude, low_threshold, fs_lfp, min_samples=min_duration_samples)
+        
+        # Check 1: High Threshold Crossing within the event bounds
+        event_z_power_slice = z_power_envelope[start_idx:end_idx]
+        if np.max(event_z_power_slice) < high_threshold_zscore:
+            continue # Skip events that don't cross the high threshold
+            
+        # Refine boundaries using the low threshold (applied to the Z-scored envelope)
+        # Note: We must use the z_power_envelope for refinement now
+        new_start, new_end = refine_boundaries(start_idx, end_idx, z_power_envelope, low_threshold, fs_lfp, min_samples=min_duration_samples)
         
         if new_start is not None:
-            # --- QUALITY CHECK: Peak Count ---
             
-            # Extract the slice of the filtered LFP within the refined boundaries
+            # Check 2: Peak Count QC
             lfp_slice = lfp_filtered[new_start:new_end]
-            
-            # 1. Find all local maxima (peaks) in the LFP slice
-            # prominence=sigma_filtered/2 helps ignore noise
-            peaks, _ = find_peaks(lfp_slice, prominence=sigma_filtered/2)
-            
-            # 2. Count how many of these peaks exceed the instantaneous peak threshold
+            peaks, _ = find_peaks(lfp_slice) # Find all peaks
             peaks_above_threshold = np.sum(lfp_slice[peaks] > peak_qc_threshold)
             
-            # 3. Apply QC: Must have more than 2 peaks above threshold
             if peaks_above_threshold >= MIN_PEAKS:
                 
                 # Find the peak power index within the refined boundaries
-                event_slice_rms = rms_amplitude[new_start:new_end]
-                peak_relative_idx = np.argmax(event_slice_rms)
+                event_slice_z = z_power_envelope[new_start:new_end]
+                peak_relative_idx = np.argmax(event_slice_z)
                 peak_abs_idx = new_start + peak_relative_idx
 
                 # Append: [Start Sample, Peak Sample, End Sample]
@@ -172,7 +185,15 @@ def plot_random_events(lfp_data: np.ndarray, detected_events: np.ndarray, fs: fl
     power = np.abs(hilbert(lfp_filtered))
     win_size = int(WIN_SIZE_SEC * fs)
     kernel = np.ones(win_size) / win_size
-    rms_amplitude = np.sqrt(np.convolve(power**2, kernel, mode='same'))
+    
+    # Calculate Mean Power Envelope (used for Z-scoring)
+    power_envelope = np.convolve(power**2, kernel, mode='same')
+    
+    # 2. Z-Score Normalization (Match to MATLAB methodology)
+    mu_power = np.nanmean(power_envelope)
+    sigma_power = np.nanstd(power_envelope)
+    # Z-score the power envelope: mean=0, std=1
+    z_power_envelope = (power_envelope - mu_power) / (sigma_power + 1e-10) 
     
     os.makedirs(output_dir, exist_ok=True)
 
@@ -191,7 +212,7 @@ def plot_random_events(lfp_data: np.ndarray, detected_events: np.ndarray, fs: fl
         ax.plot(time_axis, lfp_data_1d[plot_start_sample:plot_end_sample], color='gray', linewidth=0.7, label='Raw LFP')
         
         ax2 = ax.twinx()
-        ax2.plot(time_axis, rms_amplitude[plot_start_sample:plot_end_sample], color='orange', linewidth=1.5, alpha=0.7, label='RMS Envelope')
+        ax2.plot(time_axis, z_power_envelope[plot_start_sample:plot_end_sample], color='orange', linewidth=1.5, alpha=0.7, label='RMS Envelope')
         
         # --- Mark Event Boundaries and Peak ---
         ax.axvspan(start / fs, end / fs, color='green', alpha=0.2, label='Detected Event')
@@ -201,7 +222,7 @@ def plot_random_events(lfp_data: np.ndarray, detected_events: np.ndarray, fs: fl
         ax.set_title(f'Validation Plot {i+1} (Event {event_index})', fontsize=12)
         ax.set_xlabel('Time (s)')
         ax.set_ylabel('LFP Amplitude (Raw)')
-        ax2.set_ylabel('RMS Amplitude (Env.)', color='orange')
+        ax2.set_ylabel('Z-scored power', color='orange')
         ax.grid(axis='x', alpha=0.5)
         
         # Combine legends
