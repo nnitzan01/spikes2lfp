@@ -226,15 +226,11 @@ def run_detection_analysis(output_dir: str, session_id: str ):
     
     if len(detected_events) == 0:
         print(f"No events found in session {session_id}.")
-        return
-
-    if len(detected_events) == 0:
-        print(f"No events found in session {session_id}.")
         # Still save empty array for consistency
         output_session_dir = os.path.join(output_dir, str(session_id))
         os.makedirs(output_session_dir, exist_ok=True)
         np.save(os.path.join(output_session_dir, 'detected_events.npy'), np.array([]))
-    return
+        return
 
     print(f"Found {len(detected_events)} events.")
 
