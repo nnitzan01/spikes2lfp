@@ -202,82 +202,89 @@ class process_model:
         else:
             return yHat
     
-    # def evaluate(self,x_data):
-    #     self.model.eval()
-    #     L = x_data.shape[0]
-    #     N = L - np.mod(L, self.seqlength)
-    #     if N < L:
-    #         # pad the data to be a multiple of the sequence length
-    #         pad_shape = (L-N, x_data.shape[1])
-    #         padding = torch.zeros(pad_shape, dtype=x_data.dtype, device=x_data.device)
-    #         x_data = torch.cat((x_data, padding), dim=0)
-            
-    #     input_size = x_data.shape[1]
-    #     y_hat = np.zeros(x_data.shape[0])
-    #     with torch.no_grad():
-    #         for timei in range(0, x_data.shape[0], self.seqlength):
-    #             # Corrected Reshape:
-    #             X = x_data[timei:timei+self.seqlength, :].unsqueeze(1).to(self.device) #add an extra dimension for batch_size
-    #             yy = self.model(X)
-    #             y_hat[timei:timei+self.seqlength] = np.squeeze(yy.cpu().numpy())
-    #     y_hat = y_hat[:L]
-    #     return y_hat
     
-    # def evaluate(self, x_data, overlap_factor=0.5):
-    #     self.model.eval()
-    #     L = x_data.shape[0]
-    #     y_hat = np.zeros(L)
-    #     hop_length = int(self.seqlength * (1 - overlap_factor))
+    def evaluate_in_batches(self, x_data, batch_size=1000, return_hidden=False):
+        """
+        Evaluate the model in batches to reduce GPU memory usage.
+        
+        Args:
+            x_data: Input data (2D or 3D tensor/array)
+            batch_size: Number of trials to process at once
+            return_hidden: Whether to return hidden states
+        
+        Returns:
+            yHat: Predictions reshaped to (L,)
+            hidden: Hidden states (if return_hidden=True)
+        """
+        self.model.eval()
+        self.model.to(self.device)
+        
+        # Convert to tensor if needed
+        if not torch.is_tensor(x_data):
+            x_data = torch.tensor(x_data, dtype=torch.float32)
+        
+        # Handle 2D input: reshape to 3D
+        if len(x_data.shape) == 2:
+            L = x_data.shape[0]
+            if L % self.seqlength != 0:
+                x_data = x_data[:-(L % self.seqlength), :]
+            L = x_data.shape[0]
 
-    #     with torch.no_grad():
-    #         for timei in range(0, L - self.seqlength + 1, hop_length):
-    #             if type(self.model) is SpikingTransformer:
-    #                 current_seq = x_data[timei:timei+self.seqlength, :].unsqueeze(0).to(self.device)
-    #             elif type(self.model) is LSTMnet:
-    #                 current_seq = x_data[timei:timei+self.seqlength, :].unsqueeze(1).to(self.device)
-
-    #             # Check if the sequence needs padding (at the beginning)
-    #             if current_seq.shape[0] < self.seqlength:
-    #                 pad_length = self.seqlength - current_seq.shape[0]
-    #                 if type(self.model) is SpikingTransformer:
-    #                     pad_shape = (current_seq.shape[0], pad_length, current_seq.shape[2])
-    #                     padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
-    #                     current_seq = torch.cat((padding, current_seq), dim=1)
-    #                 elif type(self.model) is LSTMnet:
-    #                     pad_shape = (pad_length, current_seq.shape[1], current_seq.shape[2])
-    #                     padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
-    #                     current_seq = torch.cat((padding, current_seq), dim=0)
-
-    #             yy = self.model(current_seq)
+            num_trials = int(L / self.seqlength)
+            input_size = x_data.shape[1]
+            x_data = torch.reshape(x_data, (num_trials, self.seqlength, input_size))
+        else:
+            num_trials = x_data.shape[0]
+            L = x_data.shape[0] * x_data.shape[1]
+        
+        # Process in batches
+        yHat_list = []
+        hidden_list = []
+        
+        with torch.no_grad():
+            for i in range(0, num_trials, batch_size):
+                # Get batch
+                batch_end = min(i + batch_size, num_trials)
+                x_batch = x_data[i:batch_end].to(self.device)
                 
-    #             # Assign predictions to y_hat with overlap handling
-    #             if type(self.model) is SpikingTransformer:
-    #                 y_hat[timei:timei+self.seqlength] = yy.cpu().numpy()
-    #             elif type(self.model) is LSTMnet:
-    #                 y_hat[timei:timei+self.seqlength] = yy[:,0,0].cpu().numpy()
+                # Forward pass
+                if return_hidden and (isinstance(self.model, LSTMnet) | isinstance(self.model, GRUnet)):
+                    yHat_batch, hidden_batch = self.model(x_batch)
+                    hidden_list.append(hidden_batch)
+                elif (not return_hidden) and (isinstance(self.model, LSTMnet) | isinstance(self.model, GRUnet)):
+                    yHat_batch, _ = self.model(x_batch)
+                else:
+                    yHat_batch = self.model(x_batch)
                 
-    #         # handle the last chunk
-    #         if timei + self.seqlength < L:
-    #             if type(self.model) is SpikingTransformer:
-    #                 current_seq = x_data[timei:L, :].unsqueeze(0).to(self.device)
-    #                 pad_length = self.seqlength - current_seq.shape[1]
-    #                 pad_shape = (current_seq.shape[0], pad_length, current_seq.shape[2])
-    #                 padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
-    #                 current_seq = torch.cat((current_seq, padding), dim=1)
-    #             elif type(self.model) is LSTMnet:
-    #                 current_seq = x_data[timei:L, :].unsqueeze(1).to(self.device)
-    #                 pad_length = self.seqlength - current_seq.shape[0]
-    #                 pad_shape = (pad_length, current_seq.shape[1], current_seq.shape[2])
-    #                 padding = torch.zeros(pad_shape, dtype=current_seq.dtype, device=current_seq.device)
-    #                 current_seq = torch.cat((current_seq, padding), dim=0)
-                    
-    #             yy = self.model(current_seq)
+                # Move to CPU immediately to free GPU memory
+                yHat_list.append(yHat_batch.cpu())
                 
-    #             if type(self.model) is SpikingTransformer:
-    #                 y_hat[timei:L] = yy[:L-timei].cpu().numpy()
-    #             elif type(self.model) is LSTMnet:
-    #                 y_hat[timei:L] = yy[:L-timei,0,0].cpu().numpy()
-    #     return y_hat
+                # Clear GPU cache
+                del x_batch, yHat_batch
+                torch.cuda.empty_cache()
+        
+        # Concatenate results
+        yHat = torch.cat(yHat_list, dim=0)
+        
+        # Reshape the output back to (L,)
+        yHat = torch.reshape(yHat, (L,))
+        
+        if return_hidden:
+            # Concatenate hidden states if needed
+            if hidden_list:
+                # For LSTM: hidden is tuple of (h, c), each with shape (num_layers, batch, hidden_size)
+                if isinstance(hidden_list[0], tuple):
+                    h_concat = torch.cat([h[0] for h in hidden_list], dim=1)
+                    c_concat = torch.cat([h[1] for h in hidden_list], dim=1)
+                    hidden = (h_concat, c_concat)
+                else:
+                    # For GRU: hidden is tensor with shape (num_layers, batch, hidden_size)
+                    hidden = torch.cat(hidden_list, dim=1)
+            else:
+                hidden = None
+            return yHat, hidden
+        else:
+            return yHat
     
     def save_model(self, filename):
         torch.save(self.model.state_dict(), filename)
