@@ -17,7 +17,7 @@ def start(output_dir, session_id):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if os.path.exists('./units_info.csv'):
         print("Loading units_info.csv from the repo.")
-        df = pd.read_csv('./units_info.csv')
+        df = pd.read_csv('./tables/units_info.csv')
     else:
         print("units_info.csv not found in the repo.")
         exit(1)
