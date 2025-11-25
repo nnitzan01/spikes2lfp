@@ -15,7 +15,7 @@ from spectral_analysis import bandpass_filter, calculate_band_r2
 
 def start(output_dir, session_id):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if os.path.exists('./units_info.csv'):
+    if os.path.exists('./tables/units_info.csv'):
         print("Loading units_info.csv from the repo.")
         df = pd.read_csv('./tables/units_info.csv')
     else:
