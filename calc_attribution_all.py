@@ -20,7 +20,7 @@ def calc_attribution_all(output_dir, session_id):
         print("units_info.csv not found in the repo.")
         exit(1)
 
-    print("Obtaining session, spikes, and LFP data for spontaneous times.", flush=True)
+    print("Obtaining session, spikes, and LFP data for the entire session.", flush=True)
     session_obj = ps(session_id, df, output_dir)
 
     # model hyperparameters (should match the original training)
@@ -32,7 +32,7 @@ def calc_attribution_all(output_dir, session_id):
     criterion = torch.nn.MSELoss()
     bin_size = 0.004
 
-    # Process spikes for spontaneous times instead of active times
+    # Process spikes times
     spikes_obj = pre_process_spikes(session_obj.units, session_obj.spike_times, bin_size=bin_size, sigma=3)
     spikes_obj.getSpkMat(session_obj.active_times[0], session_obj.passive_times[1])
     spikes_obj.truncate(seqlength)
@@ -91,7 +91,7 @@ def calc_attribution_all(output_dir, session_id):
     # X_attr_flat = torch.tensor(spikes_obj.spkMat[:num_trials * seqlength, :]).float().to('cpu')
     
     mean_attribution = np.zeros((num_channels, len(bands)+1, spikes_obj.spkMat.shape[1]))
-    output_dir_attrs = Path(output_dir / 'spikes2lfp' / 'attrs_spontaneous' / str(session_id))
+    output_dir_attrs = Path(output_dir / 'spikes2lfp' / 'attrs_entire_session' / str(session_id))
     os.makedirs(output_dir_attrs, exist_ok=True)
 
     bandi=0 # run only for broadband for now
