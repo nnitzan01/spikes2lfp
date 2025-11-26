@@ -96,8 +96,8 @@ def start(output_dir, session_id):
         yHat = model.evaluate(test_dataloader.dataset.tensors[0])
         r2_broadband = r2_score(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), 
                        yHat.cpu().numpy().reshape(-1,1))
-        r2_bands = calculate_band_r2(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1),
-                                              np.array(yHat.to('cpu')), bands[:-2], sr)
+        r2_bands = calculate_band_r2(np.squeeze(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1)),
+                                              np.squeeze(yHat.cpu().numpy().reshape(-1,1)), bands[:-2], sr)
         r2_bands.loc['broadband'] = r2_broadband
         r2_series_list.append(r2_bands.rename(f'channel_{chani}'))
     r2_results_full_model = pd.concat(r2_series_list, axis=1)
@@ -114,8 +114,8 @@ def start(output_dir, session_id):
         yHat = model.evaluate(test_dataloader.dataset.tensors[0])
         r2_broadband = r2_score(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), 
                        yHat.cpu().numpy().reshape(-1,1))
-        r2_bands = calculate_band_r2(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1),
-                                              np.array(yHat.to('cpu')), bands[:-2], sr)
+        r2_bands = calculate_band_r2(np.squeeze(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1)),
+                                              np.squeeze(yHat.cpu().numpy().reshape(-1,1)), bands[:-2], sr)
         r2_bands.loc['broadband'] = r2_broadband
         r2_series_list.append(r2_bands.rename(f'channel_{chani}'))
     r2_results_cortex = pd.concat(r2_series_list, axis=1)
@@ -132,8 +132,8 @@ def start(output_dir, session_id):
         yHat = model.evaluate(test_dataloader.dataset.tensors[0])
         r2_broadband = r2_score(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), 
                        yHat.cpu().numpy().reshape(-1,1))
-        r2_bands = calculate_band_r2(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1),
-                                              np.array(yHat.to('cpu')), bands[:-2], sr)
+        r2_bands = calculate_band_r2(np.squeeze(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1)),
+                                              np.squeeze(yHat.cpu().numpy().reshape(-1,1)), bands[:-2], sr)
         r2_bands.loc['broadband'] = r2_broadband
         r2_series_list.append(r2_bands.rename(f'channel_{chani}'))
     r2_results_cortex_no_visp = pd.concat(r2_series_list, axis=1)
@@ -150,8 +150,8 @@ def start(output_dir, session_id):
         yHat = model.evaluate(test_dataloader.dataset.tensors[0])
         r2_broadband = r2_score(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), 
                        yHat.cpu().numpy().reshape(-1,1))
-        r2_bands = calculate_band_r2(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1),
-                                              np.array(yHat.to('cpu')), bands[:-2], sr)
+        r2_bands = calculate_band_r2(np.squeeze(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1)),
+                                            np.squeeze(yHat.cpu().numpy().reshape(-1,1)), bands[:-2], sr)
         r2_bands.loc['broadband'] = r2_broadband
         r2_series_list.append(r2_bands.rename(f'channel_{chani}'))
     r2_results_hpc = pd.concat(r2_series_list, axis=1)
@@ -168,8 +168,8 @@ def start(output_dir, session_id):
         yHat = model.evaluate(test_dataloader.dataset.tensors[0])
         r2_broadband = r2_score(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1), 
                        yHat.cpu().numpy().reshape(-1,1))
-        r2_bands = calculate_band_r2(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1),
-                                              np.array(yHat.to('cpu')), bands[:-2], sr)
+        r2_bands = calculate_band_r2(np.squeeze(test_dataloader.dataset.tensors[1].cpu().numpy().reshape(-1,1)),
+                                              np.squeeze(yHat.cpu().numpy().reshape(-1,1)), bands[:-2], sr)
         r2_bands.loc['broadband'] = r2_broadband
         r2_series_list.append(r2_bands.rename(f'channel_{chani}'))
     r2_results_subcortical = pd.concat(r2_series_list, axis=1)
