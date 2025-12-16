@@ -11,7 +11,6 @@ from scipy.sparse import coo_matrix
 import warnings # Required for RuntimeWarning handling
 
 def get_peri_stim_data(output_dir, session_id):
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Check for unit info file
     if os.path.exists('./tables/units_info.csv'):
