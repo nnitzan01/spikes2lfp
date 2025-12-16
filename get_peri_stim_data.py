@@ -21,7 +21,7 @@ def get_peri_stim_data(output_dir, session_id):
         print("units_info.csv not found in the repo.")
         exit(1)
 
-    print("Obtaining session data and calculating PSTHs.", flush=True)
+    print("Obtaining session data", flush=True)
     
     # --- CONSTANTS ---
     seqlength = 750
@@ -73,6 +73,8 @@ def get_peri_stim_data(output_dir, session_id):
     stim_st = session_obj.stimulus_presentation.start_time
     stim_st = stim_st[((stim_st + time_win[0]) > timestamps[0]) & ((stim_st + time_win[1]) < timestamps[-1])]
     stim_st = stim_st.values
+    
+    print("Calculating PSTH", flush=True)
     
     # Calculate PSTHs
     psth = np.zeros((spikes_obj.spkMat.shape[1], len(t)))
