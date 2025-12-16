@@ -45,7 +45,7 @@ def get_peri_stim_data(output_dir, session_id):
             # The channel number is embedded in the 4th part (index 3)
             try:
                 # Assuming the channel number is the 0-based index
-                chan_part = parts[2].replace("chan", "")
+                chan_part = parts[4].replace("chan", "")
                 chan_numbers_0_indexed.append(int(chan_part))
             except (IndexError, ValueError):
                 continue
