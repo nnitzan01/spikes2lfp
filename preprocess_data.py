@@ -22,7 +22,7 @@ class pre_process_spikes:
         bin_count = int(np.ceil(dur/self.bin_size))
         bins = np.linspace(start,stop,num=bin_count+1)
         self.timestamps = np.linspace(start, stop, num=bin_count)
-        self.spkMat = np.zeros((bin_count, len(self.units)))
+        self.spkMat = np.zeros((bin_count, len(self.units)), dtype = np.float32)
         for i, unit in enumerate(self.units.index):
             self.spkMat[:, i] = np.histogram(self.spike_times[unit], bins=bins)[0].tolist()
 
