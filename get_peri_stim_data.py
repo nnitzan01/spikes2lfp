@@ -9,6 +9,7 @@ from preprocess_data import *
 from process_session import session as ps
 from scipy.sparse import coo_matrix
 import warnings # Required for RuntimeWarning handling
+import gc
 
 def get_peri_stim_data(output_dir, session_id):
     
@@ -83,13 +84,18 @@ def get_peri_stim_data(output_dir, session_id):
         
     # The duration of the snippet is len(t). Number of trials is len(stim_st).
     psth = psth / (len(stim_st) * bin_size) 
-
+    
+    print("PSTH computed successfully")
+    
     # --- 3. Initialize Global Rank and Mask Matrices ---
     n_neurons = spikes_obj.spkMat.shape[1]
     n_timepoints = len(timestamps)
     
+    del spikes_obj # Memory cleanup
+    gc.collect() 
+    
     # Rank and Mask are 3D: (Time x Neuron x Channel)
-    rank_matrix = np.zeros((n_timepoints, n_neurons , num_channels_storage))
+    rank_matrix = np.zeros((n_timepoints, n_neurons , num_channels_storage), dtype = np.int16)
     non_zero_att_mask_global = np.zeros((n_timepoints, n_neurons , num_channels_storage), dtype=bool)
     
     # --- 4. Rank Calculation Loop (Per Channel) ---
@@ -127,15 +133,15 @@ def get_peri_stim_data(output_dir, session_id):
             rank_matrix[ti, sorted_indices_ascending, ch_storage_idx] = ranks_descending
             
         del attrs, sparse_attr, attrs_normalized # Memory cleanup
-
+        gc.collect() 
     # Calculate Inverse Rank Matrix (Time x Neuron x Channel)
-    InverseRank_Matrix = 1/rank_matrix
+    InverseRank_Matrix = 1/rank_matrix.astype(np.float32)
     
     # --- 5. Jaccard Stability Analysis ---
     
     # Jaccard scores are 2D: (Time x Channel)
-    jaccard_scores_raw = np.zeros((n_timepoints - 1, num_channels_storage))
-    jaccard_scores_baseline_ref = np.zeros((n_timepoints - 1, num_channels_storage))
+    jaccard_scores_raw = np.zeros((n_timepoints - 1, num_channels_storage), dtype=np.float32)
+    jaccard_scores_baseline_ref = np.zeros((n_timepoints - 1, num_channels_storage), dtype=np.float32)
     
     print("Calculating Jaccard Scores...")
     
@@ -182,11 +188,11 @@ def get_peri_stim_data(output_dir, session_id):
     # --- 6. Final Snippet Extraction and Saving ---
     
     # Final snippets are 3D: (Trial x TimeBin x Channel)
-    jaccard_ref_snippets = np.zeros((len(stim_st), len(t), num_channels_storage))
-    jaccard_raw_snippets = np.zeros((len(stim_st), len(t), num_channels_storage)) 
+    jaccard_ref_snippets = np.zeros((len(stim_st), len(t), num_channels_storage), dtype=np.float32)
+    jaccard_raw_snippets = np.zeros((len(stim_st), len(t), num_channels_storage), dtype=np.float32)
     
     # Inverse Rank and Active Mask are 4D: (Trial x TimeBin x Neuron x Channel)
-    inverse_rank_snippets = np.zeros((len(stim_st), len(t), n_neurons, num_channels_storage))
+    inverse_rank_snippets = np.zeros((len(stim_st), len(t), n_neurons, num_channels_storage), dtype=np.float32)
     active_mask_snippet = np.zeros((len(stim_st), len(t), n_neurons, num_channels_storage), dtype=bool) 
     
     print("Extracting and saving final snippets...")
