@@ -70,14 +70,15 @@ def get_peri_stim_data(output_dir, session_id):
     timestamps = spikes_obj.timestamps
     
     # Filter stimulus times to ensure full snippet fits within session data
-    stim_st = session_obj.stimulus_presentation.start_time
-    stim_st = stim_st[((stim_st + time_win[0]) > timestamps[0]) & ((stim_st + time_win[1]) < timestamps[-1])]
+    stim_st = session_obj.stimulus_presentation.start_time[(session_obj.stimulus_presentation.active == True) & 
+                                                       (session_obj.stimulus_presentation.image_name != "omitted")]
+    # stim_st = stim_st[((stim_st + time_win[0]) > timestamps[0]) & ((stim_st + time_win[1]) < timestamps[-1])]
     stim_st = stim_st.values
     
     print("Calculating PSTH", flush=True)
     
-    # Calculate PSTHs
-    psth = np.zeros((spikes_obj.spkMat.shape[1], len(t)))
+    # Calculate PSTHs for active stimuli
+    psth = np.zeros((spikes_obj.spkMat.shape[1], len(t)), dytpe=np.float32)
     for i in range(len(stim_st)):
         # Calculate start index in the full spike matrix (stim_st[i] + time_win[0])
         start = np.argmin(np.abs(timestamps - (stim_st[i] + time_win[0])))
@@ -187,6 +188,8 @@ def get_peri_stim_data(output_dir, session_id):
             union_baseline = len(S_t.union(S_Baseline))
             jaccard_scores_baseline_ref[ti,ch_storage_idx] = intersection_baseline / union_baseline if union_baseline > 0 else 0
             
+    del rank_matrix
+    
     # --- 6. Final Snippet Extraction and Saving ---
     
     # Final snippets are 3D: (Trial x TimeBin x Channel)
