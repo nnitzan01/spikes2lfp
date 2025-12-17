@@ -78,7 +78,7 @@ def get_peri_stim_data(output_dir, session_id):
     print("Calculating PSTH", flush=True)
     
     # Calculate PSTHs for active stimuli
-    psth = np.zeros((spikes_obj.spkMat.shape[1], len(t)), dytpe=np.float32)
+    psth = np.zeros((spikes_obj.spkMat.shape[1], len(t)), dtype=np.float32)
     for i in range(len(stim_st)):
         # Calculate start index in the full spike matrix (stim_st[i] + time_win[0])
         start = np.argmin(np.abs(timestamps - (stim_st[i] + time_win[0])))
