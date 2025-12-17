@@ -18,6 +18,10 @@ def calculate_ipd(output_dir, session_id):
         print("units_info.csv not found in the repo.")
         sys.exit(1)
     
+    bin_size  = 0.004
+    time_win = [-.25, .5]
+    t = np.arange(time_win[0], time_win[1], bin_size)
+    
     # Path setup
     variables_dir = Path(output_dir / 'spikes2lfp' / 'variables' / str(session_id))
     
@@ -27,9 +31,6 @@ def calculate_ipd(output_dir, session_id):
     session_obj = ps(session_id, df, output_dir)
     spikes_obj = pre_process_spikes(session_obj.units, session_obj.spike_times)
     locs = spikes_obj.units['structure_acronym'].values
-    
-    # Load metadata and PSTH
-    t    = np.load(variables_dir / 't.npy')
     
     # Load the Rank Snippets (Trial x Time x Neuron x Channel) - uint16
     rank_snippets = np.load(variables_dir / 'rank_snippets.npy')
