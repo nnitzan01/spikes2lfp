@@ -61,8 +61,7 @@ def get_peri_stim_data(output_dir, session_id):
     session_obj = ps(session_id, df, output_dir)
     spikes_obj = pre_process_spikes(session_obj.units, session_obj.spike_times, bin_size=bin_size, sigma=3)
     spikes_obj.getSpkMat(session_obj.active_times[0], session_obj.passive_times[1])
-    # Note: truncate might be needed depending on your model training setup
-    # spikes_obj.truncate(750) 
+    spikes_obj.truncate(750) 
     
     t = np.arange(time_win[0], time_win[1], bin_size)
     n_bins_snippet = len(t)
@@ -81,6 +80,7 @@ def get_peri_stim_data(output_dir, session_id):
     print(f"Valid trials for analysis: {n_trials}")
 
     # Calculate PSTH
+    print("Calculating PSTH")
     n_neurons = spikes_obj.spkMat.shape[1]
     psth = np.zeros((n_neurons, n_bins_snippet), dtype=np.float32)
     for i in range(n_trials):
@@ -88,7 +88,7 @@ def get_peri_stim_data(output_dir, session_id):
         if start_idx + n_bins_snippet <= n_timepoints_total:
             psth += spikes_obj.spkMat[start_idx : start_idx + n_bins_snippet, :].T
     psth /= (n_trials * bin_size)
-    
+    print("PSTH successfully computed")
     # Store trial indices for reuse in the channel loop
     trial_start_indices = [np.searchsorted(timestamps, s + time_win[0]) for s in stim_st]
     
