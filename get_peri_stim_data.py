@@ -113,7 +113,7 @@ def get_peri_stim_data(output_dir, session_id):
         
         # Load Sparse Attribution
         sparse_file = output_dir_attrs / f'attribution_scores_entire_session_chan{ch_val}_band0.npz'
-        sparse_attr = np.load(sparse_file)
+        sparse_attr = np.load(sparse_file, allow_pickle=True)
         attrs = coo_matrix((sparse_attr['data'], (sparse_attr['row'], sparse_attr['col'])), 
                           shape=sparse_attr['shape']).toarray().astype(np.float32)
         
