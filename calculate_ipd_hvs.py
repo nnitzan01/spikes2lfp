@@ -25,7 +25,7 @@ def calculate_ipd_hvs(output_dir, session_id):
     print(f"Obtaining session data for Session {session_id}", flush=True)
     
     bin_size  = 0.004
-    time_win = [-.25, .5]
+    time_win = [-1, 1]
     t = np.arange(time_win[0], time_win[1], bin_size)
     
     # Path setup
