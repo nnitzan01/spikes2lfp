@@ -56,6 +56,7 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
     valid_trials_mask = ((stim_st + time_win[0]) >= timestamps_full[0]) & ((stim_st + time_win[1]) < timestamps_full[-1])
     stim_st = stim_st[valid_trials_mask]
     n_trials = len(stim_st)
+    print(f"Found {n_trials} valid stimulus trials for attribution snippet extraction.", flush=True)
     n_neurons = spikes_obj.spkMat.shape[1]
 
     # Pre-calculate start indices for all trials
@@ -66,7 +67,8 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
 
     # --- 3. Initialize Averaged Container ---
     # Final matrix to store the mean across trials
-    avg_attr_matrix = np.zeros((n_bins_snippet, n_neurons, num_channels), dtype=np.float32)
+    avg_attr_matrix    = np.zeros((n_bins_snippet, n_neurons, num_channels), dtype=np.float32)
+    avg_potency_matrix = np.zeros((n_bins_snippet, n_neurons, num_channels), dtype=np.float32)
 
     # --- 4. Channel Loop ---
     print(f"Processing {num_channels} channels...", flush=True)
@@ -82,8 +84,8 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
         
         # Temporary container for snippets of this channel across all trials
         # Shape: (Trials, Bins, Neurons)
-        temp_snippets = np.full((n_trials, n_bins_snippet, n_neurons), np.nan, dtype=np.float32)
-
+        temp_potency_snippets = np.full((n_trials, n_bins_snippet, n_neurons), np.nan, dtype=np.float32)
+        temp_attr_snippets    = np.zeros((n_trials, n_bins_snippet, n_neurons), dtype=np.float32)
         # Iterate through trials and extract snippets
         for i, s_idx in enumerate(trial_start_indices):
             e_idx = s_idx + n_bins_snippet
@@ -93,11 +95,13 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
                 mask = np.abs(snippet) > EPSILON
                 
                 # Fill only active bins with values, others remain NaN
-                temp_snippets[i, mask] = snippet[mask]
-
+                temp_potency_snippets[i, mask] = snippet[mask]
+                temp_attr_snippets[i,:,:]      = snippet
+                
         # Calculate average for this channel across trials, ignoring NaNs
         # Results in (Bins, Neurons)
-        avg_attr_matrix[:, :, ch_idx] = np.nanmean(temp_snippets, axis=0)
+        avg_potency_matrix[:, :, ch_idx] = np.nanmean(temp_potency_snippets, axis=0)
+        avg_attr_matrix[:, :, ch_idx]    = np.nanmean(temp_attr_snippets, axis=0)
 
         del attrs, sparse_attr, temp_snippets
         gc.collect() 
@@ -105,8 +109,9 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
     # --- 5. Saving ---
     # This file stores the potency (average attribution per spike)
     np.save(variables_dir / 'mean_attribution_snippet.npy', avg_attr_matrix)
+    np.save(variables_dir / 'mean_potency_snippet.npy', avg_potency_matrix)
     
-    print(f"Successfully saved averaged attribution matrix (potency per spike) to: {variables_dir}")
+    print(f"Successfully saved averaged attribution and potency matrices to: {variables_dir}")
 
 def main(args):
     gc.enable()
