@@ -103,7 +103,7 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
         avg_potency_matrix[:, :, ch_idx] = np.nanmean(temp_potency_snippets, axis=0)
         avg_attr_matrix[:, :, ch_idx]    = np.nanmean(temp_attr_snippets, axis=0)
 
-        del attrs, sparse_attr, temp_snippets
+        del attrs, sparse_attr, temp_potency_snippets, temp_attr_snippets
         gc.collect() 
 
     # --- 5. Saving ---
