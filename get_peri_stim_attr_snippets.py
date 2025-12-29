@@ -30,7 +30,7 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
     
     output_dir_attrs = Path(output_dir / 'spikes2lfp' / 'attrs_entire_session' / str(session_id))
     variables_dir = Path(output_dir / 'spikes2lfp' / 'variables' / str(session_id))
-    os.makedirs(variables_dir, exist_ok=True)
+    # os.makedirs(variables_dir, exist_ok=True)
 
     # --- 1. Determine Channels ---
     files = os.listdir(output_dir_attrs)
@@ -119,8 +119,12 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
 def main(args):
     gc.enable()
     dir_path = Path(args.dir)
+    if not dir_path.exists():
+        print(f"Directory {dir_path} does not exist.")
+        sys.exit(1)
+    
     session_id = int(dir_path.name)
-    # Adjust root_dir based on your specific path hierarchy
+    # Reconstructing root based on common Allen SDK dir structure
     root_dir = dir_path.parent.parent.parent
     get_peri_stim_attr_snippets(root_dir, session_id)
 
