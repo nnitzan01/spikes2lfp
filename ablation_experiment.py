@@ -52,7 +52,8 @@ def start(output_dir, session_id):
     chani = 5  # first channel
     
     #load the saved mean attributions of the full model 
-    path2mean_attr = Path(output_dir / 'spikes2lfp' / 'attrs' / str(session_id) / 'attribution_scores_ipi_mean.npy')
+    path2mean_attr = Path(output_dir / 'spikes2lfp' / 'attrs' / str(session_id) / 'attribution_scores_mean.npy')
+    # path2mean_attr = Path(output_dir / 'spikes2lfp' / 'attrs' / str(session_id) / 'attribution_scores_ipi_mean.npy')
     
     mean_attr   = np.abs(np.load(path2mean_attr))
     firing_rate = session_obj.units['firing_rate'] 
