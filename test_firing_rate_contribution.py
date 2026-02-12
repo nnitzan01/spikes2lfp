@@ -111,16 +111,20 @@ def test_firing_rate_contribution(output_dir, session_id):
     # Get area information for these neurons
     neuron_areas = []
     neuron_unit_ids = []
+    
+    # Get session-specific dataframe by filtering df for this session's units
+    session_units_df = df[df.unit_id.isin(session_obj.units)]
+    
     for neuron_idx in top_neuron_indices:
         unit_id = session_obj.units.iloc[neuron_idx]
         neuron_unit_ids.append(unit_id)
         
-        # Find area for this unit_id with error handling
-        unit_matches = df[df.unit_id == unit_id]['structure_acronym']
-        if len(unit_matches) == 0:
-            print(f"  Warning: Unit {unit_id} not found in units_info.csv, skipping...")
+        # Find area for this unit_id from session-filtered dataframe
+        unit_row = session_units_df[session_units_df.unit_id == unit_id]
+        if len(unit_row) == 0:
+            print(f"  Warning: Unit {unit_id} not found in session data, skipping...")
             continue
-        area = unit_matches.iloc[0]
+        area = unit_row['structure_acronym'].iloc[0]
         neuron_areas.append(area)
         print(f"  Neuron {neuron_idx} (unit_id {unit_id}) is in area: {area}")
     
