@@ -225,7 +225,7 @@ def test_firing_rate_contribution(output_dir, session_id):
                 del X_attr_modified
             
             attrs_modified = np.array(attrs_modified)
-            mean_abs_attr_modified = np.mean(np.abs(attrs_modified[:, :, neuron_idx]))
+            mean_abs_attr_modified = np.mean(np.abs(attrs_modified[:, neuron_idx]))
             
             neuron_downsampled_attrs.append(mean_abs_attr_modified)
             
