@@ -24,16 +24,9 @@ def test_firing_rate_contribution(output_dir, session_id):
         Output directory path
     session_id : int
         Session identifier
-    n_top_neurons : int, default=10
-        Number of top-attribution neurons to test
-    n_iterations : int, default=50
-        Number of downsampling iterations per neuron
-    target_channel : int, default=5
-        Target channel for analysis
-    
     Returns:
-    --------
-    dict : Results containing original attributions, downsampled attributions, and area averages
+    ----- ---
+        None (saves results to a .npy file in the output directory)
     """
     
     n_top_neurons  = 10 
@@ -119,9 +112,15 @@ def test_firing_rate_contribution(output_dir, session_id):
     neuron_areas = []
     neuron_unit_ids = []
     for neuron_idx in top_neuron_indices:
-        unit_id = session_obj.units[neuron_idx]
+        unit_id = session_obj.units.iloc[neuron_idx]
         neuron_unit_ids.append(unit_id)
-        area = df[df.unit_id == unit_id]['structure_acronym'].iloc[0]
+        
+        # Find area for this unit_id with error handling
+        unit_matches = df[df.unit_id == unit_id]['structure_acronym']
+        if len(unit_matches) == 0:
+            print(f"  Warning: Unit {unit_id} not found in units_info.csv, skipping...")
+            continue
+        area = unit_matches.iloc[0]
         neuron_areas.append(area)
         print(f"  Neuron {neuron_idx} (unit_id {unit_id}) is in area: {area}")
     
@@ -139,9 +138,10 @@ def test_firing_rate_contribution(output_dir, session_id):
     for area in unique_areas:
         area_unit_ids = df[df['structure_acronym'] == area]['unit_id'].values
         area_neuron_indices = []
+        units_list = session_obj.units.tolist() if hasattr(session_obj.units, 'tolist') else list(session_obj.units)
         for unit_id in area_unit_ids:
             try:
-                idx = session_obj.units.index(unit_id)
+                idx = units_list.index(unit_id)
                 area_neuron_indices.append(idx)
             except ValueError:
                 continue  # Unit not in this session
@@ -214,6 +214,9 @@ def test_firing_rate_contribution(output_dir, session_id):
             
             # Recalculate attribution with modified spike matrix
             X_attr_modified = torch.tensor(modified_spike_mat[:int(attr_dur/bin_size),:]).float().to(device)
+            # Verify shape consistency - should match original X_attr shape
+            assert X_attr_modified.shape == X_attr.reshape(-1, X_attr.shape[-1]).shape, \
+                f"Shape mismatch: original {X_attr.reshape(-1, X_attr.shape[-1]).shape}, modified {X_attr_modified.shape}"
             num_trials_mod = int(int(attr_dur/bin_size)/seqlength)
             X_attr_modified = X_attr_modified.reshape(num_trials_mod, seqlength, X_attr_modified.shape[1])
             
@@ -224,7 +227,7 @@ def test_firing_rate_contribution(output_dir, session_id):
                 torch.cuda.ipc_collect()
             
             attrs_modified = np.array(attrs_modified)
-            mean_abs_attr_modified = np.mean(np.abs(attrs_modified[:, neuron_idx]))
+            mean_abs_attr_modified = np.mean(np.abs(attrs_modified[:, :, neuron_idx]))
             
             neuron_downsampled_attrs.append(mean_abs_attr_modified)
             
@@ -242,9 +245,10 @@ def test_firing_rate_contribution(output_dir, session_id):
     for area in unique_areas:
         area_unit_ids = df[df['structure_acronym'] == area]['unit_id'].values
         area_neuron_indices = []
+        units_list = session_obj.units.tolist() if hasattr(session_obj.units, 'tolist') else list(session_obj.units)
         for unit_id in area_unit_ids:
             try:
-                idx = session_obj.units.index(unit_id)
+                idx = units_list.index(unit_id)
                 area_neuron_indices.append(idx)
             except ValueError:
                 continue
