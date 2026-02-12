@@ -112,19 +112,12 @@ def test_firing_rate_contribution(output_dir, session_id):
     neuron_areas = []
     neuron_unit_ids = []
     
-    # Get session-specific dataframe by filtering df for this session's units
-    session_units_df = df[df.unit_id.isin(session_obj.units)]
-    
     for neuron_idx in top_neuron_indices:
         unit_id = session_obj.units.iloc[neuron_idx]
         neuron_unit_ids.append(unit_id)
         
-        # Find area for this unit_id from session-filtered dataframe
-        unit_row = session_units_df[session_units_df.unit_id == unit_id]
-        if len(unit_row) == 0:
-            print(f"  Warning: Unit {unit_id} not found in session data, skipping...")
-            continue
-        area = unit_row['structure_acronym'].iloc[0]
+        # Get area information directly from session object
+        area = session_obj.units['structure_acronym'].iloc[neuron_idx]
         neuron_areas.append(area)
         print(f"  Neuron {neuron_idx} (unit_id {unit_id}) is in area: {area}")
     
@@ -140,15 +133,11 @@ def test_firing_rate_contribution(output_dir, session_id):
     unique_areas = np.unique(neuron_areas)
     
     for area in unique_areas:
-        area_unit_ids = df[df['structure_acronym'] == area]['unit_id'].values
+        # Find all neurons in this area from session data
         area_neuron_indices = []
-        units_list = session_obj.units.tolist() if hasattr(session_obj.units, 'tolist') else list(session_obj.units)
-        for unit_id in area_unit_ids:
-            try:
-                idx = units_list.index(unit_id)
+        for idx in range(len(session_obj.units)):
+            if session_obj.units['structure_acronym'].iloc[idx] == area:
                 area_neuron_indices.append(idx)
-            except ValueError:
-                continue  # Unit not in this session
         
         if area_neuron_indices:
             area_avg_firing_rates[area] = np.mean(firing_rates[area_neuron_indices])
@@ -247,15 +236,11 @@ def test_firing_rate_contribution(output_dir, session_id):
     area_population_attrs = {}
     
     for area in unique_areas:
-        area_unit_ids = df[df['structure_acronym'] == area]['unit_id'].values
+        # Find all neurons in this area from session data  
         area_neuron_indices = []
-        units_list = session_obj.units.tolist() if hasattr(session_obj.units, 'tolist') else list(session_obj.units)
-        for unit_id in area_unit_ids:
-            try:
-                idx = units_list.index(unit_id)
+        for idx in range(len(session_obj.units)):
+            if session_obj.units['structure_acronym'].iloc[idx] == area:
                 area_neuron_indices.append(idx)
-            except ValueError:
-                continue
         
         if area_neuron_indices:
             area_attrs = mean_abs_attrs[area_neuron_indices]
