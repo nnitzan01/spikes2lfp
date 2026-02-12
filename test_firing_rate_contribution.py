@@ -113,7 +113,8 @@ def test_firing_rate_contribution(output_dir, session_id):
     neuron_unit_ids = []
     
     for neuron_idx in top_neuron_indices:
-        unit_id = session_obj.units.iloc[neuron_idx]
+        # Get the actual unit_id from the index, not the entire row
+        unit_id = session_obj.units.index[neuron_idx]
         neuron_unit_ids.append(unit_id)
         
         # Get area information directly from session object
@@ -213,11 +214,15 @@ def test_firing_rate_contribution(output_dir, session_id):
             num_trials_mod = int(int(attr_dur/bin_size)/seqlength)
             X_attr_modified = X_attr_modified.reshape(num_trials_mod, seqlength, X_attr_modified.shape[1])
             
-            # Calculate attribution
-            attrs_modified = ig.run(X_attr_modified, baselines=0, n_batch=40, n_steps=50).cpu()
+            # Calculate attribution with reduced batch size for memory efficiency
+            torch.cuda.empty_cache()  # Clear cache before attribution
+            attrs_modified = ig.run(X_attr_modified, baselines=0, n_batch=10, n_steps=25).cpu()  # Reduced batch and steps
             if device == 'cuda':
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
+                # Move to CPU immediately to free GPU memory
+                X_attr_modified = X_attr_modified.cpu()
+                del X_attr_modified
             
             attrs_modified = np.array(attrs_modified)
             mean_abs_attr_modified = np.mean(np.abs(attrs_modified[:, :, neuron_idx]))
