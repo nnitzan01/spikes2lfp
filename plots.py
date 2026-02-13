@@ -10,7 +10,19 @@ from scipy.stats import zscore
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
+from matplotlib.backends.backend_pdf import PdfPages
+
+# Set PDF backend to preserve text
+plt.rcParams.update({
+    'pdf.fonttype': 42,  # Output Type 42 (TrueType) fonts instead of Type 3
+    'ps.fonttype': 42,   # Also for PostScript
+    'font.family': 'sans-serif',
+    'font.sans-serif': ['Arial', 'DejaVu Sans', 'Liberation Sans'],
+    'font.size': 10,
+    'text.usetex': False  # Don't use LaTeX rendering
+})
+
+def save_plot(fig, output_dir, session_id, plot_name = 'default_name.pdf'):
     """
     Save the plot to the output directory.
 
@@ -22,13 +34,15 @@ def save_plot(fig, output_dir, session_id, plot_name = 'default_name.png'):
     None
 
     file structure:
-    output_dir/plot.png
+    output_dir/plot.pdf
     """
     # session_path = Path(output_dir / "plots" / str(session_id))
     # file_path = Path(session_path / plot_name)
     file_path = Path(output_dir / plot_name)
     # os.makedirs(output_dir, exist_ok=True)
-    fig.savefig(file_path, format = 'pdf', dpi=300, bbox_inches='tight')
+    # fig.savefig(file_path, format = 'pdf', dpi=300, bbox_inches='tight')
+    fig.savefig(file_path, 
+            format='pdf', dpi=300, bbox_inches='tight')
 
 def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', show_plot=True, 
             save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
@@ -121,6 +135,8 @@ def plot_lfp_prediction(y, yHat, chan2use, bands, start_time = None, end_time = 
         plt.close(fig)
     if save_fig:
         save_plot(fig, output_dir, session_id, fig_name)
+    
+    return fig
 
 def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True, 
                         save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
