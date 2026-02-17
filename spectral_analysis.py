@@ -5,7 +5,8 @@ from sklearn.metrics import r2_score
 from typing import Union, List, Tuple, Dict
 from scipy.fft import fft, ifft
 import matplotlib.pyplot as plt
-
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 def bandpass_filter(data: np.ndarray, band: tuple, fs: float, order: int = 3) -> np.ndarray:
     """
@@ -84,140 +85,305 @@ def calculate_band_r2(
     return pd.Series(results)
 
 
-def wavelet_power(data, timestamps, freqs=[0.5, 220], Fs=1250, num_frex=200, range_cycles=[4, 12], normalization='none', baseline=None, scaling='lin', mkplt=1):
-    """
-    Computes the wavelet spectrogram and ITPC of a timeseries, translated from MATLAB.
-
-    Args:
-        data (np.ndarray): Input data, should be 2D (time x trials).
-        timestamps (np.ndarray): Time stamps of the data in seconds. Must have same length as time dimension of data.
-        freqs (list, optional): Min and max frequency to use. Defaults to [0.5, 220].
-        Fs (int, optional): Sampling frequency. Defaults to 1250.
-        num_frex (int, optional): Number of frequencies to use. Defaults to 200.
-        range_cycles (list, optional): Number of cycles for wavelet for min and max frequency. Defaults to [4, 12].
-        normalization (str, optional): Normalization method: 'z-score', 'decibel', 'maxpower', or 'none'. Defaults to 'none'.
-        baseline (list, optional): Baseline for normalization in seconds. Defaults to the full time period.
-        scaling (str, optional): Frequency scaling, 'lin' or 'log'. Defaults to 'lin'.
-        mkplt (int, optional): Plotting option: 0 for none; 1 for tf; 2 for itpc; 3 for both. Defaults to 1.
-
-    Returns:
-        tuple: (tf, tf_all, itpc, frex)
-            tf (np.ndarray): Raw power data (frex x time).
-            tf_all (np.ndarray): Raw power data for all trials (frex x time x trials).
-            itpc (np.ndarray): Inter-trial phase clustering (frex x time).
-            frex (np.ndarray): Frequencies vector.
-    """
-    if mkplt not in [0, 1, 2, 3]:
-        raise ValueError('variable mkplt must be 0, 1, 2 or 3')
-
-    # Ensure data is 2D (time x trials)
-    data = np.atleast_2d(data)
-    n_time, n_trials = data.shape
+def _process_frequency(fi, frex, s, wavtime, half_wave, n_conv, dataX, data_shape, num_trials, return_tf_all=True):
+    """Helper function for parallel frequency processing"""
+    # Create wavelet
+    wavelet = np.exp(2j * np.pi * frex[fi] * wavtime) * np.exp(-wavtime**2 / (2 * s[fi]**2))
+    waveletX = fft(wavelet, n_conv)
+    waveletX = waveletX / np.max(waveletX)
     
-    time = np.array(timestamps)
-    if len(time) != n_time:
-        raise ValueError(f"The length of timestamps ({len(time)}) must be equal to the number of time points in data ({n_time}).")
+    # Convolution
+    as_signal = ifft(waveletX * dataX)
+    
+    # Flatten to 1D for proper slicing
+    as_signal = as_signal.flatten()
+    
+    # Proper trimming to match MATLAB behavior
+    # In MATLAB: as = as(half_wave+1:end-half_wave);
+    as_signal = as_signal[half_wave:len(as_signal)-half_wave]
+    
+    # The result should have length = data_shape[0] * num_trials
+    expected_length = data_shape[0] * num_trials
+    if len(as_signal) != expected_length:
+        # Trim or pad to match expected length
+        if len(as_signal) > expected_length:
+            as_signal = as_signal[:expected_length]
+        else:
+            # This shouldn't happen if the math is right, but just in case
+            raise ValueError(f"Convolution result too short: {len(as_signal)} vs expected {expected_length}")
+    
+    # Reshape back to time × trials
+    as_signal = as_signal.reshape(data_shape[0], num_trials)
+    
+    # Power
+    pow_signal = np.abs(as_signal)**2
+    tf_freq = np.mean(pow_signal, axis=1)
+    
+    # ITPC
+    itpc_freq = np.abs(np.mean(np.exp(1j * np.angle(as_signal)), axis=1))
+    
+    # Return pow_signal only if needed
+    if return_tf_all:
+        return fi, tf_freq, pow_signal, itpc_freq
+    else:
+        return fi, tf_freq, None, itpc_freq
 
-    # Frequency vector
-    min_freq, max_freq = freqs[0], freqs[1]
-    if scaling == 'log':
+def wavelet_power(data, timestamps, freqs=(0.5, 220), fs=1250, num_frex=200,
+                  range_cycles=(4, 12), normalization='none',
+                  baseline=None, scaling='lin', mkplt=True, n_jobs=None,
+                  dtype='float32', return_tf_all=True):
+    """
+    Computes wavelet spectrogram and ITPC for single- or multi-channel data.
+    
+    Parameters:
+    -----------
+    data : array_like
+        Time × trials × channels (channels optional)
+    timestamps : array_like
+        Time vector
+    freqs : tuple, optional
+        Frequency range (default: (0.5, 220))
+    fs : float, optional
+        Sampling frequency (default: 1250)
+    num_frex : int, optional
+        Number of frequencies (default: 200)
+    range_cycles : tuple, optional
+        Range of cycles (default: (4, 12))
+    normalization : str, optional
+        Normalization method: 'none', 'z-score', 'decibel', 'maxpower' (default: 'none')
+    baseline : tuple, optional
+        Baseline window (default: [min(timestamps), max(timestamps)])
+    scaling : str, optional
+        Frequency scaling: 'lin' or 'log' (default: 'lin')
+    mkplt : bool, optional
+        Make plot (default: True)
+    n_jobs : int, optional
+        Number of parallel jobs. -1 uses all cores, None uses single core (default: None)
+    dtype : str, optional
+        Data type for arrays: 'float32' (memory efficient) or 'float64' (default: 'float32')
+    return_tf_all : bool, optional
+        Whether to return tf_all array. Set False to save memory (default: True)
+    
+    Returns:
+    --------
+    tf : ndarray
+        freq × time × channels
+    tf_all : ndarray or None
+        freq × time × trials × channels (None if return_tf_all=False)
+    itpc : ndarray
+        freq × time × channels
+    frex : ndarray
+        frequencies used
+    """
+    
+    # Handle default baseline
+    if baseline is None:
+        baseline = (np.min(timestamps), np.max(timestamps))
+    
+    # Detect channels - reshape if 2D
+    if data.ndim == 2:
+        data = data.reshape(data.shape[0], data.shape[1], 1)
+    
+    num_ch = data.shape[2]
+    num_trials = data.shape[1]
+    
+    # Frequency parameters
+    min_freq = freqs[0]
+    max_freq = freqs[1]
+    
+    if scaling.lower() == 'log':
         frex = np.logspace(np.log10(min_freq), np.log10(max_freq), num_frex)
     else:
         frex = np.linspace(min_freq, max_freq, num_frex)
-
+    
     # Wavelet parameters
     s = np.logspace(np.log10(range_cycles[0]), np.log10(range_cycles[-1]), num_frex) / (2 * np.pi * frex)
-    step = 1 / round(Fs)
-    wavtime = np.arange(-2, 2 + step, step)
+    wavtime = np.arange(-2, 2 + 1/np.round(fs), 1/np.round(fs))
     half_wave = (len(wavtime) - 1) // 2
-
+    
     # FFT parameters
-    nWave = len(wavtime)
-    nData = n_time * n_trials
-    nConv = nWave + nData - 1
-
-    # Output arrays
-    tf = np.zeros((num_frex, n_time))
-    tf_all = np.zeros((num_frex, n_time, n_trials))
-    itpc = np.zeros((num_frex, n_time))
-
-    # FFT of all data concatenated
-    alldata = data.flatten(order='F')  # MATLAB column-major
-    dataX = fft(alldata, nConv)
-
-    for fi, f in enumerate(frex):
-        # Create wavelet
-        wavelet = np.exp(2 * 1j * np.pi * f * wavtime) * np.exp(-wavtime ** 2 / (2 * s[fi] ** 2))
-        waveletX = fft(wavelet, nConv)
-        # Normalize wavelet to have a peak amplitude of 1 in the frequency domain.
-        waveletX = waveletX / np.max(np.abs(waveletX))
-        
-        # Convolution
-        asig = ifft(waveletX * dataX)
-        asig = asig[half_wave:-half_wave]
-        asig = asig.reshape((n_time, n_trials), order='F')
-                
-        # Power
-        tf[fi, :] = np.mean(np.abs(asig) ** 2, axis=1)
-        tf_all[fi, :, :] = np.abs(asig) ** 2
-        
-        # ITPC
-        itpc[fi, :] = np.abs(np.mean(np.exp(1j * np.angle(asig)), axis=1))
-
-    # Normalization
-    if baseline is None:
-        baseline = [time[0], time[-1]]
-        
-    baseidx = [np.argmin(np.abs(time - baseline[0])), np.argmin(np.abs(time - baseline[1]))]
-    baseline_power = tf[:, baseidx[0]:baseidx[1]]
+    n_wave = len(wavtime)
+    n_data = data.shape[0] * num_trials
+    n_conv = n_wave + n_data - 1
     
-    mean_baseline_power = np.mean(baseline_power, axis=1, keepdims=True)
-    std_baseline_power = np.std(baseline_power, axis=1, keepdims=True)
+    # Set numpy dtype
+    np_dtype = np.float32 if dtype == 'float32' else np.float64
     
-    # Add a small epsilon to avoid division by zero or log of zero
-    tf_db = 10 * np.log10(tf / (mean_baseline_power + 1e-15))
-    norm_tf = (tf - mean_baseline_power) / (std_baseline_power + 1e-15)
-    maxP = np.max(tf)
-
-    # Plotting
-    if mkplt == 1 or mkplt == 3:
-        plt.figure()
-        if normalization == 'none':
-            plot_data, cbar_label = tf, 'Power [uV^2]'
-        elif normalization == 'z-score':
-            plot_data, cbar_label = norm_tf, 'Power [z-score]'
-        elif normalization == 'decibel':
-            plot_data, cbar_label = tf_db, 'Power [dB]'
-        elif normalization == 'maxpower':
-            plot_data, cbar_label = tf / maxP, 'Power [a.u.]'
+    # Initialize outputs with channel dimension
+    tf = np.zeros((num_frex, data.shape[0], num_ch), dtype=np_dtype)
+    tf_all = np.zeros((num_frex, data.shape[0], num_trials, num_ch), dtype=np_dtype) if return_tf_all else None
+    itpc = np.zeros((num_frex, data.shape[0], num_ch), dtype=np_dtype)
+    
+    # Handle parallel processing
+    if n_jobs is None:
+        use_parallel = False
+    else:
+        use_parallel = True
+        if n_jobs == -1:
+            n_jobs = cpu_count()
+    
+    # Multichannel loop
+    for ch in range(num_ch):
+        # Concatenate trials for this channel
+        alldata = data[:, :, ch].reshape(1, -1)
+        dataX = fft(alldata, n_conv)
+        
+        if use_parallel:
+            # Parallel processing
+            process_func = partial(_process_frequency, 
+                                 frex=frex, s=s, wavtime=wavtime, half_wave=half_wave,
+                                 n_conv=n_conv, dataX=dataX, data_shape=data.shape, 
+                                 num_trials=num_trials, return_tf_all=return_tf_all)
+            
+            with Pool(n_jobs) as pool:
+                results = pool.map(process_func, range(num_frex))
+            
+            # Collect results
+            for fi, tf_freq, pow_signal, itpc_freq in results:
+                tf[fi, :, ch] = tf_freq
+                if return_tf_all and pow_signal is not None:
+                    tf_all[fi, :, :, ch] = pow_signal
+                itpc[fi, :, ch] = itpc_freq
         else:
-            raise ValueError('Please choose a valid normalization method')
-
-        plt.pcolormesh(time, frex, plot_data, shading='auto', cmap='jet')
-        plt.ylabel('Frequency [Hz]')
-        plt.xlabel('Time [s]')
-        c = plt.colorbar()
-        c.set_label(cbar_label)
-
-        if scaling == 'log':
-            plt.yscale('log')
-        plt.ylim([min_freq, max_freq])
-        plt.title('Time-Frequency Power')
-        plt.tight_layout()
-        plt.show()
+            # Sequential processing (original)
+            for fi in range(num_frex):
+                # Create wavelet
+                wavelet = np.exp(2j * np.pi * frex[fi] * wavtime) * np.exp(-wavtime**2 / (2 * s[fi]**2))
+                waveletX = fft(wavelet, n_conv)
+                waveletX = waveletX / np.max(waveletX)
+                
+                # Convolution
+                as_signal = ifft(waveletX * dataX)
+                
+                # Flatten to 1D for proper slicing
+                as_signal = as_signal.flatten()
+                
+                # Proper trimming to match MATLAB behavior
+                as_signal = as_signal[half_wave:len(as_signal)-half_wave]
+                
+                # Ensure correct length
+                expected_length = data.shape[0] * num_trials
+                if len(as_signal) > expected_length:
+                    as_signal = as_signal[:expected_length]
+                
+                # Reshape back to time × trials
+                as_signal = as_signal.reshape(data.shape[0], num_trials)
+                
+                # Power
+                pow_signal = np.abs(as_signal)**2
+                tf[fi, :, ch] = np.mean(pow_signal, axis=1)
+                if return_tf_all:
+                    tf_all[fi, :, :, ch] = pow_signal
+                
+                # ITPC
+                itpc[fi, :, ch] = np.abs(np.mean(np.exp(1j * np.angle(as_signal)), axis=1))
+    
+    # Normalization (applied channel-wise)
+    baseline_window = [baseline[0], baseline[1]]
+    baseidx = [np.argmin(np.abs(timestamps - baseline_window[0])), 
+               np.argmin(np.abs(timestamps - baseline_window[1]))]
+    
+    tf_db = np.zeros_like(tf)
+    norm_tf = np.zeros_like(tf)
+    
+    for ch in range(num_ch):
+        basepow = tf[:, baseidx[0]:baseidx[1]+1, ch]
         
-    if mkplt == 2 or mkplt == 3:
-        plt.figure()
-        plt.pcolormesh(time, frex, itpc, shading='auto', cmap='jet')
-        plt.ylabel('Frequency [Hz]')
-        plt.xlabel('Time [s]')
-        c = plt.colorbar()
-        c.set_label('ITPC')
-        if scaling == 'log':
-            plt.yscale('log')
-        plt.ylim([min_freq, max_freq])
-        plt.title('ITPC')
+        tf_db[:, :, ch] = 10 * np.log10(tf[:, :, ch] / np.mean(basepow, axis=1, keepdims=True))
+        
+        mu = np.mean(basepow, axis=1, keepdims=True)
+        sd = np.std(basepow, axis=1, keepdims=True)
+        norm_tf[:, :, ch] = (tf[:, :, ch] - mu) / sd
+    
+    max_p = np.max(tf)
+    
+    # Plotting
+    if mkplt:
+        ch = 0  # default channel for plotting
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        if normalization == 'none':
+            im = ax.contourf(timestamps, frex, tf[:, :, ch], levels=50, cmap='jet')
+            cbar = plt.colorbar(im)
+            cbar.set_label('Power [µV²]')
+        elif normalization == 'z-score':
+            im = ax.contourf(timestamps, frex, norm_tf[:, :, ch], levels=50, cmap='jet')
+            cbar = plt.colorbar(im)
+            cbar.set_label('Power [z-score]')
+        elif normalization == 'decibel':
+            im = ax.contourf(timestamps, frex, tf_db[:, :, ch], levels=50, cmap='jet')
+            cbar = plt.colorbar(im)
+            cbar.set_label('Power [dB]')
+        elif normalization == 'maxpower':
+            im = ax.contourf(timestamps, frex, tf[:, :, ch]/max_p, levels=50, cmap='jet')
+            cbar = plt.colorbar(im)
+            cbar.set_label('Power [a.u.]')
+        
+        ax.set_xlabel('Time [s]')
+        ax.set_ylabel('Frequency [Hz]')
+        
+        if scaling.lower() == 'log':
+            ax.set_yscale('log')
+        
         plt.tight_layout()
         plt.show()
-
+    
     return tf, tf_all, itpc, frex
+
+
+# standard bandpass filetering + hilbert transform
+from scipy.signal import butter, filtfilt, hilbert
+
+def bandpass_hilbert_power(data, bands=None, fs=1250):
+    """
+    Bandpass filtering + Hilbert transform to compute band power.
+    """
+    if bands is None:
+        bands = [(0.5, 4), (4, 8), (8, 12), (12, 25), (25, 50), (50, 100)]
+        
+    power_data = np.zeros((len(bands), data.shape[0], data.shape[1], data.shape[2]))
+    
+    for band_idx, band in enumerate(bands):
+        filtered = butter_bandpass(data, band, fs)
+        analytic_signal = hilbert(filtered, axis=0)
+        power = np.abs(analytic_signal)**2
+        power_data[band_idx,:, :, :] = power
+    
+    return power_data
+
+    
+# Bandpass filtering function
+def butter_bandpass(data, band, fs, order=3):
+    """
+    Designs a Butterworth bandpass filter and applies it to the data.
+    Parameters:
+    data : array_like
+        Input signal (time × trials × channels) or (time × trials)
+    band : tuple
+        Frequency band (low, high)
+    fs : float
+        Sampling frequency
+    order : int, optional
+        Filter order (default: 3)
+    Returns:
+    filtered_data : array_like
+        Filtered signal
+    
+    """
+
+    filtered_data = np.zeros_like(data)
+    
+    nyq = 0.5 * fs
+    low = band[0] / nyq
+    high = band[1] / nyq
+    b, a = butter(order, [low, high], btype='band')
+    padlen = min(3 * max(len(a), len(b)) , data.shape[0]-1)  # Limit padlen to avoid warning
+    if data.ndim == 2:
+        filtered_data = filtfilt(b, a, data, padlen=padlen, axis=0)
+        return filtered_data
+    elif data.ndim == 3:
+        for ch in range(data.shape[2]):
+            filtered_data[:, :, ch] = filtfilt(b, a, data[:, :, ch], padlen=padlen, axis=0)
+        return filtered_data
+    else:
+        raise ValueError("Data must be 2D or 3D array.")
