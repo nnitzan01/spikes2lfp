@@ -91,7 +91,7 @@ def test_firing_rate_contribution(output_dir, session_id):
     X_attr = X_attr.reshape(num_trials, seqlength, X_attr.shape[1])
     
     ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
-    attrs = ig.run(X_attr, baselines=0, n_batch=40, n_steps=50).cpu()
+    attrs = ig.run(X_attr, baselines=0, n_batch=10, n_steps=25).cpu()
     if device == 'cuda':
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
