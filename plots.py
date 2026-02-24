@@ -28,24 +28,34 @@ def save_plot(fig, output_dir, session_id, plot_name = 'default_name.pdf'):
 
     input:
     fig: matplotlib figure object
-    output_dir: str, parent folder to save the plot
+    output_dir: str or Path, parent folder to save the plot
+    session_id: int, session ID
+    plot_name: str, filename for the plot
 
     output:
     None
 
     file structure:
-    output_dir/plot.pdf
+    output_dir/plot_name
     """
-    # session_path = Path(output_dir / "plots" / str(session_id))
-    # file_path = Path(session_path / plot_name)
-    file_path = Path(output_dir / plot_name)
-    # os.makedirs(output_dir, exist_ok=True)
-    # fig.savefig(file_path, format = 'pdf', dpi=300, bbox_inches='tight')
-    fig.savefig(file_path, 
-            format='pdf', dpi=300, bbox_inches='tight')
+    # Ensure output_dir is a Path object
+    output_dir = Path(output_dir)
+    
+    # Create directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create full file path
+    file_path = output_dir / plot_name
+    
+    try:
+        fig.savefig(file_path, format='pdf', dpi=300, bbox_inches='tight')
+        print(f"Plot saved successfully to: {file_path}")
+    except Exception as e:
+        print(f"Error saving plot to {file_path}: {str(e)}")
+        raise
 
 def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', show_plot=True, 
-            save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+            save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     """
     Make and/or save a plot of the R2 scores for the models.
 
@@ -139,7 +149,7 @@ def plot_lfp_prediction(y, yHat, chan2use, bands, start_time = None, end_time = 
     return fig
 
 def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True, 
-                        save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+                        save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     """
     Plot the loss for all channels for a given band.
 
@@ -179,7 +189,7 @@ def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True,
         save_plot(fig, output_dir, session_id, fig_name)
 
 def plot_abs_error_change(y, yHat, session_obj, timestamps, chan2use, bands,
-                   snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+                   snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     abs_error = np.zeros((y.shape[0], len(bands)+1))
     for bandi in range(len(bands)+1):
         abs_error[:, bandi] = np.abs(yHat[:,chan2use, bandi] - y[:, chan2use, bandi])
@@ -225,7 +235,7 @@ def plot_abs_error_change(y, yHat, session_obj, timestamps, chan2use, bands,
         save_plot(fig, output_dir, session_id, fig_name)
 
 def plot_abs_error_omission(lfp, yHat, session_obj, timestamps, chani, bands,
-                   snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+                   snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     abs_error = np.zeros((lfp.shape[0], len(bands)+1))
     for bandi in range(len(bands)+1):
         abs_error[:, bandi] = np.abs(yHat[:, bandi] - lfp[:, chani, bandi])
@@ -265,7 +275,7 @@ def plot_abs_error_omission(lfp, yHat, session_obj, timestamps, chani, bands,
         save_plot(fig, output_dir, session_id, fig_name)
         
 def plot_psd(y, yHat, chani, show_plot=True, save_fig=False, 
-             output_dir=None, session_id=None, fig_name='default_name.png'):
+             output_dir=None, session_id=None, fig_name='default_name.pdf'):
 
     f, Pxx = welch(y[:,chani, 0], 250, nperseg=64)
     f, Pxx_hat = welch(yHat[:,chani, 0], 250, nperseg=64)
@@ -287,7 +297,7 @@ def plot_psd(y, yHat, chani, show_plot=True, save_fig=False,
         
         
 def plot_attr_corrmat(attr,session_obj, show_plot=True, save_fig=False, 
-                      output_dir=None, session_id=None, fig_name='default_name.png'):
+                      output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     locs = session_obj.units['structure_acronym']
     sidx = np.argsort(locs.values)
@@ -307,6 +317,13 @@ def plot_attr_corrmat(attr,session_obj, show_plot=True, save_fig=False,
     corrmat = np.corrcoef(attr.T)
     fig, ax = plt.subplots(1,1,figsize=(8,8))
     ax.imshow(corrmat, vmin=-.1, vmax=.1, aspect='auto', cmap='bwr')
+    
+    # Add horizontal and vertical lines between areas
+    for i in range(len(last) - 1):  # Don't add line after the last area
+        boundary = last[i] + 0.5  # Add 0.5 to place line between units
+        ax.axhline(y=boundary, color='white', linewidth=1, alpha=0.8)
+        ax.axvline(x=boundary, color='white', linewidth=1, alpha=0.8)
+    
     ax.set_xticks(middle)
     ax.set_xticklabels(areas, rotation=45, ha='right')
     ax.set_yticks(middle)
@@ -321,7 +338,7 @@ def plot_attr_corrmat(attr,session_obj, show_plot=True, save_fig=False,
         save_plot(fig, output_dir, session_id, fig_name)
         
 def plot_attr_density_plots(mean_attribution, session_obj, bands, area, show_plot=True, save_fig=False, 
-                            output_dir=None, session_id=None, fig_name='default_name.png'):
+                            output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     exp   = np.ceil(np.log10(np.abs(np.median(mean_attribution))))
 
@@ -353,7 +370,7 @@ def plot_attr_density_plots(mean_attribution, session_obj, bands, area, show_plo
         
         
 def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.png'):
+                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     num_channels = len(lfp_obj.channels)
     areas = sorted(session_obj.units['structure_acronym'].unique())
@@ -394,7 +411,7 @@ def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot
         
 
 def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2use, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.png'):
+                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     area_idx = session_obj.units.index[session_obj.units['structure_acronym'].str.contains(area)]
     pyr  = np.intersect1d(df.unit_id[df.pyr == 1], area_idx)
@@ -456,8 +473,15 @@ def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = F
     ax1.plot(timestamps, lfp, 'k')
     ax1.set_xlim([time_win[0], time_win[1]])
     
-    ax2.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.01, vmax=0.01,
+    ax2.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.0001, vmax=0.0001,
             extent = [time_win[0], time_win[1], len(session_obj.units), 0])
+    
+    # Add horizontal lines between brain areas
+    for i in range(len(last) - 1):  # Don't add line after the last area
+        boundary = last[i] + 0.5  # Add 0.5 to place line between units
+        ax2.axhline(y=len(session_obj.units) - boundary, color='gray', 
+                    linewidth=1, alpha=0.8, linestyle='--')
+    
     if plot_stim:
         for st in stim_st:
             ax2.axvline(st,     color='k', linestyle='--')
@@ -465,28 +489,35 @@ def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = F
     ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('Unit') 
     ax2.set_xlim([time_win[0], time_win[1]])
-    ax2.set_yticks(middle)
+    ax2.set_yticks(len(session_obj.units) - middle)  # Adjust for inverted y-axis
     ax2.set_yticklabels(areas, rotation=45, ha='right')
-    # add a colorbar aligned with the bottom subplot only
-    fig.subplots_adjust(right=0.85)  # Make room for colorbar
-    # Get the position of ax2 to align colorbar with it
+    
+    # Apply tight layout first, then adjust for colorbar
+    plt.tight_layout()
+    
+    # Make both subplots the same width and add colorbar without occlusion
+    fig.subplots_adjust(right=0.85)  # Leave space for colorbar
+    pos1 = ax1.get_position()
     pos2 = ax2.get_position()
-    cbar_ax = fig.add_axes([0.87, pos2.y0, 0.03, pos2.height])  # Align with ax2
+    
+    # Ensure both subplots have the same width
+    ax1.set_position([pos1.x0, pos1.y0, pos2.width, pos1.height])
+    ax2.set_position([pos2.x0, pos2.y0, pos2.width, pos2.height])
+    
+    # Add colorbar spanning the full height of both subplots
+    cbar_ax = fig.add_axes([0.87, pos2.y0, 0.02, pos1.y0 + pos1.height - pos2.y0])
     cbar = fig.colorbar(ax2.images[0], cax=cbar_ax)
     cbar.set_label('Attribution')
-    
-    # tight layout
-    plt.tight_layout()
     if show_plot:
         plt.show()
     else:
         plt.close(fig)
     if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)    
+        save_plot(fig, output_dir, session_id, fig_name)
         
     
 def plot_attr_lfp_corr(attr, lfp, session_obj, sorting = "max", bin_size = 0.004,
-                        show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.png'):
+                        show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     locs = session_obj.units['structure_acronym']
     sidx = np.argsort(locs.values)
@@ -545,7 +576,7 @@ def plot_attr_lfp_corr(attr, lfp, session_obj, sorting = "max", bin_size = 0.004
         
 
 def plot_mean_attr_clusters(mean_attr_clusters, lfp_obj, bands, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.png'):
+                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     num_channels = len(lfp_obj.channels) 
     fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2,figsize=(10,20)) 
@@ -579,7 +610,7 @@ def plot_mean_attr_clusters(mean_attr_clusters, lfp_obj, bands, show_plot=True, 
         
         
 def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size = 0.004, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.png'):
+                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     t = np.arange(time_win[0], time_win[1], bin_size)
 
@@ -637,7 +668,7 @@ def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size =
     
     
 def plot_unit_attr_fr_corr(unit_attr_fr_corr, session_obj, bands, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.png'):
+                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
     
     num_channels = unit_attr_fr_corr.shape[1]
     num_bands    = unit_attr_fr_corr.shape[2]
