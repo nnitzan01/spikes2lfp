@@ -109,7 +109,7 @@ def calc_raw_attribution(output_dir, session_id):
         model = all_models[chani, bandi]
         ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
         # Reduce batch size  to avoid CUDA out of memory
-        attrs = ig.run(X_attr, baselines=0, n_batch=5, n_steps=50).cpu()
+        attrs = ig.run(X_attr, baselines=0, n_batch=2, n_steps=50).cpu()
         
         # Move attribution to CPU immediately and clear GPU cache
         attrs = np.array(attrs)
