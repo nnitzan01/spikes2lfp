@@ -19,58 +19,136 @@ class IntegratedGradient():
         self.exp_func = None # exponential function for moving window method
         self.seqlength = seqlength # length of the sequence for moving window method, default is 750
 
-    def run(self, 
-            inputs, 
-            baselines = None, 
-            n_batch: int = 10,
-            n_steps: int = 50,
-            method: str = "gausslegendre"):
-        r"""
-        A wrapper function to run the integrated gradients method.
+    # def run(self, 
+    #         inputs, 
+    #         baselines = None, 
+    #         n_batch: int = 10,
+    #         n_steps: int = 50,
+    #         method: str = "gausslegendre"):
+    #     r"""
+    #     A wrapper function to run the integrated gradients method.
 
-        Args:
+    #     Args:
 
-            inputs:     tensor, Total input of a batch.
-                        shape (total_length, input_size).
-                        If method is "last time point", it will be reshaped to (total_length//750, 750, input_size)
-            baselines:  (1) int, the value of input that signifies no information. 
-                        In the case of this project, it should be 0 for no neuron's firing state.
-                        (2) tuple, If inputs has been z-scored for each feature, baselines should be the z-scored value
-                        corresponding to the state of no-firing. Length of tuple should be equal to the number of features.
-            n_steps:    int, number of steps for approximation.
-            method:     str, approximation method to calculate the weights. Defaults to `gausslegendre`.
+    #         inputs:     tensor, Total input of a batch.
+    #                     shape (total_length, input_size).
+    #                     If method is "last time point", it will be reshaped to (total_length//750, 750, input_size)
+    #         baselines:  (1) int, the value of input that signifies no information. 
+    #                     In the case of this project, it should be 0 for no neuron's firing state.
+    #                     (2) tuple, If inputs has been z-scored for each feature, baselines should be the z-scored value
+    #                     corresponding to the state of no-firing. Length of tuple should be equal to the number of features.
+    #         n_steps:    int, number of steps for approximation.
+    #         method:     str, approximation method to calculate the weights. Defaults to `gausslegendre`.
         
-        Out:
+    #     Out:
 
-            attrs:      tensor, Attributions of the input.
-                        shape (total_length, input_size) if method is "last time point"
-                        shape (total_length - window_size + 1, input_size) if method is "moving window"
+    #         attrs:      tensor, Attributions of the input.
+    #                     shape (total_length, input_size) if method is "last time point"
+    #                     shape (total_length - window_size + 1, input_size) if method is "moving window"
         
+    #     """
+    #     if self.method == 'moving window':
+    #         length = inputs.shape[0]
+    #         if self.window_size is None:
+    #             self.window_size = 50
+    #         attrs = torch.zeros(length-self.window_size+1, inputs.shape[1])
+    #         n_slides = length - self.window_size + 1
+    #         for i in range(n_slides):
+    #             inputs_slice = inputs[i:i+self.window_size, :].unsqueeze(0)
+    #             attrs[i, :] = torch.mean(self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0),axis=0)
+    #         return attrs
+    #     else:
+    #         # assume input is of shape (n_batch, seq_length, input_size)
+    #         if len(inputs.shape) == 2:
+    #             num_trials = inputs.shape[0]//self.seqlength 
+    #             inputs = inputs[:num_trials*self.seqlength ].reshape(num_trials, self.seqlength , inputs.shape[1])
+    #         attrs = torch.zeros_like(inputs)
+    #         counter = 0
+    #         iterations = inputs.shape[0] // n_batch
+    #         for i in range(iterations):
+    #             inputs_slice = inputs[counter:counter+n_batch, :, :]
+    #             attrs[counter:counter+n_batch, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
+    #             counter += n_batch
+    #         attrs = attrs.reshape(attrs.shape[0]*attrs.shape[1], attrs.shape[2])
+    #         return attrs
+
+    def run(
+        self,
+        inputs,
+        baselines=None,
+        n_batch: int = 1,
+        n_steps: int = 10,
+        method: str = "gausslegendre",
+        trial_chunk_size: int = 200,
+    ):
         """
-        if self.method == 'moving window':
+        Memory-safe Integrated Gradients over large sessions.
+
+        inputs: (total_length, input_size) or (n_trials, seqlength, input_size)
+        """
+
+        device = next(self.model.parameters()).device  # assume model has .parameters()
+        seqlen = self.seqlength
+
+        if self.method == "moving window":
             length = inputs.shape[0]
             if self.window_size is None:
                 self.window_size = 50
-            attrs = torch.zeros(length-self.window_size+1, inputs.shape[1])
+            attrs = torch.zeros(length - self.window_size + 1, inputs.shape[1])
             n_slides = length - self.window_size + 1
             for i in range(n_slides):
-                inputs_slice = inputs[i:i+self.window_size, :].unsqueeze(0)
-                attrs[i, :] = torch.mean(self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0),axis=0)
+                inputs_slice = inputs[i:i + self.window_size, :].unsqueeze(0).to(device)
+                with torch.no_grad():
+                    attr_slice = self.attribute(
+                        inputs_slice, baselines, n_steps=n_steps, method=method
+                    )[0].squeeze(0)
+                attrs[i, :] = attr_slice.mean(dim=0).cpu()
+                del inputs_slice, attr_slice
+                torch.cuda.empty_cache()
             return attrs
-        else:
-            # assume input is of shape (n_batch, seq_length, input_size)
-            if len(inputs.shape) == 2:
-                num_trials = inputs.shape[0]//self.seqlength 
-                inputs = inputs[:num_trials*self.seqlength ].reshape(num_trials, self.seqlength , inputs.shape[1])
-            attrs = torch.zeros_like(inputs)
+
+        # ---- last time point mode ----
+        # reshape to (n_trials, seqlen, input_size)
+        if len(inputs.shape) == 2:
+            num_trials = inputs.shape[0] // seqlen
+            inputs = inputs[: num_trials * seqlen].reshape(num_trials, seqlen, inputs.shape[1])
+
+        n_trials = inputs.shape[0]
+        input_size = inputs.shape[2]
+
+        # store final attrs on CPU
+        attrs = torch.zeros(n_trials, seqlen, input_size)
+
+        # outer loop: trial chunks
+        for start_trial in range(0, n_trials, trial_chunk_size):
+            end_trial = min(start_trial + trial_chunk_size, n_trials)
+            inputs_chunk = inputs[start_trial:end_trial]  # (chunk_trials, seqlen, input_size)
+
+            # inner loop: small batches within chunk
             counter = 0
-            iterations = inputs.shape[0] // n_batch
-            for i in range(iterations):
-                inputs_slice = inputs[counter:counter+n_batch, :, :]
-                attrs[counter:counter+n_batch, :, :] = self.attribute(inputs_slice, baselines, n_steps=n_steps, method=method)[0].squeeze(0)
-                counter += n_batch
-            attrs = attrs.reshape(attrs.shape[0]*attrs.shape[1], attrs.shape[2])
-            return attrs
+            chunk_trials = inputs_chunk.shape[0]
+            while counter < chunk_trials:
+                this_batch = min(n_batch, chunk_trials - counter)
+                inputs_slice = inputs_chunk[counter:counter + this_batch].to(device)
+
+                attr_slice = self.attribute(
+                    inputs_slice, baselines, n_steps=n_steps, method=method
+                )[0]  # expect (this_batch, seqlen, input_size)
+
+                attrs[start_trial + counter : start_trial + counter + this_batch] = (
+                    attr_slice.detach().cpu()
+                )
+
+                counter += this_batch
+                del inputs_slice, attr_slice
+                torch.cuda.empty_cache()
+
+            del inputs_chunk
+            torch.cuda.empty_cache()
+
+        # flatten back to (total_length, input_size)
+        attrs = attrs.reshape(attrs.shape[0] * attrs.shape[1], attrs.shape[2])
+        return attrs
 
     # MODIFIED from captum/_utils/gradient.py
     def _run_forward(self, inputs, h_c = None):
