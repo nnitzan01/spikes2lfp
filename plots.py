@@ -444,7 +444,8 @@ def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2
         
         
 def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004,
-                     show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='attr_matrix.pdf'):
+                     show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='attr_matrix.pdf',
+                     min_neurons=None):
     
     stim_st = session_obj.stimulus_presentation.start_time
     stim_st = stim_st[(stim_st > time_win[0]) & (stim_st < time_win[1])]
@@ -455,13 +456,30 @@ def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = F
     sorted_locs = locs.values[sidx]
 
     # for each area, find the first and last unit
-    areas = np.unique(sorted_locs)
-    first = []
-    last  = []
-    for area in areas:
+    all_areas = np.unique(sorted_locs)
+    all_first = []
+    all_last = []
+    area_counts = []
+    for area in all_areas:
         ind = sorted_locs == area
-        first.append(np.where(ind)[0][0])
-        last.append(np.where(ind)[0][-1])
+        count = np.sum(ind)
+        area_counts.append(count)
+        all_first.append(np.where(ind)[0][0])
+        all_last.append(np.where(ind)[0][-1])
+    
+    # Apply filtering if min_neurons is specified
+    if min_neurons is not None:
+        large_area_mask = np.array(area_counts) >= min_neurons
+        areas = all_areas[large_area_mask]
+        first = [all_first[i] for i in range(len(all_areas)) if large_area_mask[i]]
+        last = [all_last[i] for i in range(len(all_areas)) if large_area_mask[i]]
+        filtered_areas = all_areas[~large_area_mask]
+        print(f"Filtered out {len(filtered_areas)} areas with <{min_neurons} neurons: {', '.join(filtered_areas)}")
+    else:
+        areas = all_areas
+        first = all_first
+        last = all_last
+        
     middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
     
     st = int((time_win[0] - timestamps[0]) / bin_size)
@@ -479,7 +497,7 @@ def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = F
     # Add horizontal lines between brain areas
     for i in range(len(last) - 1):  # Don't add line after the last area
         boundary = last[i] + 0.5  # Add 0.5 to place line between units
-        ax2.axhline(y=len(session_obj.units) - boundary, color='gray', 
+        ax2.axhline(y=boundary, color='gray', 
                     linewidth=1, alpha=0.8, linestyle='--')
     
     if plot_stim:
@@ -489,7 +507,7 @@ def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = F
     ax2.set_xlabel('Time (s)')
     ax2.set_ylabel('Unit') 
     ax2.set_xlim([time_win[0], time_win[1]])
-    ax2.set_yticks(len(session_obj.units) - middle)  # Adjust for inverted y-axis
+    ax2.set_yticks(middle)  # Use middle positions directly
     ax2.set_yticklabels(areas, rotation=45, ha='right')
     
     # Apply tight layout first, then adjust for colorbar
