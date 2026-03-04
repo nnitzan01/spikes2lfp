@@ -109,7 +109,7 @@ def calc_raw_attribution(output_dir, session_id):
         model = all_models[chani, bandi]
         ig = IntegratedGradient(model.model.train().to(device), method='last time point', seqlength=seqlength)        
         # Reduce batch size  to avoid CUDA out of memory
-        attrs = ig.run(X_attr, baselines=0, n_batch=2, n_steps=50).cpu()
+        attrs = ig.run(X_attr, baselines=0, n_batch=2, n_steps=20).cpu()
         
         # Move attribution to CPU immediately and clear GPU cache
         attrs = np.array(attrs)
@@ -123,6 +123,10 @@ def calc_raw_attribution(output_dir, session_id):
         attrs_sparse = coo_matrix(attrs)
         save_npz(filename, attrs_sparse, compressed=True)
         mean_attribution[chani, bandi, :] = np.mean(attrs, axis=0)
+        del attrs, attrs_sparse
+        if device == 'cuda':
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
             
     filename = Path(output_dir_attrs / f'attribution_scores_raw_entire_session_mean.npy')
     np.save(filename, mean_attribution)
