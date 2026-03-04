@@ -87,7 +87,7 @@ class IntegratedGradient():
         inputs: (total_length, input_size) or (n_trials, seqlength, input_size)
         """
 
-        device = next(self.model.parameters()).device  # assume model has .parameters()
+        device = inputs.device # assume model has .parameters()
         seqlen = self.seqlength
 
         if self.method == "moving window":
