@@ -74,7 +74,7 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
 
     # --- 4. Channel Loop ---
     print(f"Processing {num_channels} channels...", flush=True)
-    for ch_idx, ch_val in enumerate(chan_numbers): 
+    for ch_idx, ch_val in enumerate(range(num_channels)): 
         print(f"Channel {ch_val} ({ch_idx+1}/{num_channels})", flush=True)
         
         # Load the massive attribution file for the entire session
