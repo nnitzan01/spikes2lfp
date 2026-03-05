@@ -33,9 +33,11 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
     os.makedirs(variables_dir, exist_ok=True)
 
     # --- 1. Determine Channels ---
-    files = os.listdir(output_dir_attrs)
-    chan_numbers = sorted(list(set([int(f.split("_")[4].replace("chan", "")) for f in files if f.endswith("_band0.npz")])))
-    num_channels = len(chan_numbers)
+    # files = os.listdir(output_dir_attrs)
+    # chan_numbers = sorted(list(set([int(f.split("_")[4].replace("chan", "")) for f in files if f.endswith("_band0.npz")])))
+    # load attribution_scores_entire_session_mean.npy
+    avg_attr = np.load(output_dir_attrs / 'attribution_scores_entire_session_mean.npy')
+    num_channels = avg_attr.shape[0]
     
     # --- 2. Load Spiking Data for Metadata and Timestamps ---
     session_obj = ps(session_id, df, output_dir)
