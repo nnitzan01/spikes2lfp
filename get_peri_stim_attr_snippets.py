@@ -79,10 +79,13 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
         
         # Load the massive attribution file for the entire session
         sparse_attr = np.load(output_dir_attrs / f'attribution_scores_raw_entire_session_chan{ch_val}_band{0}.npz') 
-        attrs = coo_matrix((sparse_attr['data'], (sparse_attr['row'], sparse_attr['col'])), 
-                          shape=sparse_attr['shape']).toarray().astype(np.float32)
+        # attrs = coo_matrix((sparse_attr['data'], (sparse_attr['row'], sparse_attr['col'])), 
+        #                   shape=sparse_attr['shape']).toarray().astype(np.float32)
+        attrs_sparse = coo_matrix(
+        (sparse_attr['data'], (sparse_attr['row'], sparse_attr['col'])),
+        shape=sparse_attr['shape']).tocsr()
         
-        n_timepoints_limit = min(n_timepoints_spikes, attrs.shape[0])
+        n_timepoints_limit = min(n_timepoints_spikes, attrs_sparse.shape[0])
         
         # Temporary container for snippets of this channel across all trials
         # Shape: (Trials, Bins, Neurons)
@@ -92,7 +95,8 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
         for i, s_idx in enumerate(trial_start_indices):
             e_idx = s_idx + n_bins_snippet
             if e_idx <= n_timepoints_limit:
-                snippet = attrs[s_idx:e_idx, :]
+                # snippet = attrs[s_idx:e_idx, :]
+                snippet = attrs_sparse[s_idx:e_idx, :].toarray().astype(np.float32)
                 # Identify where the neuron actually fired
                 mask = np.abs(snippet) > EPSILON
                 
@@ -105,7 +109,7 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
         avg_potency_matrix[:, :, ch_idx] = np.nanmean(temp_potency_snippets, axis=0)
         avg_attr_matrix[:, :, ch_idx]    = np.nanmean(temp_attr_snippets, axis=0)
 
-        del attrs, sparse_attr, temp_potency_snippets, temp_attr_snippets
+        del attrs_sparse, sparse_attr, temp_potency_snippets, temp_attr_snippets
         gc.collect() 
 
     # --- 5. Saving ---
