@@ -76,7 +76,7 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
         print(f"Channel {ch_val} ({ch_idx+1}/{num_channels})", flush=True)
         
         # Load the massive attribution file for the entire session
-        sparse_attr = np.load(output_dir_attrs / f'attribution_scores_entire_session_chan{ch_val}_band{0}.npz') 
+        sparse_attr = np.load(output_dir_attrs / f'attribution_scores_raw_entire_session_chan{ch_val}_band{0}.npz') 
         attrs = coo_matrix((sparse_attr['data'], (sparse_attr['row'], sparse_attr['col'])), 
                           shape=sparse_attr['shape']).toarray().astype(np.float32)
         
@@ -108,8 +108,8 @@ def get_peri_stim_attr_snippets(output_dir, session_id):
 
     # --- 5. Saving ---
     # This file stores the potency (average attribution per spike)
-    np.save(variables_dir / 'mean_attribution_snippet.npy', avg_attr_matrix)
-    np.save(variables_dir / 'mean_potency_snippet.npy', avg_potency_matrix)
+    np.save(variables_dir / 'mean_raw_attribution_snippet.npy', avg_attr_matrix)
+    np.save(variables_dir / 'mean_raw_potency_snippet.npy', avg_potency_matrix)
     
     print(f"Successfully saved averaged attribution and potency matrices to: {variables_dir}")
 
