@@ -1,8 +1,13 @@
-import os
-import torch
+"""
+Plotting helpers for single-session results.
+
+Every plotting function takes the same trailing arguments:
+    show_plot  display the figure (otherwise it is closed after saving)
+    save_fig   save it as output_dir / fig_name (format taken from the extension, PDF if none)
+"""
 import numpy as np
-import seaborn as sns
-from scipy import signal 
+import torch
+from scipy import signal
 from pathlib import Path
 import matplotlib.cm as cm
 from scipy.signal import welch
@@ -10,277 +15,189 @@ from scipy.stats import zscore
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 
-from matplotlib.backends.backend_pdf import PdfPages
+import config
 
-# Set PDF backend to preserve text
+# Keep text editable in PDF/PS output (TrueType instead of Type 3 fonts)
 plt.rcParams.update({
-    'pdf.fonttype': 42,  # Output Type 42 (TrueType) fonts instead of Type 3
-    'ps.fonttype': 42,   # Also for PostScript
+    'pdf.fonttype': 42,
+    'ps.fonttype': 42,
     'font.family': 'sans-serif',
     'font.sans-serif': ['Arial', 'DejaVu Sans', 'Liberation Sans'],
     'font.size': 10,
-    'text.usetex': False  # Don't use LaTeX rendering
+    'text.usetex': False
 })
 
-def save_plot(fig, output_dir, session_id, plot_name = 'default_name.pdf'):
-    """
-    Save the plot to the output directory.
 
-    input:
-    fig: matplotlib figure object
-    output_dir: str or Path, parent folder to save the plot
-    session_id: int, session ID
-    plot_name: str, filename for the plot
-
-    output:
-    None
-
-    file structure:
-    output_dir/plot_name
-    """
-    # Ensure output_dir is a Path object
+def save_plot(fig, output_dir, session_id=None, plot_name='default_name.pdf'):
+    """Save fig to output_dir / plot_name, creating the directory. session_id is unused (kept for callers)."""
     output_dir = Path(output_dir)
-    
-    # Create directory if it doesn't exist
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Create full file path
     file_path = output_dir / plot_name
-    
-    try:
-        fig.savefig(file_path, format='pdf', dpi=300, bbox_inches='tight')
-        print(f"Plot saved successfully to: {file_path}")
-    except Exception as e:
-        print(f"Error saving plot to {file_path}: {str(e)}")
-        raise
+    fmt = file_path.suffix.lstrip('.') or 'pdf'
+    fig.savefig(file_path, format=fmt, dpi=300, bbox_inches='tight')
+    print(f"Plot saved to: {file_path}")
 
-def plot_r2(scoresTest, channels, bands, clim = [-.4, .7],  data_type='active', show_plot=True, 
+
+def _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name):
+    """Save (if requested) before showing or closing, so the saved file matches what is shown."""
+    if save_fig:
+        save_plot(fig, output_dir, session_id, fig_name)
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def _band_title(bands, bandi):
+    """Title for model target bandi: 0 is broadband, i > 0 is bands[i-1]."""
+    return 'Broadband' if bandi == 0 else f'{bands[bandi-1][0]}-{bands[bandi-1][1]} Hz'
+
+
+def _area_order(locs):
+    """
+    Order units by area for area-blocked matrix plots.
+
+    Returns (sidx, areas, first, last, middle): the sorting index, the sorted unique areas, and the
+    first/last/middle row of each area's block in the sorted order.
+    """
+    locs = np.asarray(locs)
+    sidx = np.argsort(locs, kind='stable')
+    sorted_locs = locs[sidx]
+    areas = np.unique(sorted_locs)
+    first = np.array([np.flatnonzero(sorted_locs == a)[0] for a in areas])
+    last = np.array([np.flatnonzero(sorted_locs == a)[-1] for a in areas])
+    middle = (first + (last - first) / 2).astype(int)
+    return sidx, areas, first, last, middle
+
+
+def _band_grid(n_panels, figsize):
+    """Two-column grid with enough rows for n_panels; unused trailing axes are removed."""
+    fig, ax = plt.subplots(int(np.ceil(n_panels / 2)), 2, figsize=figsize)
+    for extra in ax.flat[n_panels:]:
+        fig.delaxes(extra)
+    return fig, ax
+
+
+def plot_r2(scoresTest, channels, bands, clim=[-.4, .7], data_type='active', show_plot=True,
             save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     """
-    Make and/or save a plot of the R2 scores for the models.
+    Heatmap of test R2 for every channel and model target.
 
-    input:
-    scoreTest: np.array, shape is (#channels, #bands+1), contains the R2 scores
-    channels: pandas DataFrame, channel information
-    bands: list, frequency bands
-    data_type: str, 'active', 'spontaneous', etc.
-    show_plot: bool, display the plot
-    save_fig: bool, save the plot
-    output_dir: str, parent folder to save the plot
-    session_id: int, session_id
-    fig_name: str, name of the plot
+    scoresTest: (#channels, #bands+1); channels: channel table (rows in the same order)
     """
     num_channels = len(channels)
     assert scoresTest.shape == (num_channels, len(bands)+1)
-    fig,ax = plt.subplots(1,1,figsize=(7,7))
-    cax = ax.imshow(scoresTest, aspect='equal', cmap='viridis')
+    fig, ax = plt.subplots(1, 1, figsize=(7, 7))
+    im = ax.imshow(scoresTest, aspect='equal', cmap='viridis', vmin=clim[0], vmax=clim[1])
     ax.set_xlabel('Band')
     ax.set_ylabel('Channel')
     ax.set_title('Model score for all channels and bands on ' + data_type + ' data')
     ax.set_yticks(range(num_channels))
     ax.set_yticklabels(channels['dorsal_ventral_ccf_coordinate'], rotation=45)
     ax.set_xticks(range(len(bands)+1))
-    ax.set_xticklabels(['Broadband'] + [str(bands[i]) for i in range(len(bands))], rotation=45, ha='right')
+    ax.set_xticklabels(['Broadband'] + [str(b) for b in bands], rotation=45, ha='right')
     ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')
-    cbar = fig.colorbar(cax)
-    cbar.set_label('R2')
-    cax.set_clim(clim[0], clim[1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
+    fig.colorbar(im).set_label('R2')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
 
-def plot_lfp_prediction(y, yHat, chan2use, bands, start_time = None, end_time = None, fs=250, show_plot=True,
+
+def plot_lfp_prediction(y, yHat, chan2use, bands, start_time=None, end_time=None, fs=1/config.BIN_SIZE, show_plot=True,
                         save_fig=False, output_dir=None, session_id=None, fig_name='lfp_prediction.pdf'):
     """
-    Plot the LFP prediction for the given channel and bands.
+    Recorded vs predicted LFP of one channel for every model target.
 
-    input:
-    y: torch.Tensor, target data
-    yHat: torch.Tensor, predicted data
-    chani: int, channel index
-    bands: list, frequency bands
-    start_time: float, in seconds, start time for the plot, assume 0 is the start of X
-    end_time: float, in seconds, end time for the plot, assume end of X is the end
-    fs: int, sampling frequency
-    show_plot: bool, display the plot
-    save_fig: bool, save the plot
-    output_dir: str, parent folder to save the plot
-    session_id: int, session_id
-    fig_name: str, name of the plot
+    y: (time, channels, targets); yHat: same shape, or (time, targets) for chan2use only
+    start_time, end_time: window to plot in seconds from the start of y (default: everything)
     """
-    # if not already on the cpu, move it there
     if isinstance(y, torch.Tensor):
         y = y.cpu().detach().numpy()
-        
-    if len(yHat.shape) == 2:
-        chan2use = 0
-        yHat = yHat[:, np.newaxis]
+    y = y[:, chan2use, :]
+    if yHat.ndim == 3:
+        yHat = yHat[:, chan2use, :]
 
-       
-    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(16, 16))
+    start_idx = 0 if start_time is None else int(start_time * fs)
+    end_idx = y.shape[0] if end_time is None else int(end_time * fs)
+    t = np.arange(start_idx, end_idx) / fs
+
+    fig, ax = _band_grid(len(bands)+1, figsize=(16, 16))
     for bandi in range(len(bands)+1):
-        if start_time != None and end_time != None:
-            start_idx = int(start_time * fs)
-            end_idx = int(end_time * fs)
-            y_test = y[start_idx:end_idx]
-            yHat_test = yHat[start_idx:end_idx]
-        else:
-            start_time = 0
-            end_time = y.shape[0]/fs
-            start_idx = 0
-            end_idx = y.shape[0]
-        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), y_test[0:int(end_idx-start_idx), chan2use, bandi],'k',label='LFP')
-        ax.flat[bandi].plot(np.linspace(start_time, end_time, int(y_test.shape[0])), yHat_test[0:int(end_idx-start_idx), chan2use, bandi],'r',label='LSTM')
-        if bandi == 0:
-            ax.flat[bandi].set_title('Channel ' + str(chan2use) + ' Broadband')
-        else:
-            ax.flat[bandi].set_title('Channel ' + str(chan2use) + ' Band: ' + str(bands[bandi-1]) + ' Hz')
-    fig.delaxes(ax.flat[-1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-    
+        ax.flat[bandi].plot(t, y[start_idx:end_idx, bandi], 'k', label='LFP')
+        ax.flat[bandi].plot(t, yHat[start_idx:end_idx, bandi], 'r', label='Model')
+        ax.flat[bandi].set_title(f'Channel {chan2use} {_band_title(bands, bandi)}')
+    ax.flat[0].legend(loc='upper right')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
     return fig
 
-def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True, 
-                        save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    """
-    Plot the loss for all channels for a given band.
 
-    input:
-    channels: pandas DataFrame, channel information
-    bands: list, frequency bands
-    bandi: int, selected band index
-    losses: np.array, shape is (#channels, #epochs, #bands)
-    show_plot: bool, display the plot
-    save_fig: bool, save the plot
-    output_dir: str, parent folder to save the plot
-    session_id: int, session_id
-    fig_name: str, name of the plot
+def plot_all_channel_loss(channels, bands, bandi, losses, show_plot=True,
+                          save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
     """
-    fig,ax = plt.subplots(1,1,figsize=(5,4))
-    norm = mcolors.Normalize(vmin=channels['dorsal_ventral_ccf_coordinate'].min(), 
-                             vmax=channels['dorsal_ventral_ccf_coordinate'].max())
+    Loss per epoch for every channel's model of one target, coloured by channel depth.
+
+    losses: (#channels, #epochs, #bands+1)
+    """
+    fig, ax = plt.subplots(1, 1, figsize=(5, 4))
+    depth = channels['dorsal_ventral_ccf_coordinate']
+    norm = mcolors.Normalize(vmin=depth.min(), vmax=depth.max())
     cmap = cm.viridis
     for chani in range(len(channels)):
-        color = cmap(norm(channels['dorsal_ventral_ccf_coordinate'].iloc[chani]))
-        ax.plot(losses[chani, :, bandi], 'o-', alpha=0.5, color=color)
+        ax.plot(losses[chani, :, bandi], 'o-', alpha=0.5, color=cmap(norm(depth.iloc[chani])))
     ax.set_xlabel('Epochs')
     ax.set_ylabel('Loss')
-    if bandi==0:
-        ax.set_title('Model loss for broadband model')
-    else:
-        ax.set_title('Model loss for ' + str(bands[bandi-1]) + ' Hz model')
+    ax.set_title(f'Model loss for {_band_title(bands, bandi)} model')
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
-    cbar = fig.colorbar(sm, ax=ax)
-    cbar.set_label('Electrode Depth')
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
+    fig.colorbar(sm, ax=ax).set_label('Electrode Depth')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
+
 
 def plot_abs_error_change(y, yHat, session_obj, timestamps, chan2use, bands,
-                   snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    abs_error = np.zeros((y.shape[0], len(bands)+1))
-    for bandi in range(len(bands)+1):
-        abs_error[:, bandi] = np.abs(yHat[:,chan2use, bandi] - y[:, chan2use, bandi])
+                          snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None,
+                          fig_name='default_name.pdf'):
+    """
+    Absolute prediction error around every active-task image presentation (-0.25 to +0.5 s),
+    one row per presentation, with the mean error for change vs non-change images overlaid.
+
+    y, yHat: (time, channels, targets); timestamps: (time,) in seconds
+    """
+    abs_error = np.abs(yHat[:, chan2use, :] - y[:, chan2use, :])    # (time, targets)
     start_times = session_obj.active.start_time.values
-    start_times = start_times[start_times < timestamps[-1]-snippet_length]
-    change = np.array(session_obj.active.is_change.values, dtype=bool)
-    change = change[:len(start_times)]
-    
-    bin_size = 0.004
-    nbins = int(snippet_length/bin_size)
+    keep = start_times < timestamps[-1] - snippet_length
+    start_times = start_times[keep]
+    change = np.array(session_obj.active.is_change.values, dtype=bool)[keep]
+
+    nbins = int(snippet_length / config.BIN_SIZE)
     t = np.linspace(-0.25, 0.5, nbins)
     error_snippets = np.zeros((len(start_times), nbins, len(bands)+1))
-    lfp_snippets = np.zeros((len(start_times), nbins, len(bands)+1))
-    for i in range(len(start_times)):
-        start = np.argmin(np.abs(timestamps - (start_times[i]-.25)))
-        error_snippets[i,:,:] = abs_error[start:start+nbins,:]
-        lfp_snippets[i,:,:] = y[start:start+nbins,chan2use,:]
-    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(30, 30))
+    for i, st in enumerate(start_times):
+        start = np.argmin(np.abs(timestamps - (st - .25)))
+        error_snippets[i] = abs_error[start:start+nbins, :]
+
+    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)), 2, figsize=(30, 30))
     for bandi in range(len(bands)+1):
-        ax.flat[bandi].imshow(error_snippets[:, :,bandi], aspect='auto', cmap='bwr', extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2, alpha=0.9)
-        avr_condition = np.mean(error_snippets[change, :,bandi], axis=0)
-        avr_nochange = np.mean(error_snippets[~change, :,bandi], axis=0)
+        im = ax.flat[bandi].imshow(error_snippets[:, :, bandi], aspect='auto', cmap='bwr',
+                                   extent=[-0.25, 0.5, 0, len(start_times)], vmin=0, vmax=2, alpha=0.9)
         ax2 = ax.flat[bandi].twinx()
-        ax2.plot(t, avr_condition ,   'm', label='change', linewidth=3)
-        ax2.plot(t, avr_nochange, 'k', label='no change', linewidth=3)
-        # ax.flat[bandi].plot(t, len(start_times)//2 + avr_condition * len(start_times)//5,   'm', label='change', linewidth=3)
-        # ax.flat[bandi].plot(t, len(start_times)//2 + avr_nochange * len(start_times)//5, 'k', label='no change', linewidth=3)
-        ax.flat[bandi].set_xlabel('Time from change (s)')
-        if bandi==0:
-            ax.flat[bandi].set_ylabel('Trial')
-            ax.flat[bandi].set_title('broadband')
-            ax.flat[bandi].legend(loc = 'upper left')
-        else:
-            ax.flat[bandi].set_title('Band: ' + str(bands[bandi-1]) + ' Hz')
-    ax.flat[-1].imshow(np.zeros((1,1)), cmap='bwr', extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2)
+        ax2.plot(t, np.mean(error_snippets[change, :, bandi], axis=0), 'm', label='change', linewidth=3)
+        ax2.plot(t, np.mean(error_snippets[~change, :, bandi], axis=0), 'k', label='no change', linewidth=3)
+        ax.flat[bandi].set_xlabel('Time from image onset (s)')
+        ax.flat[bandi].set_title(_band_title(bands, bandi))
+        if bandi == 0:
+            ax.flat[bandi].set_ylabel('Presentation')
+            ax2.legend(loc='upper left')
+    # the spare last panel holds the shared colorbar
     ax.flat[-1].axis('off')
-    cbar = fig.colorbar(ax.flat[-1].images[0], ax=ax.flat[-1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
+    fig.colorbar(im, ax=ax.flat[-1]).set_label('|error|')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
 
-def plot_abs_error_omission(lfp, yHat, session_obj, timestamps, chani, bands,
-                   snippet_length=0.75, show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    abs_error = np.zeros((lfp.shape[0], len(bands)+1))
-    for bandi in range(len(bands)+1):
-        abs_error[:, bandi] = np.abs(yHat[:, bandi] - lfp[:, chani, bandi])
-    omission = np.array(session_obj.active.omitted.values, dtype=bool)
-    start_times = session_obj.active.start_time.values[omission]
-    fs = 250
-    nbins = int(snippet_length*fs)
-    t = np.linspace(-0.25, 0.5, nbins)
-    error_snippets = np.zeros((len(start_times), nbins, len(bands)+1))
-    lfp_snippets = np.zeros((len(start_times), nbins, len(bands)+1))
-    for i in range(len(start_times)):
-        start = np.argmin(np.abs(timestamps - (start_times[i]-.25)))
-        error_snippets[i,:,:] = abs_error[start:start+nbins,:]
-        lfp_snippets[i,:,:] = lfp[start:start+nbins,chani,:]
-    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(30, 30))
-    for bandi in range(len(bands)+1):
-        ax.flat[bandi].imshow(error_snippets[:, :,bandi], aspect='auto', cmap='bwr', extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2)
-        avr_omission_data = np.mean(lfp_snippets[:, :, bandi], axis=0)
-        ax.flat[bandi].plot(t, len(start_times)//2 + avr_omission_data * len(start_times)//5, 'k', label='omission data', linewidth=3)
-        avr_condition = np.mean(error_snippets[:, :,bandi], axis=0)
-        ax.flat[bandi].plot(t, len(start_times)//2 + avr_condition * len(start_times)//5,   'w', label='change', linewidth=3)
-        ax.flat[bandi].set_xlabel('Time from change (s)')
-        if bandi==0:
-            ax.flat[bandi].set_ylabel('Trial')
-            ax.flat[bandi].set_title('broaband')
-            ax.flat[bandi].legend(loc = 'upper left')
-        else:
-            ax.flat[bandi].set_title('Band: ' + str(bands[bandi-1]) + ' Hz')
-    ax.flat[-1].imshow(np.zeros((1,1)), cmap='bwr', extent=[-0.25, 0.5, 0, len(start_times)],vmin=0, vmax=2)
-    ax.flat[-1].axis('off')
-    cbar = fig.colorbar(ax.flat[-1].images[0], ax=ax.flat[-1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-def plot_psd(y, yHat, chani, show_plot=True, save_fig=False, 
+
+def plot_psd(y, yHat, chani, fs=1/config.BIN_SIZE, show_plot=True, save_fig=False,
              output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """Welch PSD of the recorded and predicted broadband LFP of one channel (y, yHat: time x channels x targets)."""
+    f, Pxx = welch(y[:, chani, 0], fs, nperseg=64)
+    f, Pxx_hat = welch(yHat[:, chani, 0], fs, nperseg=64)
 
-    f, Pxx = welch(y[:,chani, 0], 250, nperseg=64)
-    f, Pxx_hat = welch(yHat[:,chani, 0], 250, nperseg=64)
-
-    fig, ax = plt.subplots(1,1,figsize=(5,5))
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     ax.plot(f, np.log10(Pxx), 'r', label='LFP')
     ax.plot(f, np.log10(Pxx_hat), 'g', label='model')
     ax.set_xlabel('Frequency (Hz)')
@@ -288,527 +205,256 @@ def plot_psd(y, yHat, chani, show_plot=True, save_fig=False,
     ax.set_title('Power spectral density of LFP and model prediction')
     ax.set_xlim([0, 120])
     ax.legend()
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-        
-def plot_attr_corrmat(attr,session_obj, show_plot=True, save_fig=False, 
-                      output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
-    locs = session_obj.units['structure_acronym']
-    sidx = np.argsort(locs.values)
-    sorted_locs = locs.values[sidx]
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
 
-    # for each area, find the first and last unit
-    areas = np.unique(sorted_locs)
-    first = []
-    last  = []
-    for area in areas:
-        ind = sorted_locs == area
-        first.append(np.where(ind)[0][0])
-        last.append(np.where(ind)[0][-1])
-    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
-    
-    attr = attr[:, sidx]
-    corrmat = np.corrcoef(attr.T)
-    fig, ax = plt.subplots(1,1,figsize=(8,8))
-    ax.imshow(corrmat, vmin=-.1, vmax=.1, aspect='auto', cmap='bwr')
-    
-    # Add horizontal and vertical lines between areas
-    for i in range(len(last) - 1):  # Don't add line after the last area
-        boundary = last[i] + 0.5  # Add 0.5 to place line between units
+
+def plot_attr_corrmat(attr, session_obj, show_plot=True, save_fig=False,
+                      output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """Correlation between units' attribution time courses (attr: time x units), grouped by area."""
+    sidx, areas, first, last, middle = _area_order(session_obj.units['structure_acronym'].values)
+    corrmat = np.corrcoef(attr[:, sidx].T)
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    im = ax.imshow(corrmat, vmin=-.1, vmax=.1, aspect='auto', cmap='bwr')
+    for boundary in last[:-1] + 0.5:       # lines between area blocks
         ax.axhline(y=boundary, color='white', linewidth=1, alpha=0.8)
         ax.axvline(x=boundary, color='white', linewidth=1, alpha=0.8)
-    
     ax.set_xticks(middle)
     ax.set_xticklabels(areas, rotation=45, ha='right')
     ax.set_yticks(middle)
     ax.set_yticklabels(areas, rotation=45, ha='right')
-    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.026, pad=0.04)
-    cbar.set_label('Correlation')
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-def plot_attr_density_plots(mean_attribution, session_obj, bands, area, show_plot=True, save_fig=False, 
+    fig.colorbar(im, ax=ax, fraction=0.026, pad=0.04).set_label('Correlation')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
+
+
+def plot_attr_density_plots(mean_attribution, session_obj, bands, area, show_plot=True, save_fig=False,
                             output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
-    exp   = np.ceil(np.log10(np.abs(np.median(mean_attribution))))
+    """
+    Histograms of |mean attribution| over channels and units of one area, per model target.
 
-    fig, ax = plt.subplots(1,1,figsize=(5,5))
-    
+    mean_attribution: (channels, targets, units); `area` is matched as a substring of the acronym.
+    """
+    in_area = session_obj.units['structure_acronym'].str.contains(area).values
+    exp = np.ceil(np.log10(np.abs(np.median(mean_attribution))))   # x range up to the median's order of magnitude
+
+    fig, ax = plt.subplots(1, 1, figsize=(5, 5))
     for bandi in range(len(bands)+1):
-        if bandi == 0:
-            plt.hist(np.abs(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()), 
-            bins=50, range = (0, 10 ** exp), density=False, histtype = 'step', label='Broadband',
-            weights=np.ones(len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten())) / len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()))
-        else:
-            plt.hist(np.abs(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()), 
-            bins=50, range = (0, 10 ** exp), density=False, histtype = 'step', label=f'{bands[bandi-1][0]}-{bands[bandi-1][1]} Hz',
-            weights=np.ones(len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten())) / len(mean_attribution[:,bandi,session_obj.units['structure_acronym'].str.contains(area)].flatten()))
-
+        values = np.abs(mean_attribution[:, bandi, in_area].flatten())
+        ax.hist(values, bins=50, range=(0, 10 ** exp), histtype='step', label=_band_title(bands, bandi),
+                weights=np.ones(len(values)) / len(values))
     ax.set_xlabel('Attribution')
     ax.set_ylabel('Probability')
     ax.set_xlim([- 10 ** (exp-2), 10 ** exp])
-    # set the y-axis to be log scale
-    # ax.set_yscale('log')
     ax.legend(loc='upper right', frameon=False)
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
 
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-        
-def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot=True, save_fig=False, 
+
+def plot_mean_attr_areas(mean_attr_areas, lfp_obj, session_obj, bands, show_plot=True, save_fig=False,
                          output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
+    """|Mean attribution| per area (rows, sorted) and channel (columns), one panel per model target."""
     num_channels = len(lfp_obj.channels)
     areas = sorted(session_obj.units['structure_acronym'].unique())
-    
-    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2,figsize=(10,20))
-    for bandi in range(len(bands)+1):
-        exp   = np.ceil(np.log10(np.abs(np.median(mean_attr_areas[:,bandi,:].flatten()))))
-        
-        ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]) , aspect='auto', cmap='bwr')
-        # set the xticks to be the channel depths
-        ax.flat[bandi].set_xticks(range(num_channels))
-        ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int), 
-                                    rotation=45, ha='right')
-        ax.flat[bandi].set_xlabel('dorsal ventral ccf coordinate')
 
-        # set the yticks to be the area names
+    fig, ax = _band_grid(len(bands)+1, figsize=(10, 20))
+    for bandi in range(len(bands)+1):
+        im = ax.flat[bandi].imshow(np.abs(mean_attr_areas[:, bandi, :]), aspect='auto', cmap='bwr')
+        ax.flat[bandi].set_xticks(range(num_channels))
+        ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int),
+                                       rotation=45, ha='right')
+        ax.flat[bandi].set_xlabel('dorsal ventral ccf coordinate')
         ax.flat[bandi].set_yticks(range(len(areas)))
         ax.flat[bandi].set_yticklabels(areas)
         ax.flat[bandi].set_ylabel('Area')
-        if bandi == 0:
-            ax.flat[bandi].set_title('Broadband')
-        else:
-            ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
-            
-        cbar = fig.colorbar(ax.flat[bandi].imshow(np.abs(mean_attr_areas[:,bandi,:]), 
-                                                aspect='auto', cmap='bwr'), 
-                            ax=ax.flat[bandi])
-
-    # tight layout
+        ax.flat[bandi].set_title(_band_title(bands, bandi))
+        fig.colorbar(im, ax=ax.flat[bandi])
     plt.tight_layout()
-    fig.delaxes(ax.flat[-1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
 
-def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2use, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
+
+def plot_mean_attr_pyr_int(mean_attribution, session_obj, area, df, bands, chan2use, show_plot=True, save_fig=False,
+                           output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """Boxplots of |mean attribution| of putative pyramidal cells vs interneurons (df.pyr) in one area and channel."""
     area_idx = session_obj.units.index[session_obj.units['structure_acronym'].str.contains(area)]
-    pyr  = np.intersect1d(df.unit_id[df.pyr == 1], area_idx)
+    pyr = np.intersect1d(df.unit_id[df.pyr == 1], area_idx)
     intn = np.intersect1d(df.unit_id[df.pyr == 0], area_idx)
+    attr_pyr = mean_attribution[:, :, session_obj.units.index.isin(pyr)]
+    attr_int = mean_attribution[:, :, session_obj.units.index.isin(intn)]
 
-    attr_pyr = mean_attribution[:, :,session_obj.units.index.isin(pyr)]
-    attr_int = mean_attribution[:, :,session_obj.units.index.isin(intn)]
-
-    # for each band, plot boxplots of the mean attribution for pyramidal cells and interneurons
-    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2, figsize=(5,8))
-
+    fig, ax = _band_grid(len(bands)+1, figsize=(5, 8))
     for bandi in range(len(bands)+1):
-        ax.flat[bandi].boxplot([np.abs(attr_pyr[chan2use, bandi,:]), np.abs(attr_int[chan2use, bandi,:])], showfliers=False)
-        if bandi == 0:
-            ax.flat[bandi].set_title('Broadband')
-        else:
-            ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
+        ax.flat[bandi].boxplot([np.abs(attr_pyr[chan2use, bandi, :]), np.abs(attr_int[chan2use, bandi, :])],
+                               showfliers=False)
+        ax.flat[bandi].set_title(_band_title(bands, bandi))
         ax.flat[bandi].set_xticklabels(['pyr', 'int'])
         ax.flat[bandi].set_ylabel('Mean attribution')
-        
-    # tight layout
     plt.tight_layout()
-    fig.delaxes(ax.flat[-1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-        
-def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim = False, bin_size = 0.004,
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
+
+
+def plot_attr_matrix(attr, lfp, timestamps, session_obj, time_win, plot_stim=False, bin_size=config.BIN_SIZE,
                      show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='attr_matrix.pdf',
                      min_neurons=None):
-    
-    stim_st = session_obj.stimulus_presentation.start_time
-    stim_st = stim_st[(stim_st > time_win[0]) & (stim_st < time_win[1])]
-    stim_st = stim_st.values
-    
-    locs = session_obj.units['structure_acronym']
-    sidx = np.argsort(locs.values)
-    sorted_locs = locs.values[sidx]
+    """
+    LFP trace above the attribution raster (units grouped by area) for time_win = [start, stop] s.
 
-    # for each area, find the first and last unit
-    all_areas = np.unique(sorted_locs)
-    all_first = []
-    all_last = []
-    area_counts = []
-    for area in all_areas:
-        ind = sorted_locs == area
-        count = np.sum(ind)
-        area_counts.append(count)
-        all_first.append(np.where(ind)[0][0])
-        all_last.append(np.where(ind)[0][-1])
-    
-    # Apply filtering if min_neurons is specified
+    attr: (time, units) aligned with timestamps; min_neurons: only label areas with at least this
+    many units; plot_stim: mark image onsets and offsets.
+    """
+    stim_st = session_obj.stimulus_presentation.start_time
+    stim_st = stim_st[(stim_st > time_win[0]) & (stim_st < time_win[1])].values
+
+    sidx, all_areas, all_first, all_last, _ = _area_order(session_obj.units['structure_acronym'].values)
     if min_neurons is not None:
-        large_area_mask = np.array(area_counts) >= min_neurons
-        areas = all_areas[large_area_mask]
-        first = [all_first[i] for i in range(len(all_areas)) if large_area_mask[i]]
-        last = [all_last[i] for i in range(len(all_areas)) if large_area_mask[i]]
-        filtered_areas = all_areas[~large_area_mask]
-        print(f"Filtered out {len(filtered_areas)} areas with <{min_neurons} neurons: {', '.join(filtered_areas)}")
+        large = (all_last - all_first + 1) >= min_neurons
+        print(f"Filtered out {np.sum(~large)} areas with <{min_neurons} neurons: {', '.join(all_areas[~large])}")
+        areas, first, last = all_areas[large], all_first[large], all_last[large]
     else:
-        areas = all_areas
-        first = all_first
-        last = all_last
-        
-    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
-    
+        areas, first, last = all_areas, all_first, all_last
+    middle = (first + (last - first) / 2).astype(int)
+
     st = int((time_win[0] - timestamps[0]) / bin_size)
     en = int((time_win[1] - timestamps[0]) / bin_size)
-    
-    # visualize the attribution we just loaded for the broadband model
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 8), 
-                               height_ratios=[1, 4])
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 8), height_ratios=[1, 4])
     ax1.plot(timestamps, lfp, 'k')
     ax1.set_xlim([time_win[0], time_win[1]])
-    
-    ax2.imshow(attr[st:en,sidx].T, aspect='auto', cmap='bwr', vmin=-0.0001, vmax=0.0001,
-            extent = [time_win[0], time_win[1], len(session_obj.units), 0])
-    
-    # Add horizontal lines between brain areas
-    for i in range(len(last) - 1):  # Don't add line after the last area
-        boundary = last[i] + 0.5  # Add 0.5 to place line between units
-        ax2.axhline(y=boundary, color='gray', 
-                    linewidth=1, alpha=0.8, linestyle='--')
-    
-    if plot_stim:
-        for st in stim_st:
-            ax2.axvline(st,     color='k', linestyle='--')
-            ax2.axvline(st+.25, color='k', linestyle='--')
-    ax2.set_xlabel('Time (s)')
-    ax2.set_ylabel('Unit') 
-    ax2.set_xlim([time_win[0], time_win[1]])
-    ax2.set_yticks(middle)  # Use middle positions directly
-    ax2.set_yticklabels(areas, rotation=45, ha='right')
-    
-    # Apply tight layout first, then adjust for colorbar
-    plt.tight_layout()
-    
-    # Make both subplots the same width and add colorbar without occlusion
-    fig.subplots_adjust(right=0.85)  # Leave space for colorbar
-    pos1 = ax1.get_position()
-    pos2 = ax2.get_position()
-    
-    # Ensure both subplots have the same width
-    ax1.set_position([pos1.x0, pos1.y0, pos2.width, pos1.height])
-    ax2.set_position([pos2.x0, pos2.y0, pos2.width, pos2.height])
-    
-    # Add colorbar spanning the full height of both subplots
-    cbar_ax = fig.add_axes([0.87, pos2.y0, 0.02, pos1.y0 + pos1.height - pos2.y0])
-    cbar = fig.colorbar(ax2.images[0], cax=cbar_ax)
-    cbar.set_label('Attribution')
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-    
-def plot_attr_lfp_corr(attr, lfp, session_obj, sorting = "max", bin_size = 0.004,
-                        show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
-    locs = session_obj.units['structure_acronym']
-    sidx = np.argsort(locs.values)
-    sorted_locs = locs.values[sidx]
 
-    # for each area, find the first and last unit
-    areas = np.unique(sorted_locs)
-    first = []
-    last  = []
-    for area in areas:
-        ind = sorted_locs == area
-        first.append(np.where(ind)[0][0])
-        last.append(np.where(ind)[0][-1])
-    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
-    
-    if len(lfp.shape) == 1:
-        lfp = lfp[:, np.newaxis]
-        
-    cross_corr = np.zeros((attr.shape[1], lfp.shape[0]))
-    for i in range(attr.shape[1]):
-        cross_corr[i,:] = signal.correlate(lfp.flatten(), attr[:,i], mode='same')
-        
+    im = ax2.imshow(attr[st:en, sidx].T, aspect='auto', cmap='bwr', vmin=-0.0001, vmax=0.0001,
+                    extent=[time_win[0], time_win[1], len(session_obj.units), 0])
+    for boundary in last[:-1] + 0.5:       # lines between area blocks
+        ax2.axhline(y=boundary, color='gray', linewidth=1, alpha=0.8, linestyle='--')
+    if plot_stim:
+        for onset in stim_st:
+            ax2.axvline(onset, color='k', linestyle='--')
+            ax2.axvline(onset + .25, color='k', linestyle='--')   # images are shown for 250 ms
+    ax2.set_xlabel('Time (s)')
+    ax2.set_ylabel('Unit')
+    ax2.set_xlim([time_win[0], time_win[1]])
+    ax2.set_yticks(middle)
+    ax2.set_yticklabels(areas, rotation=45, ha='right')
+
+    # give both panels the same width and put the colorbar beside them
+    plt.tight_layout()
+    fig.subplots_adjust(right=0.85)
+    pos1, pos2 = ax1.get_position(), ax2.get_position()
+    ax1.set_position([pos1.x0, pos1.y0, pos2.width, pos1.height])
+    cbar_ax = fig.add_axes([0.87, pos2.y0, 0.02, pos1.y0 + pos1.height - pos2.y0])
+    fig.colorbar(im, cax=cbar_ax).set_label('Attribution')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
+
+
+def plot_attr_lfp_corr(attr, lfp, session_obj, sorting="max", bin_size=config.BIN_SIZE,
+                       show_plot=True, save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """
+    Normalised cross-correlation between each unit's attribution and the LFP, within +-1 s lag.
+
+    sorting='max': order units by mean correlation within +-200 lags of zero; otherwise by area.
+    """
+    sidx, areas, _, _, middle = _area_order(session_obj.units['structure_acronym'].values)
+    lfp = lfp.reshape(-1)
+
+    cross_corr = np.array([signal.correlate(lfp, attr[:, i], mode='same') for i in range(attr.shape[1])])
     corr_norm = cross_corr / (np.std(attr, axis=0)[:, np.newaxis] * np.std(lfp) * len(lfp))
     lags = signal.correlation_lags(lfp.size, lfp.size, mode="same")
-    
-    midx = np.argsort(np.mean(corr_norm[:,int(lfp.shape[0]/2)-200:int(lfp.shape[0]/2)+200], axis=1))
-    
-    # for clim use the 5th and 95th percentile
+
+    center = len(lfp) // 2
+    order = np.argsort(np.mean(corr_norm[:, center-200:center+200], axis=1)) if sorting == "max" else sidx
     clim = np.percentile(corr_norm.flatten(), [5, 95])
-    
-    fig, ax = plt.subplots(1,1,figsize=(8,8))
-    if sorting == "max":
-        ax.imshow(corr_norm[midx,:], aspect='auto', cmap='bwr',
-          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=clim[0], vmax=clim[1])
-    else:
-       ax.imshow(corr_norm[sidx,:], aspect='auto', cmap='bwr',
-          extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0],0], vmin=clim[0], vmax=clim[1])
-       ax.set_yticks(middle)
-       ax.set_yticklabels(areas, rotation=45, ha='right')
-        
+
+    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    im = ax.imshow(corr_norm[order, :], aspect='auto', cmap='bwr',
+                   extent=[lags[0] * bin_size, lags[-1] * bin_size, corr_norm.shape[0], 0], vmin=clim[0], vmax=clim[1])
+    if sorting != "max":
+        ax.set_yticks(middle)
+        ax.set_yticklabels(areas, rotation=45, ha='right')
     ax.plot([0, 0], [0, corr_norm.shape[0]], '--k')
     ax.set_xlabel('Lag relative to LFP (s)')
     ax.set_ylabel('Unit')
     ax.set_xlim([-1, 1])
     ax.set_aspect(1.0/ax.get_data_ratio(), adjustable='box')
-    ax.set_ylabel('Unit')
+    fig.colorbar(im, ax=ax, fraction=0.026, pad=0.04).set_label('Correlation')
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
 
-    cbar = fig.colorbar(ax.images[0], ax=ax, fraction=0.026, pad=0.04)
-    cbar.set_label('Correlation')
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
 
-def plot_mean_attr_clusters(mean_attr_clusters, lfp_obj, bands, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
-    num_channels = len(lfp_obj.channels) 
-    fig, ax = plt.subplots(int(np.ceil((len(bands)+1)/2)),2,figsize=(10,20)) 
-    
+def plot_mean_attr_clusters(mean_attr_clusters, lfp_obj, bands, show_plot=True, save_fig=False,
+                            output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """|Mean attribution| per cluster (rows 1-5; row 0 is unused) and channel, one panel per model target."""
+    num_channels = len(lfp_obj.channels)
+    fig, ax = _band_grid(len(bands)+1, figsize=(10, 20))
     for bandi in range(len(bands)+1):
-        ax.flat[bandi].imshow( np.abs(mean_attr_clusters[:,bandi,:]) , aspect='auto',cmap='bwr')
-        # set the xticks to be the channel depths
+        im = ax.flat[bandi].imshow(np.abs(mean_attr_clusters[:, bandi, :]), aspect='auto', cmap='bwr')
         ax.flat[bandi].set_xticks(range(num_channels))
-        ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int) , rotation=45, ha='right')
+        ax.flat[bandi].set_xticklabels(lfp_obj.channels['dorsal_ventral_ccf_coordinate'].astype(int), rotation=45, ha='right')
         ax.flat[bandi].set_xlabel('dorsal ventral ccf coordinate')
-        ax.flat[bandi].set_ylim([.5,5.5])
-        if bandi == 0:
-            ax.flat[bandi].set_title('Broadband')
-        else:
-            ax.flat[bandi].set_title(str(bands[bandi-1]) + ' Hz')
-        # set the yticks to be the cluster ids
-        ax.flat[bandi].set_yticks(range(1,6,1))
-        ax.flat[bandi].set_yticklabels(range(1,6,1))
+        ax.flat[bandi].set_ylim([.5, 5.5])
+        ax.flat[bandi].set_title(_band_title(bands, bandi))
+        ax.flat[bandi].set_yticks(range(1, 6))
+        ax.flat[bandi].set_yticklabels(range(1, 6))
         ax.flat[bandi].set_ylabel('Cluster ID')
-        cbar = fig.colorbar(ax.flat[bandi].imshow(np.abs(mean_attr_clusters[:,bandi,:]), aspect='auto', cmap='bwr'), ax=ax.flat[bandi])
-        
-    # tight layout
+        fig.colorbar(im, ax=ax.flat[bandi])
     plt.tight_layout()
-    fig.delaxes(ax.flat[-1])
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-        
-        
-def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size = 0.004, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
+
+
+def plot_peri_stim_attr(attr, lfp, session_obj, timestamps, time_win, bin_size=config.BIN_SIZE, show_plot=True,
+                        save_fig=False, output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """
+    Stimulus-triggered attribution per area (z-scored per unit, mean +- SEM across units) with the
+    stimulus-triggered LFP overlaid, for every presentation that fits within timestamps.
+
+    Returns (attr_snippets, lfp_snippets, t): presentations x time (x units).
+    """
     t = np.arange(time_win[0], time_win[1], bin_size)
 
     stim_st = session_obj.stimulus_presentation.start_time
-    stim_st = stim_st[((stim_st - np.abs(time_win[0])) > timestamps[0]) & ((stim_st + np.abs(time_win[1])) < timestamps[-1])]
-    stim_st = stim_st.values
-    
+    stim_st = stim_st[((stim_st - np.abs(time_win[0])) > timestamps[0]) &
+                      ((stim_st + np.abs(time_win[1])) < timestamps[-1])].values
+
     areas = sorted(session_obj.units['structure_acronym'].unique())
-    
-    attr_snippets = np.zeros((len(stim_st), len(t), attr.shape[1])) # trials x time x neurons
+    attr_snippets = np.zeros((len(stim_st), len(t), attr.shape[1]))
     lfp_snippets = np.zeros((len(stim_st), len(t)))
-    
-    for i in range(len(stim_st)):
-        start = np.argmin(np.abs(timestamps - (stim_st[i]- np.abs(time_win[0])  )))
-        attr_snippets[i,:,:] = attr[start:start+len(t),:]
-        lfp_snippets[i,:]    = lfp[start:start+len(t)]
-    
-    attr_snippets_avr  = np.nanmean(attr_snippets, axis=0)
-    attr_snippets_norm = zscore(attr_snippets_avr, axis=0)
-    keep = ~np.any(np.isnan(attr_snippets_norm),axis=0)
-    
+    for i, st in enumerate(stim_st):
+        start = np.argmin(np.abs(timestamps - (st - np.abs(time_win[0]))))
+        attr_snippets[i] = attr[start:start+len(t), :]
+        lfp_snippets[i] = lfp[start:start+len(t)]
+
+    attr_snippets_norm = zscore(np.nanmean(attr_snippets, axis=0), axis=0)
+    keep = ~np.any(np.isnan(attr_snippets_norm), axis=0)    # drops units with constant attribution
     mean_lfp = np.mean(lfp_snippets, axis=0)
-    
-    fig, ax = plt.subplots(int(np.ceil(len(areas)/2)) ,2,figsize=(16,16))
-    for areai in range(len(areas)):
-        # get mean across trials
-        inarea = session_obj.units['structure_acronym'].values == areas[areai]
-        num_neurons = np.sum(inarea)
-        tmp = attr_snippets_norm[:, inarea & keep]
-        # num_neurons = np.sum(session_obj.units['structure_acronym'] == areas[areai])
-        # plot mean and sem
-        ax.flat[areai].plot(t, np.mean(tmp, axis=1), 'r', label='mean')
-        ax.flat[areai].fill_between(t, np.mean(tmp, axis=1) - np.std(tmp, axis=1)/np.sqrt(num_neurons), 
-                                 np.mean(tmp, axis=1) + np.std(tmp, axis=1)/np.sqrt(num_neurons), color='r', alpha=0.5)
+
+    fig, ax = _band_grid(len(areas), figsize=(16, 16))
+    for areai, area in enumerate(areas):
+        tmp = attr_snippets_norm[:, (session_obj.units['structure_acronym'].values == area) & keep]
+        mean, sem = np.mean(tmp, axis=1), np.std(tmp, axis=1) / np.sqrt(tmp.shape[1])
+        ax.flat[areai].plot(t, mean, 'r', label='mean')
+        ax.flat[areai].fill_between(t, mean - sem, mean + sem, color='r', alpha=0.5)
         ax2 = ax.flat[areai].twinx()
         ax2.plot(t, mean_lfp, 'k')
         ax.flat[areai].set_ylabel('Mean attribution')
         ax2.set_ylabel('Mean LFP')
-        ax.flat[areai].set_xlim([-0.25, 0.5])
-        corr = np.corrcoef(mean_lfp, np.mean(tmp, axis=1))[0,1]
-        ax.flat[areai].set_title(areas[areai] + ' Corr: ' + str(np.round(corr,2)))
-    
-    if len(areas) % 2 != 0:
-       fig.delaxes(ax.flat[-1]) 
+        ax.flat[areai].set_xlim([time_win[0], time_win[1]])
+        corr = np.corrcoef(mean_lfp, mean)[0, 1]
+        ax.flat[areai].set_title(f'{area} Corr: {np.round(corr, 2)}')
     plt.tight_layout()
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)
-    
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
+
     return attr_snippets, lfp_snippets, t
-    
-    
-    
-def plot_unit_attr_fr_corr(unit_attr_fr_corr, session_obj, bands, show_plot=True, save_fig=False, 
-                         output_dir=None, session_id=None, fig_name='default_name.pdf'):
-    
+
+
+def plot_unit_attr_fr_corr(unit_attr_fr_corr, session_obj, bands, show_plot=True, save_fig=False,
+                           output_dir=None, session_id=None, fig_name='default_name.pdf'):
+    """Per-unit correlation between attribution and firing rate (units x channels x targets), one panel per channel."""
     num_channels = unit_attr_fr_corr.shape[1]
-    num_bands    = unit_attr_fr_corr.shape[2]
-    
-    locs = session_obj.units['structure_acronym']
-    sidx = np.argsort(locs.values)
-    sorted_locs = locs.values[sidx]
+    num_bands = unit_attr_fr_corr.shape[2]
+    sidx = _area_order(session_obj.units['structure_acronym'].values)[0]
 
-    # for each area, find the first and last unit
-    areas = np.unique(sorted_locs)
-    first = []
-    last  = []
-    for area in areas:
-        ind = sorted_locs == area
-        first.append(np.where(ind)[0][0])
-        last.append(np.where(ind)[0][-1])
-    middle = (np.array(first) + (np.array(last) - np.array(first)) / 2).astype(int)
-    
-    fig, ax = plt.subplots(int(np.ceil(num_channels/2)) ,2,figsize=(10,40))
-    
+    fig, ax = plt.subplots(int(np.ceil(num_channels/2)), 2, figsize=(10, 40))
     for chani in range(num_channels):
-        ax.flat[chani].imshow(unit_attr_fr_corr[sidx,chani,:], aspect='auto', cmap='bwr',
-          extent=[0, num_bands, unit_attr_fr_corr.shape[0],0], vmin=-.1, vmax=.1, interpolation='none' )
-        # ax.flat[chani].set_yticks(middle)
-        # ax.flat[chani].set_yticklabels(areas, rotation=45, ha='right')
+        ax.flat[chani].imshow(unit_attr_fr_corr[sidx, chani, :], aspect='auto', cmap='bwr',
+                              extent=[0, num_bands, unit_attr_fr_corr.shape[0], 0], vmin=-.1, vmax=.1,
+                              interpolation='none')
         ax.flat[chani].set_xticks(range(num_bands))
-        ax.flat[chani].set_xticklabels(['Broadband'] + [str(bands[i]) for i in range(len(bands))], rotation=45, ha='center')
+        ax.flat[chani].set_xticklabels(['Broadband'] + [str(b) for b in bands], rotation=45, ha='center')
         ax.flat[chani].set_title('Channel ' + str(chani))
-        
     plt.tight_layout()
-    if show_plot:
-        plt.show()
-    else:
-        plt.close(fig)
-    if save_fig:
-        save_plot(fig, output_dir, session_id, fig_name)   
-    
-def visualize_filters(model, num_neurons):
-    """Visualizes the filters of the first convolutional layer in the model,
-    arranged in a square grid.
-
-    Args:
-        model: Trained PyTorch model with a convolutional layer.
-
-    """
-    # Set model to evaluation mode
-    model.eval()
-
-    # Access the convolutional layer
-    conv_layer = model.conv1d
-
-    # Extract the filters
-    filters = conv_layer.weight.data
-
-    # Get the number of filters, input channels, and kernel size
-    out_channels, in_channels, kernel_size = filters.shape
-    print (f"Channels: {out_channels} in: {in_channels}, kernel {kernel_size}")
-
-    # Calculate the number of rows and columns for a square grid
-    num_filters = out_channels
-    num_cols = int(np.ceil(np.sqrt(num_filters)))
-    num_rows = int(np.ceil(num_filters / num_cols))
-
-    # Create the subplots for the grid
-    fig, axs = plt.subplots(num_rows, num_cols, figsize=(3 * num_cols, 3 * num_rows), layout='constrained') # set scaling factor manually to fit
-    fig.suptitle("Heat Maps of Convolutional Layer Filters", fontsize=16)
-
-    # Iterate and plot each heatmap. Ensure out_channels and in_channels are not too large.
-    for i in range(num_filters):
-        # Get the row and column index of the current filter
-        row_idx = i // num_cols
-        col_idx = i % num_cols
-
-        # Get single filter
-        currentFilter = filters[i,:,:]
-
-        # convert to numpy
-        currentFilter = currentFilter.cpu().numpy()
-
-        # Normalize if it is exploding
-        currentMax = np.max(np.abs(currentFilter))
-        if (currentMax > 100):
-            currentFilter = currentFilter/currentMax
-
-        # Plot Heatmap
-        if num_rows == 1:
-           im = axs[col_idx].imshow(currentFilter, cmap='viridis', aspect = "auto")
-           axs[col_idx].set_title(f"Filt {i}")
-
-           # Remove all ticks and labels
-           axs[col_idx].set_xticks([])
-           axs[col_idx].set_yticks([])
-        elif num_cols == 1:
-            im = axs[row_idx].imshow(currentFilter, cmap='viridis', aspect = "auto")
-            axs[row_idx].set_title(f"Filt {i}")
-
-           # Remove all ticks and labels
-            axs[row_idx].set_xticks([])
-            axs[row_idx].set_yticks([])
-        else:
-           im = axs[row_idx, col_idx].imshow(currentFilter, cmap='viridis', aspect = "auto")
-
-            # Set Heatmap title
-           axs[row_idx, col_idx].set_title(f"Filt {i}")
-
-            # Remove all ticks and labels
-           axs[row_idx, col_idx].set_xticks([])
-           axs[row_idx, col_idx].set_yticks([])
-
-        # fig.colorbar(im, ax=axs[-1,0]) # always puts the colorbar in same location
-
-    # If num_filters is not a perfect square, then the final plots will show the heat map.
-    for i in range(num_filters,num_rows * num_cols):
-        row_idx = i // num_cols
-        col_idx = i % num_cols
-
-        if num_rows == 1:
-            axs[col_idx].axis("off")
-        elif num_cols == 1:
-            axs[row_idx].axis("off")
-        else:
-            axs[row_idx,col_idx].axis("off")
-
-    # Display plots
-    plt.show()
+    _finish(fig, show_plot, save_fig, output_dir, session_id, fig_name)
