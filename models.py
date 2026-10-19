@@ -1,9 +1,16 @@
-import sys 
-import numpy as np 
+import sys
+import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LinearRegression
+
+import config
+
+
+def build_lstm(input_size, device, seqlength=config.SEQLENGTH):
+    """The project's standard per-channel LSTM (architecture in config.LSTM_KWARGS), ready to train or load."""
+    return process_model(LSTMnet(input_size, seqlength=seqlength, **config.LSTM_KWARGS),
+                         torch.nn.MSELoss(), device)
 
 class LSTMnet(nn.Module):
     def __init__(self, input_size, num_hidden, num_layers, seqlength,

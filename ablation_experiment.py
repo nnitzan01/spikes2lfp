@@ -81,8 +81,7 @@ def start(output_dir, session_id):
         X_train_fr, X_test_fr, y_train_fr, y_test_fr  = chunk_and_reshape(spikes_obj.spkMat[:,fr_excluded], lfp_obj.lfpMat[:,chani,bandi], 
                                                     seqlength, prediction_lag=0, test_size=0.2, random_state=42)
         train_dataloader_fr , test_dataloader_fr = get_data_loaders(X_train_fr, X_test_fr, y_train_fr, y_test_fr, batch_size)
-        lstm_model_fr = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
-                                                conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
+        lstm_model_fr = models.build_lstm(len(session_obj.units) - num_neurons, device)
         train_loss, test_loss = lstm_model_fr.train(train_dataloader_fr,
                                     test_dataloader_fr , num_epochs)
         yHat_fr = lstm_model_fr.evaluate(test_dataloader_fr.dataset.tensors[0]).cpu().numpy()
@@ -93,8 +92,7 @@ def start(output_dir, session_id):
         X_train_attr, X_test_attr, y_train_attr, y_test_attr  = chunk_and_reshape(spikes_obj.spkMat[:,attr_excluded], lfp_obj.lfpMat[:,chani,bandi], 
                                                     seqlength, prediction_lag=0, test_size=0.2, random_state=42)
         train_dataloader_attr, test_dataloader_attr = get_data_loaders(X_train_attr, X_test_attr, y_train_attr, y_test_attr, batch_size)
-        lstm_model_attr = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
-                                                conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
+        lstm_model_attr = models.build_lstm(len(session_obj.units) - num_neurons, device)
         train_loss, test_loss = lstm_model_attr.train(train_dataloader_attr,
                                     test_dataloader_attr , num_epochs)
         yHat_attr = lstm_model_attr.evaluate(test_dataloader_attr.dataset.tensors[0]).cpu().numpy()
@@ -108,8 +106,7 @@ def start(output_dir, session_id):
             X_train_rand, X_test_rand, y_train_rand, y_test_rand  = chunk_and_reshape(spikes_obj.spkMat[:,rand_excluded], lfp_obj.lfpMat[:,chani,bandi], 
                                                       seqlength, prediction_lag=0, test_size=0.2, random_state=42)
             train_dataloader_rand, test_dataloader_rand = get_data_loaders(X_train_rand, X_test_rand, y_train_rand, y_test_rand, batch_size)
-            lstm_model_rand = models.process_model(models.LSTMnet(len(session_obj.units) - num_neurons, hidden_size, num_layers,seqlength, 
-                                                 conv=True,kernel_size=5, out_channels=32 ,batchNorm=False), criterion, device)
+            lstm_model_rand = models.build_lstm(len(session_obj.units) - num_neurons, device)
             train_loss, test_loss = lstm_model_rand.train(train_dataloader_rand,
                                         test_dataloader_rand , num_epochs)
             yHat_rand = lstm_model_rand.evaluate(test_dataloader_rand.dataset.tensors[0]).cpu().numpy()
