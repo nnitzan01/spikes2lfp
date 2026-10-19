@@ -1,100 +1,86 @@
-import os
+"""
+Load VISp LFP for a session directly from the Visual Behavior Neuropixels NWB files.
+
+Reading the probe NWB files with pynwb is much faster than going through the AllenSDK cache.
+Expected layout under the data root (the AllenSDK S3 cache directory):
+
+    visual-behavior-neuropixels-0.4.0/project_metadata/probes.csv
+    visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/<session_id>/probe_probe<X>_lfp.nwb
+"""
+import ast
+from pathlib import Path
+
 import numpy as np
-import xarray as xr
 import pandas as pd
 from pynwb import NWBHDF5IO
-from pathlib import Path
-import warnings
-warnings.filterwarnings('ignore')
 
-def load_nwb(nwb_dir, session_id, probe_letter):
+import config
+
+DATASET_DIR = 'visual-behavior-neuropixels-0.4.0'
+
+
+def find_visp_probe(data_root, session_id):
     """
-    Instead of downloading LFP data using AllenSDK, LFP is loaded directly from .nwb files.
-    Faster this way.
+    Return (probe_id, probe_letter) of the probe that recorded VISp in this session.
+
+    Probes that do not also pass through VISpm are preferred (this was the original selection
+    rule, kept so existing sessions use the same probe); a probe crossing both is used only if
+    there is no other. Among equals, the first in probes.csv wins.
+    """
+    probe_table = pd.read_csv(Path(data_root) / DATASET_DIR / 'project_metadata' / 'probes.csv')
+    session_probes = probe_table[probe_table['ecephys_session_id'] == session_id]
+    # structure_acronyms is stored as the string repr of a list, e.g. "['VISp', 'VISpm', 'root']";
+    # parse it so 'VISp' is matched exactly rather than as a substring of 'VISpm'
+    areas = session_probes['structure_acronyms'].apply(ast.literal_eval)
+    qualified = session_probes[areas.apply(lambda a: 'VISp' in a)]
+    if qualified.empty:
+        raise ValueError(f'No probe in session {session_id} recorded VISp')
+    also_visp_m = areas[qualified.index].apply(lambda a: 'VISpm' in a)
+    qualified = pd.concat([qualified[~also_visp_m], qualified[also_visp_m]])
+    if len(qualified) > 1:
+        print(f'{len(qualified)} probes recorded VISp in session {session_id}; using {qualified.iloc[0]["name"]}')
+    probe = qualified.iloc[0]
+    return probe['ecephys_probe_id'], probe['name'][-1]   # name is e.g. 'probeC'
+
+
+def load_lfp(data_root, session_id, channels, start_time, stop_time):
+    """
+    Load the VISp LFP of one session between start_time and stop_time (s).
 
     input:
-    session_id: int, session_id
-    probe_letter: str, probe letter, e.g. 'A', 'B', 'C', etc.
-    
-    output:
-    nwbfile: NWBFile object
-    
-    note:
-    assuming the following file structure:
-    
-    nwb_dir/session_id/probeA_lfp.nwb
-    """
-    probe_letter = probe_letter.upper()
-    session_path = Path(Path(nwb_dir) /"visual-behavior-neuropixels-0.4.0"/"behavior_ecephys_sessions"/str(session_id))
-    # session folder does not exist
-    if not os.path.exists(session_path): 
-        print(f'Session {session_id} does not exist')
-        return None
-    # probe does not exist
-    probe_nwb_path = Path(session_path / f'probe_probe{probe_letter}_lfp.nwb')
-    if not os.path.exists(probe_nwb_path):
-        print(f'Probe {probe_letter} does not exist')
-        return None
-    # load the data
-    io = NWBHDF5IO(probe_nwb_path, mode="r") # type: ignore
-    nwbfile = io.read()
-    return nwbfile
-
-def nwb_to_xarray(nwb):
-    """
-    Reading from the provided .nwb file and converting it to xarray DataArray.
-
-    input:
-    nwb: NWBFile object
+    data_root: str or Path, AllenSDK cache directory (see module docstring)
+    session_id: int
+    channels: DataFrame, session channel table (session.get_channels()), indexed by channel id
+    start_time, stop_time: float, seconds on the session clock
 
     output:
-    lfp: xarray DataArray, LFP data
-        attributes: timestamps - time points for each LFP recording
-                    channels - channel ids for each channel 
+    chans: DataFrame, rows of `channels` for the VISp channels, in recording order
+    lfp: ndarray (time x channels)
+    timestamps: ndarray (time,)
     """
-    if nwb is None:
-        return None
-    else:
+    _, probe_letter = find_visp_probe(data_root, session_id)
+    nwb_path = (Path(data_root) / DATASET_DIR / 'behavior_ecephys_sessions' / str(session_id)
+                / f'probe_probe{probe_letter.upper()}_lfp.nwb')
+    if not nwb_path.exists():
+        raise FileNotFoundError(nwb_path)
+
+    with NWBHDF5IO(str(nwb_path), mode='r') as io:
+        nwb = io.read()
         probe_id = nwb.identifier
-        data = nwb.acquisition[f'probe_{probe_id}_lfp'].electrical_series[f'probe_{probe_id}_lfp_data']
-        lfp = np.array(data.data)/2
-        timestamps = np.array(data.timestamps)
-        electrodes = nwb.electrodes.to_dataframe()
-        channels = electrodes.index.values
-        return xr.DataArray(lfp, coords=[timestamps, channels], dims=['time', 'channel']) # type: ignore
+        series = nwb.acquisition[f'probe_{probe_id}_lfp'].electrical_series[f'probe_{probe_id}_lfp_data']
+        all_timestamps = np.asarray(series.timestamps)
+        # read only the requested time window from disk instead of the whole recording
+        i0 = np.searchsorted(all_timestamps, start_time, side='left')
+        i1 = np.searchsorted(all_timestamps, stop_time, side='right')   # inclusive, like the old xarray slice
+        lfp = np.asarray(series.data[i0:i1])
+        channel_ids = nwb.electrodes.to_dataframe().index.values
 
+    # The NWB metadata states a 2500 Hz rate although the LFP is sampled at 1250 Hz. Timing here
+    # comes from the stored timestamps, so check the real rate instead of trusting the metadata.
+    fs = 1 / np.median(np.diff(all_timestamps[i0:i1]))
+    if abs(fs - config.LFP_FS) > 1:
+        raise ValueError(f'LFP sampled at {fs:.1f} Hz, expected {config.LFP_FS} Hz ({nwb_path})')
 
-def load_lfp(output_dir, id, channels, start_time, stop_time):
-    """
-    Reading from .nwb files directly and loading LFP data for the given session.
-
-    input:
-    output_dir: str, path to the output directory
-    session: object, AllenSDK session object
-
-    output:
-    chans: DataFrame, VISp channels
-    lfp_sliced: xarray DataArray, LFP data for the qualified channels
-    """
-    probe_table_dir = Path(output_dir / "visual-behavior-neuropixels-0.4.0" / "project_metadata" / "probes.csv")
-    probe_table = pd.read_csv(probe_table_dir)
-    session_probes = probe_table[probe_table['ecephys_session_id'] == id]
-    qualified_probes = []
-    for probe_id in session_probes.ecephys_probe_id.values:
-        probe = session_probes[session_probes['ecephys_probe_id'] == probe_id]
-        if ('VISp' in probe.structure_acronyms.values[0]) and ('VISpm' not in probe.structure_acronyms.values[0]):
-            qualified_probes.append(probe_id)
-    if len(qualified_probes) == 0:
-        print(f'No qualified probes for session {id}')
-    elif len(qualified_probes) > 1:
-        print(f'More than one qualified probes for session {id}')
-        print('Choosing the first one')
-        probe_id = qualified_probes[0]
-    else:
-        probe_id = qualified_probes[0]
-    probe_letter = probe_table[probe_table['ecephys_probe_id'] == probe_id].name.values[0][-1]
-    lfp = nwb_to_xarray(load_nwb(output_dir, id, probe_letter))
-    all_chans = lfp.channel.values
-    chans = channels.loc[all_chans][channels.loc[all_chans]['structure_acronym'] == 'VISp']
-    lfp_sliced = lfp.sel(time=slice(start_time, stop_time), channel=chans.index.values)
-    return chans, lfp_sliced.data, lfp_sliced.time.to_numpy()
+    probe_chans = channels.loc[channel_ids]
+    is_visp = (probe_chans['structure_acronym'] == 'VISp').to_numpy()
+    return probe_chans[is_visp], lfp[:, is_visp], all_timestamps[i0:i1]
