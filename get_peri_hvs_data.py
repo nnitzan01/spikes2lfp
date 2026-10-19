@@ -7,7 +7,9 @@ import pandas as pd
 from pathlib import Path
 from preprocess_data import *
 from process_session import session as ps
-from scipy.sparse import save_npz, coo_matrix
+from scipy.sparse import save_npz, coo_matrix, load_npz
+from analysis.ranking import (EPSILON, baseline_reference_set, jaccard_consecutive,
+                              jaccard_to_reference, rank_active_neurons, top_k_mask)
 import warnings 
 import gc
 
@@ -32,7 +34,6 @@ def get_peri_hvs_data(output_dir, session_id):
     # --- CONSTANTS ---
     bin_size  = 0.004
     K = 40 # Top neurons for Jaccard
-    EPSILON = 1e-10
     time_win = [-1, 1]
     baseline_win = [-1, -0.75]
     
@@ -100,75 +101,47 @@ def get_peri_hvs_data(output_dir, session_id):
 
     # --- 3. Initialize Snippet Containers ---
     # Memory efficient types: uint16 for ranks, bool for mask
+    # Ranks: 1 = most influential active neuron in that bin, 0 = silent (see analysis/ranking.py).
+    # Jaccard snippets start as NaN so trials that do not fit in the recording stay undefined.
     rank_snippets = np.zeros((n_trials, n_bins_snippet, n_neurons, num_channels), dtype=np.uint16)
-    active_mask_snippet = np.zeros((n_trials, n_bins_snippet, n_neurons, num_channels), dtype=bool) 
-    jaccard_raw_snippets = np.zeros((n_trials, n_bins_snippet, num_channels), dtype=np.float32)
-    jaccard_ref_snippets = np.zeros((n_trials, n_bins_snippet, num_channels), dtype=np.float32)
+    active_mask_snippet = np.zeros((n_trials, n_bins_snippet, n_neurons, num_channels), dtype=bool)
+    jaccard_raw_snippets = np.full((n_trials, n_bins_snippet, num_channels), np.nan, dtype=np.float32)
+    jaccard_ref_snippets = np.full((n_trials, n_bins_snippet, num_channels), np.nan, dtype=np.float32)
 
-    # Pre-calculate baseline relative indices
+    # Baseline window as bin offsets within a snippet
     b_start_rel = np.searchsorted(t, baseline_win[0])
     b_end_rel = np.searchsorted(t, baseline_win[1])
 
     # --- 4. Channel-by-Channel Processing ---
     print("Starting Channel Loop...", flush=True)
-    for ch_idx, ch_val in enumerate(chan_numbers): 
+    for ch_idx, ch_val in enumerate(chan_numbers):
         print(f"Processing Channel {ch_val} ({ch_idx+1}/{num_channels})", flush=True)
-        
-        # Load Sparse Attribution
-        sparse_file = output_dir_attrs / f'attribution_scores_entire_session_chan{ch_val}_band0.npz'
-        sparse_attr = np.load(sparse_file, allow_pickle=True)
-        attrs = coo_matrix((sparse_attr['data'], (sparse_attr['row'], sparse_attr['col'])), 
-                          shape=sparse_attr['shape']).toarray().astype(np.float32)
-        
-        # Normalize Attribution (Relative Load)
-        total_attr = np.nansum(np.abs(attrs), axis=1, keepdims=True)
-        attrs_normalized = np.divide(np.abs(attrs), total_attr, out=np.zeros_like(attrs), where=total_attr > EPSILON)
-        
-        # Compute Rank for the entire session for this channel
-        rank_matrix_channel = np.zeros((n_timepoints_total, n_neurons), dtype=np.int16)
-        # Sequence for rank assignment [n, n-1, ..., 1]
-        rank_values = np.arange(n_neurons, 0, -1, dtype=np.int16)
-        for ti in range(n_timepoints_total):
-            rank_matrix_channel[ti, np.argsort(attrs_normalized[ti, :])] = rank_values
 
-        # --- Jaccard Ref: Calculate Mean Baseline Rank across trials ---
-        # Using a summation approach to avoid large intermediate arrays
-        sum_baseline_rank = np.zeros(n_neurons, dtype=np.float32)
-        count_baseline_bins = n_trials * (b_end_rel - b_start_rel)
-        for s_idx in trial_start_indices:
-            sum_baseline_rank += np.sum(rank_matrix_channel[s_idx + b_start_rel : s_idx + b_end_rel, :], axis=0)
-        
-        avg_baseline_rank = sum_baseline_rank / count_baseline_bins
-        baseline_top_K = set(np.argsort(avg_baseline_rank)[:K])
-        
-        # --- Jaccard: Stability Analysis (Session-wide) ---
-        j_raw_full = np.zeros(n_timepoints_total, dtype=np.float32)
-        j_ref_full = np.zeros(n_timepoints_total, dtype=np.float32)
-        for ti in range(n_timepoints_total - 1):
-            s_t = set(np.where(rank_matrix_channel[ti, :] <= K)[0])
-            s_t1 = set(np.where(rank_matrix_channel[ti+1, :] <= K)[0])
-            
-            # t vs t+1
-            u = len(s_t | s_t1)
-            j_raw_full[ti] = len(s_t & s_t1) / u if u > 0 else 0
-            
-            # t vs Baseline
-            u_ref = len(s_t | baseline_top_K)
-            j_ref_full[ti] = len(s_t & baseline_top_K) / u_ref if u_ref > 0 else 0
+        # Attribution for the whole session (bins x neurons)
+        sparse_file = output_dir_attrs / f'attribution_scores_entire_session_chan{ch_val}_band0.npz'
+        attrs = load_npz(sparse_file).toarray().astype(np.float32)
+
+        ranks = rank_active_neurons(attrs)
+        top_k = top_k_mask(ranks, K)
+
+        # Stability of the top-K set: bin to bin (raw), and against the K neurons that dominate
+        # the pre-stimulus baseline (ref). NaN where both sets are empty.
+        reference = baseline_reference_set(attrs, trial_start_indices, (b_start_rel, b_end_rel), K)
+        j_raw_full = jaccard_consecutive(top_k)
+        j_ref_full = jaccard_to_reference(top_k, reference)
+        del top_k
 
         # --- Snippet Extraction for this channel ---
         for i, s_idx in enumerate(trial_start_indices):
             e_idx = s_idx + n_bins_snippet
             if e_idx <= n_timepoints_total:
-                rank_snippets[i, :, :, ch_idx] = rank_matrix_channel[s_idx:e_idx, :]
-                # Active mask based on raw (non-normalized) zero attribution
+                rank_snippets[i, :, :, ch_idx] = ranks[s_idx:e_idx, :]
                 active_mask_snippet[i, :, :, ch_idx] = (np.abs(attrs[s_idx:e_idx, :]) > EPSILON)
                 jaccard_raw_snippets[i, :, ch_idx] = j_raw_full[s_idx:e_idx]
                 jaccard_ref_snippets[i, :, ch_idx] = j_ref_full[s_idx:e_idx]
 
-        # Cleanup
-        del attrs, attrs_normalized, total_attr, rank_matrix_channel, j_raw_full, j_ref_full
-        gc.collect() 
+        del attrs, ranks, j_raw_full, j_ref_full
+        gc.collect()
 
     # --- 5. Saving ---
     print("Saving aggregated snippet data...", flush=True)
