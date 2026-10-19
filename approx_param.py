@@ -1,3 +1,7 @@
+"""
+Vendored from captum (captum/attr/_utils/approximation_methods.py, BSD-3-Clause) so integrated_gradients.py does not depend on
+captum's private modules, which move between releases.
+"""
 from enum import Enum
 from typing import Callable, List, Tuple
 import torch
@@ -87,7 +91,6 @@ def riemann_builders(
 
     return step_sizes, alphas
 
-# Taken from captum.attr._utils.approximation_methods
 def gauss_legendre_builders():
     r"""Numpy's `np.polynomial.legendre` function helps to compute step sizes
     and alpha coefficients using gauss-legendre quadrature rule.

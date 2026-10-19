@@ -11,7 +11,7 @@ from preprocess_data import *
 from sklearn.metrics import r2_score
 from process_session import session as ps
 from scipy.sparse import coo_matrix, save_npz
-from IntegratedGradient_local import IntegratedGradient
+from integrated_gradients import IntegratedGradient
 import copy
 
 def test_firing_rate_contribution(output_dir, session_id):

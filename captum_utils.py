@@ -1,8 +1,11 @@
+"""
+Vendored from captum (captum/attr/_utils/common.py, BSD-3-Clause) so integrated_gradients.py does not depend on
+captum's private modules, which move between releases.
+"""
 import torch
 from torch import Tensor
 from approx_param import SUPPORTED_METHODS
 
-# Taken from captum.attr._utils.common
 def _format_tensor_into_tuples(inputs):
     if inputs is None:
         return None

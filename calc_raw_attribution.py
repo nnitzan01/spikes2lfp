@@ -9,7 +9,7 @@ from pathlib import Path
 from preprocess_data import *
 from process_session import session as ps
 from scipy.sparse import coo_matrix, save_npz
-from IntegratedGradient_local import IntegratedGradient
+from integrated_gradients import IntegratedGradient
 
 def calc_raw_attribution(output_dir, session_id):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
