@@ -6,11 +6,17 @@ Data root = the AllenSDK S3 cache directory. Scripts are given a session directo
 and write their results under
     <data_root>/spikes2lfp/{models,variables,attrs,plots}/<session_id>/
 """
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 REPO_DIR = Path(__file__).resolve().parent
 OUTPUT_SUBDIR = 'spikes2lfp'
+
+# Data root used by the notebooks; set SPIKES2LFP_DATA_ROOT to override (scripts take the
+# session directory on the command line instead).
+DATA_ROOT = Path(os.environ.get('SPIKES2LFP_DATA_ROOT',
+                                r'Y:\buzsakilab\Buzsakilabspace\LabShare\NoamNitzan\Open_Access\Allen_2022'))
 
 
 def parse_session_dir(session_dir):
