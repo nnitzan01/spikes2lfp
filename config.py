@@ -26,9 +26,18 @@ TORCH_SEED = 0                          # weight initialisation and batch shuffl
 
 # --- Integrated gradients ---------------------------------------------------------------
 IG_N_STEPS = 50
+IG_N_BATCH = 10                         # sequences per IG batch (x IG_N_STEPS on the GPU at once)
 IG_BASELINE = 0                         # zero input = no spikes
-ACTIVE_ATTR_DURATION = 720              # s; window at the start of the active epoch used for the
-                                        # per-neuron mean attribution summaries
+
+# Windows over which attributions are computed (run_session.py, stage 'attr').
+#   epoch:    'active', 'spontaneous' or 'session' (start of active -> end of passive)
+#   duration: seconds from the start of the epoch (None = whole epoch)
+#   targets:  model targets to attribute (None = all; 0 = broadband)
+ATTR_WINDOWS = {
+    'active':      dict(epoch='active', duration=720, targets=None),       # per-unit summaries
+    'spontaneous': dict(epoch='spontaneous', duration=300, targets=None),  # per-unit summaries
+    'session':     dict(epoch='session', duration=None, targets=[0]),      # peri-event analyses
+}
 
 # --- Peri-event analyses ----------------------------------------------------------------
 TOP_K = 40                              # size of the top-K influential set for Jaccard
