@@ -86,47 +86,30 @@ def calculate_band_r2(
 
 
 def _process_frequency(fi, frex, s, wavtime, half_wave, n_conv, dataX, data_shape, num_trials, return_tf_all=True):
-    """Helper function for parallel frequency processing"""
-    # Create wavelet
+    """
+    Convolve the trial-concatenated signal with the complex Morlet wavelet for frequency frex[fi].
+
+    Returns (fi, trial-mean power, per-trial power or None, ITPC), each over time.
+    """
     wavelet = np.exp(2j * np.pi * frex[fi] * wavtime) * np.exp(-wavtime**2 / (2 * s[fi]**2))
     waveletX = fft(wavelet, n_conv)
-    waveletX = waveletX / np.max(waveletX)
-    
-    # Convolution
+    # Normalise to unit peak gain. np.max on a complex array compares real parts (MATLAB's max
+    # compares magnitudes), so take the magnitude explicitly.
+    waveletX = waveletX / np.max(np.abs(waveletX))
+
+    # Frequency-domain convolution, then drop the half-wavelet at each end
+    # (MATLAB: as = as(half_wave+1:end-half_wave)), leaving n_time * n_trials samples.
     as_signal = ifft(waveletX * dataX)
-    
-    # Flatten to 1D for proper slicing
-    as_signal = as_signal.flatten()
-    
-    # Proper trimming to match MATLAB behavior
-    # In MATLAB: as = as(half_wave+1:end-half_wave);
-    as_signal = as_signal[half_wave:len(as_signal)-half_wave]
-    
-    # The result should have length = data_shape[0] * num_trials
-    expected_length = data_shape[0] * num_trials
-    if len(as_signal) != expected_length:
-        # Trim or pad to match expected length
-        if len(as_signal) > expected_length:
-            as_signal = as_signal[:expected_length]
-        else:
-            # This shouldn't happen if the math is right, but just in case
-            raise ValueError(f"Convolution result too short: {len(as_signal)} vs expected {expected_length}")
-    
-    # Reshape back to time × trials
-    as_signal = as_signal.reshape(data_shape[0], num_trials)
-    
-    # Power
+    as_signal = as_signal[half_wave:half_wave + data_shape[0] * num_trials]
+
+    # Trials were concatenated end-to-end (column-major), so undo it the same way: time x trials
+    as_signal = as_signal.reshape(data_shape[0], num_trials, order='F')
+
     pow_signal = np.abs(as_signal)**2
     tf_freq = np.mean(pow_signal, axis=1)
-    
-    # ITPC
     itpc_freq = np.abs(np.mean(np.exp(1j * np.angle(as_signal)), axis=1))
-    
-    # Return pow_signal only if needed
-    if return_tf_all:
-        return fi, tf_freq, pow_signal, itpc_freq
-    else:
-        return fi, tf_freq, None, itpc_freq
+
+    return fi, tf_freq, (pow_signal if return_tf_all else None), itpc_freq
 
 def wavelet_power(data, timestamps, freqs=(0.5, 220), fs=1250, num_frex=200,
                   range_cycles=(4, 12), normalization='none',
@@ -224,59 +207,26 @@ def wavelet_power(data, timestamps, freqs=(0.5, 220), fs=1250, num_frex=200,
     
     # Multichannel loop
     for ch in range(num_ch):
-        # Concatenate trials for this channel
-        alldata = data[:, :, ch].reshape(1, -1)
+        # Concatenate trials end-to-end, as MATLAB's reshape(data,1,[]) does. Column-major order is
+        # required: the default row-major flatten would interleave the trials sample by sample.
+        alldata = data[:, :, ch].reshape(-1, order='F')
         dataX = fft(alldata, n_conv)
-        
+
+        process_func = partial(_process_frequency,
+                               frex=frex, s=s, wavtime=wavtime, half_wave=half_wave,
+                               n_conv=n_conv, dataX=dataX, data_shape=data.shape,
+                               num_trials=num_trials, return_tf_all=return_tf_all)
         if use_parallel:
-            # Parallel processing
-            process_func = partial(_process_frequency, 
-                                 frex=frex, s=s, wavtime=wavtime, half_wave=half_wave,
-                                 n_conv=n_conv, dataX=dataX, data_shape=data.shape, 
-                                 num_trials=num_trials, return_tf_all=return_tf_all)
-            
             with Pool(n_jobs) as pool:
                 results = pool.map(process_func, range(num_frex))
-            
-            # Collect results
-            for fi, tf_freq, pow_signal, itpc_freq in results:
-                tf[fi, :, ch] = tf_freq
-                if return_tf_all and pow_signal is not None:
-                    tf_all[fi, :, :, ch] = pow_signal
-                itpc[fi, :, ch] = itpc_freq
         else:
-            # Sequential processing (original)
-            for fi in range(num_frex):
-                # Create wavelet
-                wavelet = np.exp(2j * np.pi * frex[fi] * wavtime) * np.exp(-wavtime**2 / (2 * s[fi]**2))
-                waveletX = fft(wavelet, n_conv)
-                waveletX = waveletX / np.max(waveletX)
-                
-                # Convolution
-                as_signal = ifft(waveletX * dataX)
-                
-                # Flatten to 1D for proper slicing
-                as_signal = as_signal.flatten()
-                
-                # Proper trimming to match MATLAB behavior
-                as_signal = as_signal[half_wave:len(as_signal)-half_wave]
-                
-                # Ensure correct length
-                expected_length = data.shape[0] * num_trials
-                if len(as_signal) > expected_length:
-                    as_signal = as_signal[:expected_length]
-                
-                # Reshape back to time × trials
-                as_signal = as_signal.reshape(data.shape[0], num_trials)
-                
-                # Power
-                pow_signal = np.abs(as_signal)**2
-                tf[fi, :, ch] = np.mean(pow_signal, axis=1)
-                if return_tf_all:
-                    tf_all[fi, :, :, ch] = pow_signal
-                
-                # ITPC
-                itpc[fi, :, ch] = np.abs(np.mean(np.exp(1j * np.angle(as_signal)), axis=1))
+            results = map(process_func, range(num_frex))
+
+        for fi, tf_freq, pow_signal, itpc_freq in results:
+            tf[fi, :, ch] = tf_freq
+            if return_tf_all:
+                tf_all[fi, :, :, ch] = pow_signal
+            itpc[fi, :, ch] = itpc_freq
     
     # Normalization (applied channel-wise)
     baseline_window = [baseline[0], baseline[1]]
