@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 from sklearn.model_selection import train_test_split
 
 from preprocess_data import chunk_and_reshape, pre_process_spikes

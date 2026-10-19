@@ -1,8 +1,9 @@
+"""Spectral helpers: band-pass filters, per-band R2, Hilbert band power and Morlet-wavelet power/ITPC."""
 import numpy as np
 import pandas as pd
-from scipy.signal import butter, filtfilt
+from scipy.signal import butter, filtfilt, hilbert
 from sklearn.metrics import r2_score
-from typing import Union, List, Tuple, Dict
+from typing import Union, List, Tuple
 from scipy.fft import fft, ifft
 import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count
@@ -19,7 +20,7 @@ def bandpass_filter(data: np.ndarray, band: tuple, fs: float, order: int = 3) ->
     low = band[0] / nyquist
     high = band[1] / nyquist
     
-    # Ensure band limits are below Nyquist frequency
+    # an upper edge at or above Nyquist is clipped just below it
     if high >= 1.0:
         high = 0.99 
         
@@ -281,8 +282,7 @@ def wavelet_power(data, timestamps, freqs=(0.5, 220), fs=1250, num_frex=200,
     return tf, tf_all, itpc, frex
 
 
-# standard bandpass filetering + hilbert transform
-from scipy.signal import butter, filtfilt, hilbert
+# standard bandpass filtering + hilbert transform
 
 def bandpass_hilbert_power(data, bands=None, fs=1250):
     """

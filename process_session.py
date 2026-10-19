@@ -1,4 +1,3 @@
-import pandas as pd
 from allensdk.brain_observatory.behavior.behavior_project_cache import VisualBehaviorNeuropixelsProjectCache
 
 # stimulus_block values in VBN sessions

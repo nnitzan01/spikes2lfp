@@ -3,7 +3,6 @@ Vendored from captum (captum/attr/_utils/common.py, BSD-3-Clause) so integrated_
 captum's private modules, which move between releases.
 """
 import torch
-from torch import Tensor
 from approx_param import SUPPORTED_METHODS
 
 def _format_tensor_into_tuples(inputs):
