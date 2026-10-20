@@ -24,12 +24,14 @@ source cluster/env.sh
 pytest                                               # ~3 min on CPU; synthetic data only
 
 # pre-flight on a GPU node: software, the GPU code path, and every session's data
-srun --gres=gpu:a100:1 --mem=16G --time=00:15:00 --pty bash
-source cluster/env.sh && python cluster/check_setup.py
-exit
+srun --gres=gpu:1 --partition=a100_short,gl40s_short,gpu4_medium --mem=16G --time=00:15:00 \
+     bash -c "source cluster/env.sh && python cluster/check_setup.py"
 ```
 
 Fix every `FAIL` line before going on.
+
+Jobs run on any free GPU (A100, L40S or V100) in the partitions listed in `run_sessions.sbatch`;
+`squeue -u $USER -o "%.12i %.12P %.8T %.20r"` shows the partition and why a job is still pending.
 
 ## Timing run (one session)
 

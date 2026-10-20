@@ -13,13 +13,20 @@
 # An array task runs line N of cluster/sessions.txt. A session that fails or runs out of time can be
 # resubmitted: finished models and attribution files are kept and only the missing ones are computed.
 # Don't run two jobs on the same session at the same time.
+#
+# Options on the sbatch command line override the #SBATCH lines below, e.g.
+#   sbatch --partition=a100_short --gres=gpu:a100:1 --array=1 cluster/run_sessions.sbatch   # A100 only
+#   sbatch --mem=128G --array=7 cluster/run_sessions.sbatch                                 # more memory
+# A partition is only usable if its time limit (sinfo -o "%P %l") is at least --time.
 
 #SBATCH --job-name=spikes2lfp
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --gres=gpu:a100:1
-#SBATCH --mem=128G
+# any GPU type, in whichever of these partitions can start the job first (all allow >= 3 days)
+#SBATCH --partition=a100_short,gl40s_short,gpu4_medium,gpu8_medium
+#SBATCH --gres=gpu:1
+#SBATCH --mem=64G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs/%x_%j.out
 
