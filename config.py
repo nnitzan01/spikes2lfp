@@ -37,6 +37,7 @@ SPLIT_SEED = 42
 IG_N_STEPS = 50
 IG_N_BATCH = 10                         # sequences per IG batch (x IG_N_STEPS on the GPU at once)
 IG_BASELINE = 0                         # zero input = no spikes
+IG_MAX_SEQUENCES = 2000                 # SequenceIG: windows x steps sent through the model at once (GPU memory)
 
 # Windows over which attributions are computed (run_session.py, stage 'attr').
 #   epoch:    'active', 'spontaneous' or 'session' (start of active -> end of passive)
