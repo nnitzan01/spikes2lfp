@@ -38,8 +38,13 @@ def check_gpu():
     if not torch.cuda.is_available():
         report(False, 'CUDA not available (are you on a GPU node, with --gres=gpu:1?)')
         return
+    try:
+        cudnn = torch.backends.cudnn.version()
+    except RuntimeError as e:                       # e.g. an incompatible cuDNN on LD_LIBRARY_PATH
+        report(False, f'cuDNN: {str(e).splitlines()[0]}')
+        return
     report(True, f'GPU {torch.cuda.get_device_name(0)}, torch {torch.__version__}, CUDA {torch.version.cuda}, '
-                 f'cuDNN {torch.backends.cudnn.version()}')
+                 f'cuDNN {cudnn}')
 
     # the exact GPU code path of the pipeline: causal CNN-LSTM training step and SequenceIG
     # (cuDNN RNN backward with the recurrent layer in train mode and the rest in eval mode)
@@ -91,8 +96,10 @@ def check_data():
 
 
 if __name__ == '__main__':
-    check_imports()
-    check_gpu()
-    check_data()
+    for check in (check_imports, check_gpu, check_data):
+        try:
+            check()
+        except Exception as e:                       # noqa: BLE001 - report and keep checking
+            report(False, f'{check.__name__}: {type(e).__name__}: {e}')
     print(f'\n{"All checks passed." if not failures else f"{len(failures)} check(s) failed."}')
     sys.exit(1 if failures else 0)
