@@ -39,9 +39,9 @@ def model_file(dirs, chan, band, seed=0):
     return dirs.models / f'lstm_model_chan{chan}_band{band}_seed{seed}.pt'
 
 
-def attribution_file(dirs, window, chan, band):
-    """Raw (time bins x units) attributions of one model over one config.ATTR_WINDOWS window, sparse .npz."""
-    return dirs.attrs / window / f'attribution_raw_chan{chan}_band{band}.npz'
+def attribution_file(dirs, chan, band):
+    """History-aware attributions of one model (run_session stage 'attr'), compressed .npz."""
+    return dirs.attrs / f'seqig_chan{chan}_band{band}.npz'
 
 
 def hvs_events_file(dirs):

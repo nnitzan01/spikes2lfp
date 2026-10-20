@@ -6,10 +6,13 @@ from conftest import N_UNITS
 
 
 def _trained_pipeline(run_session, session_dir):
+    import config
+    config.ATTR_TARGETS = [0]          # the experiments only use the broadband model (reset by the fixture)
     data_root, session_id = paths.parse_session_dir(session_dir)
     pipeline = run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=4)
     pipeline.train()
     pipeline.attr()
+    pipeline.summaries()
     return pipeline
 
 
@@ -27,6 +30,7 @@ def test_firing_rate_contribution(pipeline_module, session_dir):
     results = firing_rate_contribution.run(pipeline, chan=0, n_top=3, n_iter=2)
     assert len(results['top_neuron_indices']) == 3
     assert all(len(d) == 2 for d in results['downsampled_attributions'])
+    assert all(len(d) == 2 for d in results['downsampled_per_spike'])
 
 
 def test_spectral_r2(pipeline_module, session_dir):

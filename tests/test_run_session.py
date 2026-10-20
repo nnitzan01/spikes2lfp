@@ -13,23 +13,31 @@ def test_all_stages(pipeline_module, session_dir):
 
     pipe = run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=4)
     pipe.train()
-    # HVS events, as written by experiments/detect_cortical_oscillations.py: [start, peak, end] in s
-    np.save(paths.hvs_events_file(dirs), np.array([[10.0, 10.5, 11.0], [80.0, 80.4, 81.0]]))
     for stage in run_session.STAGES[1:]:
         getattr(run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=4), stage)()
 
     r2 = np.load(dirs.variables / 'r2_scores.npy')
     assert r2.shape == (N_CHANNELS, config.N_TARGETS) and np.isfinite(r2).all()
     assert len(list(dirs.models.glob('*.pt'))) == N_CHANNELS * config.N_TARGETS
-    assert np.load(dirs.attrs / 'attribution_scores_ipi_mean.npy').shape == (N_CHANNELS, config.N_TARGETS, N_UNITS)
-    assert np.load(dirs.attrs / 'attribution_scores_spontaneous_mean.npy').shape == (N_CHANNELS, config.N_TARGETS, N_UNITS)
-    for sfx in ('', '_hvs'):
-        ranks = np.load(dirs.variables / f'rank_snippets{sfx}.npy')
-        assert ranks.ndim == 4 and ranks.shape[2:] == (N_UNITS, N_CHANNELS)
-        jac = np.load(dirs.variables / f'jaccard_ref_snippets{sfx}.npy')
-        assert np.nanmax(jac) <= 1
-        ipd = np.load(dirs.variables / f'regional_dominance_results{sfx}.npz')
-        assert ipd['average_dominance'].shape == (4, ranks.shape[1], N_CHANNELS)
+    assert len(list(dirs.attrs.glob('seqig_*.npz'))) == N_CHANNELS * config.N_TARGETS
+
+    a = np.load(paths.attribution_file(dirs, 0, 0))
+    t = np.load(dirs.variables / 'attr_targets.npz')
+    assert a['sampled_test_total'].shape == (len(t['sampled_test']), N_UNITS)
+    assert a['components_total'].shape == (len(t['event_onsets']), len(config.COMPONENT_TIMES), N_UNITS)
+    assert a['peri_total'].shape == (config.PERI_EVENTS, len(t['peri_times']), N_UNITS)
+    assert a['kernel_mean'].shape == (config.ATTR_HISTORY // config.LAG_KERNEL_BIN, N_UNITS)
+    assert set(t['event_partition']) <= {'train', 'val', 'test', 'buffer'}
+    assert np.nanmax(np.load(dirs.attrs / 'attribution_completeness.npy')) < 0.05
+
+    for s in ('train', 'test', 'active', 'spont'):
+        u = np.load(dirs.attrs / f'unit_attribution_{s}.npz')
+        assert u['mean_abs'].shape == (N_CHANNELS, config.N_TARGETS, N_UNITS) and np.isfinite(u['share']).all()
+    ranks = np.load(dirs.variables / 'rank_snippets.npy')
+    assert ranks.shape == (config.PERI_EVENTS, len(t['peri_times']), N_UNITS, N_CHANNELS)
+    assert np.nanmax(np.load(dirs.variables / 'jaccard_ref_snippets.npy')) <= 1
+    ipd = np.load(dirs.variables / 'regional_dominance_results.npz')
+    assert ipd['average_dominance'].shape == (4, len(t['peri_times']), N_CHANNELS)
     assert len(list(dirs.plots.glob('*.png'))) > 0
     for f in ('split.npz', 'split.json', 'spike_scaler.npz', 'target_scaler.npz', 'model_info.json', 'best_epoch.npy'):
         assert (dirs.variables / f).exists(), f

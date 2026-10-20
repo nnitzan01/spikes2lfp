@@ -7,7 +7,8 @@ by (a) firing rate, (b) mean |attribution|, and (c) at random (config-seeded per
 usage (from the repo root):
     python -m experiments.ablation <session_dir> [--channel 5] [--band 0] [--n-perm 20]
 
-Needs the 'train' and 'attr' stages of run_session.py (attributions of the 'active' window).
+Needs the 'train', 'attr' and 'summaries' stages of run_session.py (units are ranked by their
+mean |attribution| on training-block targets; R2 is measured on the test block).
 Saves to variables/<session_id>/ (steps x 1, or steps x permutations):
     r2_scores_fr.npy, r2_scores_attr.npy, r2_scores_rand.npy, r2_scores_ablation_steps.npy (% removed),
     r2_scores_ablation_full.npy (the same model trained on all units, i.e. 0% removed)
@@ -19,7 +20,7 @@ import torch
 
 import config
 import paths
-from run_session import SessionPipeline, load_sparse
+from run_session import SessionPipeline
 
 PERCENT_REMOVED = np.arange(5, 100, 5)
 
@@ -38,8 +39,9 @@ def run_ablation(pipeline, chan, band, n_perm):
 
     # unit orders, most important first
     by_rate = np.argsort(-pipeline.session.units['firing_rate'].to_numpy(), kind='stable')
-    attrs = load_sparse(paths.attribution_file(pipeline.dirs, 'active', chan, band))
-    by_attr = np.argsort(-np.mean(np.abs(attrs), axis=0), kind='stable')   # mean |attribution|, so signs don't cancel
+    # mean |attribution| over training-block targets, so the ranking is chosen on data the R2 is not measured on
+    mean_abs = np.load(pipeline.dirs.attrs / 'unit_attribution_train.npz')['mean_abs'][chan, band]
+    by_attr = np.argsort(-mean_abs, kind='stable')
 
     r2_full = test_r2(pipeline, spikes, lfp, np.arange(n_units))
     r2_rate, r2_attr = np.zeros((len(PERCENT_REMOVED), 1)), np.zeros((len(PERCENT_REMOVED), 1))

@@ -50,11 +50,9 @@ def pipeline_module(monkeypatch):
     monkeypatch.setitem(sys.modules, 'process_session', types.SimpleNamespace(session=FakeSession))
     monkeypatch.setattr(preprocess_data.pp, 'load_lfp', fake_load_lfp)
     monkeypatch.setattr(config, 'NUM_EPOCHS', 1)
-    monkeypatch.setattr(config, 'IG_N_STEPS', 3)
-    monkeypatch.setattr(config, 'ATTR_WINDOWS', {
-        'active': dict(epoch='active', duration=9, targets=None),
-        'spontaneous': dict(epoch='spontaneous', duration=6, targets=None),
-        'session': dict(epoch='session', duration=None, targets=[0])})
+    for name, value in dict(ATTR_SAMPLED=20, ATTR_EVENTS=12, PERI_EVENTS=4, IG_N_STEPS=4,
+                            ATTR_TARGETS=config.ATTR_TARGETS).items():
+        monkeypatch.setattr(config, name, value)
     import run_session
     return run_session
 

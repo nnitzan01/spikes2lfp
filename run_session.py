@@ -26,16 +26,18 @@ training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, 
   plots      diagnostic figures of the models on the active epoch -> plots/
   variables  model input and metadata -> variables/: spikes_sparse.npz (scaled active-epoch
              spikes), units.csv, timestamps.npy, stimulus_presentation_active.csv
-  attr       raw integrated-gradient attributions over each window in config.ATTR_WINDOWS
-             attrs/<window>/attribution_raw_chan{c}_band{b}.npz (time bins x units)
-  summaries  per-unit summaries (channels x targets x units) of the 'active' and 'spontaneous' windows
-             attrs/  attribution_scores{,_spontaneous}_{mean,relative_mean,ipi_mean}.npy
-  peri       snippets around image onsets, and around HVS peaks when HVS were detected, from
-             the 'session' window broadband attributions -> variables/ (suffix _hvs for HVS):
-             psth, rank_snippets, jaccard_{raw,ref}_snippets, active_mask_snippet_sparse +
-             active_mask_shape, mean_raw_attribution_snippet, mean_raw_potency_snippet
-  ipd        regional instantaneous predictive dominance from the peri snippets
-             variables/  regional_dominance_results{,_hvs}.npz
+  attr       history-aware attribution (integrated_gradients.SequenceIG) of every model target:
+             each target bin's prediction is attributed to every unit at every lag of the preceding
+             3 s. Targets (the same for all models; variables/attr_targets.npz): random bins of the
+             training block, the test block and the spontaneous epoch; the four CSD-component
+             windows after ATTR_EVENTS image onsets; a peri-stimulus grid for PERI_EVENTS onsets.
+             attrs/  seqig_chan{c}_band{b}.npz (per-target unit totals, lag kernels, peri maps,
+                     f(x), f(b) and completeness error of every target)
+  summaries  per-unit summaries (mean, mean |.|, per spike, share; channels x targets x units)
+             attrs/  unit_attribution_{train,test,active,spont}.npz, attribution_completeness.npy
+  peri       broadband peri-stimulus ranks and top-K Jaccard stability -> variables/: psth.npy,
+             peri_times.npy, rank_snippets.npy, jaccard_{raw,ref}_snippets.npy
+  ipd        regional instantaneous predictive dominance -> variables/regional_dominance_results.npz
 """
 import argparse
 import json
@@ -44,7 +46,7 @@ from functools import cached_property
 import numpy as np
 import pandas as pd
 import torch
-from scipy.sparse import coo_matrix, load_npz, save_npz
+from scipy.sparse import coo_matrix, save_npz
 from sklearn.metrics import r2_score
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -52,36 +54,21 @@ import config
 import models
 import paths
 import plots
-from analysis.attribution_summaries import ipi_mean_attribution, mean_attribution, relative_mean_attribution
 from analysis.peri_events import (event_start_indices, extract_snippets, proportional_influence,
                                   regional_dominance, snippet_time_axis)
-from analysis.ranking import (EPSILON, baseline_reference_set, jaccard_consecutive, jaccard_to_reference,
+from analysis.ranking import (baseline_reference_set, jaccard_consecutive, jaccard_to_reference,
                               rank_active_neurons, top_k_mask)
-from integrated_gradients import IntegratedGradient
+from analysis.sequence_attribution import (attribute_targets, coarsen_lags, relative_completeness_error,
+                                           unit_summaries, valid_ends, window_spike_counts)
+from integrated_gradients import SequenceIG
 from preprocess_data import SpikeScaler, Standardizer, pre_process_lfp, pre_process_spikes, take_chunks
 from splits import chunk_bins, describe, holdout_split
 
 STAGES = ['train', 'transfer', 'plots', 'variables', 'attr', 'summaries', 'peri', 'ipd']
 
-# file-name prefix of the per-unit summaries of each summarised attribution window
-SUMMARY_PREFIX = {'active': 'attribution_scores', 'spontaneous': 'attribution_scores_spontaneous'}
-SUMMARY_KINDS = {'mean': mean_attribution, 'relative_mean': relative_mean_attribution,
-                 'ipi_mean': ipi_mean_attribution}
-
-# peri-event analyses: output-file suffix, snippet window and Jaccard baseline (s, relative to the event)
-EVENT_TYPES = {
-    'stim': dict(suffix='', window=config.STIM_WINDOW, baseline=config.STIM_BASELINE),
-    'hvs': dict(suffix='_hvs', window=config.HVS_WINDOW, baseline=config.HVS_BASELINE),
-}
-
-
 def save_sparse(path, matrix):
     path.parent.mkdir(parents=True, exist_ok=True)
     save_npz(path, coo_matrix(matrix), compressed=True)
-
-
-def load_sparse(path):
-    return load_npz(path).toarray()
 
 
 def make_loader(X, y, shuffle):
@@ -97,7 +84,7 @@ def r2(model, dataloader):
 
 
 class SessionPipeline:
-    def __init__(self, data_root, session_id, device, retrain=False, ig_batch=config.IG_N_BATCH,
+    def __init__(self, data_root, session_id, device, retrain=False, ig_batch=config.IG_BATCH_WINDOWS,
                  n_seeds=config.N_SEEDS):
         self.data_root = data_root
         self.n_seeds = n_seeds
@@ -114,20 +101,6 @@ class SessionPipeline:
         from process_session import session    # imported here because it pulls in allensdk
         units_table = pd.read_csv(paths.REPO_DIR / config.UNITS_TABLE)
         return session(self.session_id, units_table, self.data_root)
-
-    def window_times(self, window):
-        """[start, stop] in seconds of an attribution window from config.ATTR_WINDOWS."""
-        spec = config.ATTR_WINDOWS[window]
-        s = self.session
-        start, stop = {'active': s.active_times, 'spontaneous': s.spontaneous_times,
-                       'session': [s.active_times[0], s.passive_times[1]]}[spec['epoch']]
-        if spec['duration'] is not None:
-            stop = min(stop, start + spec['duration'])
-        return start, stop
-
-    def window_targets(self, window):
-        targets = config.ATTR_WINDOWS[window]['targets']
-        return range(config.N_TARGETS) if targets is None else targets
 
     def spike_counts(self, start, stop):
         """Binned spike counts (bins x units) from start to stop (s), truncated to whole sequences."""
@@ -349,134 +322,215 @@ class SessionPipeline:
         np.save(out / 'timestamps.npy', self.active_spikes.timestamps)
         self.session.active.to_csv(out / 'stimulus_presentation_active.csv', index=False)
 
+    @cached_property
+    def attr_targets(self):
+        """
+        The attribution targets shared by every model of the session (saved to
+        variables/attr_targets.npz on first use, so all channels and targets use the same ones):
+
+          sampled_{train,test,spont}   random target bins in the training block, the test block
+                                       and the spontaneous epoch (single-bin targets)
+          events                       image onsets (s) of ATTR_EVENTS random active, non-omitted
+                                       presentations, with their split partition, used for the
+                                       CSD-component targets; the first PERI_EVENTS also get
+                                       peri-stimulus maps
+          *_spikes                     spike counts of every unit in each target's window
+        """
+        f = self.dirs.variables / 'attr_targets.npz'
+        if f.exists():
+            return dict(np.load(f))
+        L, rng = config.ATTR_HISTORY, np.random.default_rng(config.TORCH_SEED)
+        counts = self.active_counts.spkMat
+        n_bins = counts.shape[0]
+
+        def sample(candidates, n):
+            candidates = valid_ends(candidates, n_bins, L)
+            return np.sort(rng.choice(candidates, min(n, len(candidates)), replace=False))
+
+        t = {'sampled_train': sample(chunk_bins(self.split['train']), config.ATTR_SAMPLED),
+             'sampled_test': sample(chunk_bins(self.split['test']), config.ATTR_SAMPLED)}
+        spont = self.spike_counts(*self.session.spontaneous_times).spkMat
+        spont_ends = valid_ends(np.arange(spont.shape[0]), spont.shape[0], L)
+        t['sampled_spont'] = np.sort(rng.choice(spont_ends, min(config.ATTR_SAMPLED, len(spont_ends)), replace=False))
+
+        # image onsets whose component and peri-stimulus windows all fit inside the active epoch
+        stim = self.session.stimulus_presentation
+        onsets = stim.start_time[stim.active & (stim.image_name != 'omitted')].values
+        onset_bins = np.round((onsets - self.active_counts.timestamps[0]) / config.BIN_SIZE).astype(int)
+        first = onset_bins + int(np.round(config.STIM_WINDOW[0] / config.BIN_SIZE))
+        last = onset_bins + max(self.component_end_offsets().max(), self.peri_offsets().max())
+        ok = (first - L + 1 >= 0) & (last < n_bins)
+        pick = np.sort(rng.choice(np.flatnonzero(ok), min(config.ATTR_EVENTS, ok.sum()), replace=False))
+        rng.shuffle(pick)                               # random order: the first PERI_EVENTS are a random subset
+        t['event_onsets'], t['event_onset_bins'] = onsets[pick], onset_bins[pick]
+        chunk_of = t['event_onset_bins'] // config.SEQLENGTH
+        t['event_partition'] = np.select([np.isin(chunk_of, self.split[p]) for p in ('train', 'val', 'test')],
+                                         ['train', 'val', 'test'], 'buffer')
+        t['peri_times'] = self.peri_offsets() * config.BIN_SIZE
+
+        for name in ('sampled_train', 'sampled_test'):
+            t[name + '_spikes'] = window_spike_counts(counts, t[name], L)
+        t['sampled_spont_spikes'] = window_spike_counts(spont, t['sampled_spont'], L)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(f, **t)
+        return t
+
+    @staticmethod
+    def component_end_offsets():
+        """Bin offset from image onset to the last bin of each component target window."""
+        half = (config.COMPONENT_TARGET_BINS - 1) // 2
+        return np.array([int(np.round(tc / config.BIN_SIZE)) + half for tc in config.COMPONENT_TIMES.values()])
+
+    @staticmethod
+    def peri_offsets():
+        """Bin offsets from image onset of the peri-stimulus targets."""
+        first, last = (int(np.round(x / config.BIN_SIZE)) for x in config.STIM_WINDOW)
+        return np.arange(first, last, config.PERI_STEP_BINS)
+
+    def ig_baseline(self, n_units):
+        """IG baseline per config.IG_BASELINE: 0 (no spikes) or each unit's mean scaled input in the training chunks."""
+        if config.IG_BASELINE == 'zero':
+            return 0.0
+        if config.IG_BASELINE == 'mean':
+            mean = self.active_spikes.spkMat[chunk_bins(self.split['train'])].mean(axis=0)
+            return torch.as_tensor(mean, dtype=torch.float32, device=self.device)
+        raise ValueError(f'unknown IG_BASELINE {config.IG_BASELINE!r}')
+
     def attr(self):
-        for window in config.ATTR_WINDOWS:
-            todo = [(c, b) for c in range(self.n_channels) for b in self.window_targets(window)
-                    if not paths.attribution_file(self.dirs, window, c, b).exists()]
-            if not todo:
-                print(f'Attributions for window "{window}" already saved', flush=True)
-                continue
-            start, stop = self.window_times(window)
-            print(f'Attributions for window "{window}" ({start}-{stop} s): {len(todo)} models', flush=True)
-            X = torch.tensor(self.spikes(start, stop).spkMat).float().to(self.device)
-            for chan, band in todo:
-                # train() mode is required for the cuDNN RNN backward pass; LSTMnet has no dropout
-                net = self.models[chan, band].model.train().to(self.device)
-                ig = IntegratedGradient(net, method='last time point', seqlength=config.SEQLENGTH)
-                attrs = ig.run(X, baselines=config.IG_BASELINE, n_batch=self.ig_batch, n_steps=config.IG_N_STEPS)
-                save_sparse(paths.attribution_file(self.dirs, window, chan, band), attrs.numpy())
-            del X
+        """History-aware attribution (SequenceIG) of every model target in config.ATTR_TARGETS."""
+        targets = range(config.N_TARGETS) if config.ATTR_TARGETS is None else config.ATTR_TARGETS
+        todo = [(c, b) for c in range(self.n_channels) for b in targets
+                if not paths.attribution_file(self.dirs, c, b).exists()]
+        if not todo:
+            print('Attributions already saved', flush=True)
+            return
+        t, L = self.attr_targets, config.ATTR_HISTORY
+        X = torch.as_tensor(self.active_spikes.spkMat, device=self.device)
+        X_spont = torch.as_tensor(self.spikes(*self.session.spontaneous_times).spkMat, device=self.device)
+        baseline = self.ig_baseline(X.shape[1])
+        comp_ends = t['event_onset_bins'][:, None] + self.component_end_offsets()[None, :]     # events x components
+        peri_on = t['event_onset_bins'][:config.PERI_EVENTS]
+        peri_ends = peri_on[:, None] + self.peri_offsets()[None, :]                             # events x times
+        run = dict(history=L, baseline=baseline, batch_windows=self.ig_batch)
+        print(f'Attributing {len(todo)} models', flush=True)
+        for chan, band in todo:
+            ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=config.IG_N_STEPS)
+            out = {}
+            sampled = {}
+            for name, data in (('sampled_train', X), ('sampled_test', X), ('sampled_spont', X_spont)):
+                sampled[name] = attribute_targets(ig, data, t[name], keep_kernel=(name != 'sampled_spont'), **run)
+            comp = attribute_targets(ig, X, comp_ends.ravel(), target_bins=config.COMPONENT_TARGET_BINS,
+                                     keep_kernel=True, **run)
+            peri = attribute_targets(ig, X, peri_ends.ravel(), **run)
+            for name, res in sampled.items():
+                out[name + '_total'] = res['total'].astype(np.float16)
+            n_ev, n_comp = comp_ends.shape
+            out['components_total'] = comp['total'].reshape(n_ev, n_comp, -1).astype(np.float16)
+            peri_total = peri['total'].reshape(len(peri_on), peri_ends.shape[1], -1)
+            out['peri_mean'], out['peri_abs_mean'] = peri_total.mean(axis=0), np.abs(peri_total).mean(axis=0)
+            if band in config.PERI_PER_EVENT_TARGETS:
+                out['peri_total'] = peri_total.astype(np.float16)
+            n_kernel = len(t['sampled_train']) + len(t['sampled_test'])
+            k = config.LAG_KERNEL_BIN
+            out['kernel_mean'] = coarsen_lags(sampled['sampled_train']['kernel_sum'] + sampled['sampled_test']['kernel_sum'], k) / n_kernel
+            out['kernel_abs_mean'] = coarsen_lags(sampled['sampled_train']['kernel_abs_sum'] + sampled['sampled_test']['kernel_abs_sum'], k) / n_kernel
+            out['components_kernel_mean'] = coarsen_lags(comp['kernel_sum'], k) / len(comp['total'])
+            for name, res in list(sampled.items()) + [('components', comp), ('peri', peri)]:
+                for key in ('f_x', 'f_b', 'delta'):
+                    out[f'{name}_{key}'] = res[key].astype(np.float32)
+            f = paths.attribution_file(self.dirs, chan, band)
+            f.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(f, **out)
 
     def summaries(self):
-        n_units = len(self.unit_areas)
-        for window, prefix in SUMMARY_PREFIX.items():
-            out = {kind: self.dirs.attrs / f'{prefix}_{kind}.npy' for kind in SUMMARY_KINDS}
-            if all(f.exists() for f in out.values()):
-                continue
-            # targets that were not attributed stay NaN
-            result = {kind: np.full((self.n_channels, config.N_TARGETS, n_units), np.nan) for kind in SUMMARY_KINDS}
-            for chan in range(self.n_channels):
-                for band in self.window_targets(window):
-                    attrs = load_sparse(paths.attribution_file(self.dirs, window, chan, band))
-                    for kind, summarise in SUMMARY_KINDS.items():
-                        result[kind][chan, band] = summarise(attrs)
-            for kind, f in out.items():
-                np.save(f, result[kind])
-
-    def event_times(self):
-        """Event times (s) for each type in EVENT_TYPES; None where unavailable."""
-        stim = self.session.stimulus_presentation
-        events = {'stim': stim.start_time[stim.active & (stim.image_name != 'omitted')].values, 'hvs': None}
-
-        hvs_table = pd.read_csv(paths.REPO_DIR / 'tables' / 'hvs_detection.csv')
-        flagged = hvs_table.loc[hvs_table['session'] == self.session_id, 'hvs']
-        hvs_file = paths.hvs_events_file(self.dirs)
-        legacy_file = self.data_root / f'session_{self.session_id}' / 'detected_hvs_events.npy'
-        if flagged.empty or not flagged.iloc[0]:
-            print('Session not marked as having HVS (tables/hvs_detection.csv); skipping HVS events')
-        elif hvs_file.exists() or legacy_file.exists():
-            events['hvs'] = np.load(hvs_file if hvs_file.exists() else legacy_file)[:, 1]   # peak times
-        else:
-            print(f'No HVS events file at {hvs_file}; run experiments/detect_cortical_oscillations.py first')
-        return events
+        """
+        Per-unit attribution summaries (analysis/sequence_attribution.py) for each target set,
+        as (channels x model targets x units) arrays, and the completeness error of every model.
+          attrs/unit_attribution_{train,test,active,spont}.npz   keys: mean, mean_abs, per_spike, share
+          attrs/attribution_completeness.npy                      channels x targets (median relative error)
+        """
+        t = self.attr_targets
+        n_units = t['sampled_train_spikes'].shape[1]
+        sets = {'train': ['sampled_train'], 'test': ['sampled_test'], 'active': ['sampled_train', 'sampled_test'],
+                'spont': ['sampled_spont']}
+        files = {s: self.dirs.attrs / f'unit_attribution_{s}.npz' for s in sets}
+        if all(f.exists() for f in files.values()):
+            return
+        shape = (self.n_channels, config.N_TARGETS, n_units)
+        result = {s: {k: np.full(shape, np.nan) for k in ('mean', 'mean_abs', 'per_spike', 'share')} for s in sets}
+        completeness = np.full(shape[:2], np.nan)
+        for chan in range(self.n_channels):
+            for band in range(config.N_TARGETS):
+                f = paths.attribution_file(self.dirs, chan, band)
+                if not f.exists():
+                    continue
+                a = np.load(f)
+                for s, names in sets.items():
+                    totals = np.concatenate([a[n + '_total'] for n in names])
+                    spikes = np.concatenate([t[n + '_spikes'] for n in names])
+                    for k, v in unit_summaries(totals, spikes).items():
+                        result[s][k][chan, band] = v
+                completeness[chan, band] = relative_completeness_error(
+                    *(np.concatenate([a[f'{n}_{key}'] for n in ('sampled_train', 'sampled_test', 'components')])
+                      for key in ('f_x', 'f_b', 'delta')))
+        for s, f in files.items():
+            np.savez(f, **result[s])
+        np.save(self.dirs.attrs / 'attribution_completeness.npy', completeness)
 
     def peri(self):
-        channels = [c for c in range(self.n_channels) if paths.attribution_file(self.dirs, 'session', c, 0).exists()]
-        if not channels:
-            raise FileNotFoundError('No "session" window attributions; run the attr stage first')
-        spikes = self.spikes(*self.window_times('session'), scaled=False)    # raw counts for the PSTH
+        """
+        Peri-stimulus analyses from the broadband per-event attribution maps (PERI_EVENTS images,
+        targets every PERI_STEP_BINS bins over STIM_WINDOW), per channel:
+          variables/  psth.npy (units x bins, all active non-omitted images), peri_times.npy,
+                      rank_snippets.npy (events x times x units x channels; 1 = largest |attribution|),
+                      jaccard_raw_snippets.npy (consecutive peri times), jaccard_ref_snippets.npy
+                      (vs. the K units with the largest mean share over the pre-stimulus times)
+        """
         out = self.dirs.variables
-        out.mkdir(parents=True, exist_ok=True)
+        if (out / 'jaccard_ref_snippets.npy').exists():
+            return
+        t = self.attr_targets
+        stim = self.session.stimulus_presentation
+        counts = self.active_counts
+        tax = snippet_time_axis(config.STIM_WINDOW, config.BIN_SIZE)
+        starts, _ = event_start_indices(counts.timestamps, stim.start_time[stim.active & (stim.image_name != 'omitted')].values,
+                                        config.STIM_WINDOW, len(tax))
+        np.save(out / 'psth.npy', (extract_snippets(counts.spkMat, starts, len(tax)).mean(axis=0).T / config.BIN_SIZE).astype(np.float32))
+        np.save(out / 'peri_times.npy', t['peri_times'])
 
-        for name, times in self.event_times().items():
-            spec = EVENT_TYPES[name]
-            sfx = spec['suffix']
-            if times is None or (out / f'mean_raw_potency_snippet{sfx}.npy').exists():
-                continue
-            t = snippet_time_axis(spec['window'], config.BIN_SIZE)
-            n_bins = len(t)
-            starts, _ = event_start_indices(spikes.timestamps, times, spec['window'], n_bins)
-            baseline_bins = tuple(np.searchsorted(t, spec['baseline']))
-            n_events, n_units, n_ch = len(starts), spikes.spkMat.shape[1], len(channels)
-            print(f'{name}: {n_events} events, {n_ch} channels', flush=True)
-
-            psth = extract_snippets(spikes.spkMat, starts, n_bins).mean(axis=0).T / config.BIN_SIZE   # units x bins, spikes/s
-            rank_snippets = np.zeros((n_events, n_bins, n_units, n_ch), dtype=np.uint16)
-            active_snippets = np.zeros((n_events, n_bins, n_units, n_ch), dtype=bool)
-            jaccard_raw = np.zeros((n_events, n_bins, n_ch), dtype=np.float32)
-            jaccard_ref = np.zeros((n_events, n_bins, n_ch), dtype=np.float32)
-            mean_attr = np.zeros((n_bins, n_units, n_ch), dtype=np.float32)
-            mean_potency = np.zeros((n_bins, n_units, n_ch), dtype=np.float32)
-
-            for ci, chan in enumerate(channels):
-                attrs = load_sparse(paths.attribution_file(self.dirs, 'session', chan, 0)).astype(np.float32)
-                ranks = rank_active_neurons(attrs)
-                top_k = top_k_mask(ranks, config.TOP_K)
-                reference = baseline_reference_set(attrs, starts, baseline_bins, config.TOP_K)
-                jaccard_raw[..., ci] = extract_snippets(jaccard_consecutive(top_k), starts, n_bins)
-                jaccard_ref[..., ci] = extract_snippets(jaccard_to_reference(top_k, reference), starts, n_bins)
-                rank_snippets[..., ci] = extract_snippets(ranks, starts, n_bins)
-                del ranks, top_k
-
-                attr_snippets = extract_snippets(attrs, starts, n_bins)
-                active = np.abs(attr_snippets) > EPSILON
-                active_snippets[..., ci] = active
-                mean_attr[:, :, ci] = attr_snippets.mean(axis=0)
-                # potency: mean attribution per spike (over the events in which the unit fired in that bin)
-                with np.errstate(invalid='ignore', divide='ignore'):
-                    mean_potency[:, :, ci] = attr_snippets.sum(axis=0) / active.sum(axis=0)
-                del attrs, attr_snippets, active
-
-            np.save(out / f'psth{sfx}.npy', psth.astype(np.float32))
-            np.save(out / f'rank_snippets{sfx}.npy', rank_snippets)
-            np.save(out / f'jaccard_raw_snippets{sfx}.npy', jaccard_raw)
-            np.save(out / f'jaccard_ref_snippets{sfx}.npy', jaccard_ref)
-            save_sparse(out / f'active_mask_snippet_sparse{sfx}.npz', active_snippets.reshape(-1, n_ch))
-            np.save(out / f'active_mask_shape{sfx}.npy', active_snippets.shape)
-            np.save(out / f'mean_raw_attribution_snippet{sfx}.npy', mean_attr)
-            np.save(out / f'mean_raw_potency_snippet{sfx}.npy', mean_potency)
+        n_base = int(np.sum(t['peri_times'] < config.STIM_BASELINE[1]))
+        maps = [np.load(paths.attribution_file(self.dirs, c, 0))['peri_total'].astype(np.float32) for c in range(self.n_channels)]
+        n_ev, n_t, n_u = maps[0].shape
+        ranks = np.zeros((n_ev, n_t, n_u, self.n_channels), dtype=np.uint16)
+        jac_raw = np.full((n_ev, n_t, self.n_channels), np.nan, dtype=np.float32)
+        jac_ref = np.full((n_ev, n_t, self.n_channels), np.nan, dtype=np.float32)
+        for ci, totals in enumerate(maps):
+            flat = totals.reshape(n_ev * n_t, n_u)
+            r = rank_active_neurons(flat)
+            top = top_k_mask(r, config.TOP_K)
+            reference = baseline_reference_set(flat, np.arange(n_ev) * n_t, (0, n_base), config.TOP_K)
+            ranks[..., ci] = r.reshape(n_ev, n_t, n_u)
+            jac_ref[..., ci] = jaccard_to_reference(top, reference).reshape(n_ev, n_t)
+            for e in range(n_ev):                       # consecutive times within each event only
+                jac_raw[e, :, ci] = jaccard_consecutive(top[e * n_t:(e + 1) * n_t])
+        np.save(out / 'rank_snippets.npy', ranks)
+        np.save(out / 'jaccard_raw_snippets.npy', jac_raw)
+        np.save(out / 'jaccard_ref_snippets.npy', jac_ref)
 
     def ipd(self):
+        """Regional instantaneous predictive dominance from the peri-stimulus ranks -> variables/regional_dominance_results.npz."""
         out = self.dirs.variables
-        for name, spec in EVENT_TYPES.items():
-            sfx = spec['suffix']
-            rank_file, result_file = out / f'rank_snippets{sfx}.npy', out / f'regional_dominance_results{sfx}.npz'
-            if not rank_file.exists() or result_file.exists():
-                continue
-            rank_snippets = np.load(rank_file)
-            shape = tuple(np.load(out / f'active_mask_shape{sfx}.npy'))
-            active_snippets = load_npz(out / f'active_mask_snippet_sparse{sfx}.npz').toarray().reshape(shape).astype(bool)
-
-            per_channel = []
-            for ci in range(rank_snippets.shape[-1]):
-                dominance, regions = regional_dominance(rank_snippets[..., ci], active_snippets[..., ci], self.unit_areas)
-                per_channel.append(dominance.mean(axis=0))                  # average over events
-            average_dominance = np.stack(per_channel, axis=-1)                # regions x bins x channels
-            np.savez_compressed(result_file,
-                                average_dominance=average_dominance,
-                                proportional_influence=proportional_influence(average_dominance),
-                                region_names=regions,
-                                t=snippet_time_axis(spec['window'], config.BIN_SIZE))
+        if not (out / 'rank_snippets.npy').exists() or (out / 'regional_dominance_results.npz').exists():
+            return
+        ranks = np.load(out / 'rank_snippets.npy')
+        per_channel = []
+        for ci in range(ranks.shape[-1]):
+            dominance, regions = regional_dominance(ranks[..., ci], ranks[..., ci] > 0, self.unit_areas)
+            per_channel.append(dominance.mean(axis=0))                  # average over events
+        average_dominance = np.stack(per_channel, axis=-1)                # regions x times x channels
+        np.savez_compressed(out / 'regional_dominance_results.npz', average_dominance=average_dominance,
+                            proportional_influence=proportional_influence(average_dominance),
+                            region_names=regions, t=np.load(out / 'peri_times.npy'))
 
 
 def main():
@@ -484,7 +538,7 @@ def main():
     parser.add_argument('session_dir', help='.../visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/<session_id>')
     parser.add_argument('--stages', default=','.join(STAGES), help=f'comma-separated subset of {STAGES}')
     parser.add_argument('--retrain', action='store_true', help='train even if saved models exist')
-    parser.add_argument('--ig-batch', type=int, default=config.IG_N_BATCH, help='sequences per IG batch')
+    parser.add_argument('--ig-batch', type=int, default=config.IG_BATCH_WINDOWS, help='windows attributed per batch')
     parser.add_argument('--seeds', type=int, default=config.N_SEEDS, help='independently initialised fits per model')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()

@@ -145,7 +145,7 @@ def main():
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     pipeline = SessionPipeline(data_root, session_id, device='cpu')
-    start, stop = pipeline.window_times('session')
+    start, stop = pipeline.session.active_times[0], pipeline.session.passive_times[1]   # active through passive epoch
     lfp = pre_process_lfp(session_id, pipeline.session.channels, start, stop, data_root)
     fs = lfp.sampling_rate
 
