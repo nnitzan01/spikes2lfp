@@ -96,6 +96,16 @@ def atomic(path):
             tmp.unlink()
 
 
+ATTR_SETS = ('sampled_train', 'sampled_test', 'sampled_spont', 'components', 'peri')
+
+
+def completeness_error(attr_file_contents):
+    """Completeness error of one model's attribution outputs, over all its targets (relative_completeness_error)."""
+    a = attr_file_contents
+    return relative_completeness_error(*(np.concatenate([np.ravel(a[f'{n}_{k}']) for n in ATTR_SETS])
+                                         for k in ('f_x', 'f_b', 'delta')))
+
+
 def save_npy(path, array):
     with atomic(path) as tmp, open(tmp, 'wb') as fh:
         np.save(fh, array)
@@ -457,54 +467,76 @@ class SessionPipeline:
         raise ValueError(f'unknown IG_BASELINE {config.IG_BASELINE!r}')
 
     def attr(self):
-        """History-aware attribution (SequenceIG) of every model target in config.ATTR_TARGETS."""
+        """
+        History-aware attribution (SequenceIG) of every model target in config.ATTR_TARGETS.
+
+        Integration steps adapt per model: starting from IG_N_STEPS, a model whose completeness
+        error exceeds IG_MAX_ERROR is recomputed with 4x the steps (up to IG_MAX_STEPS). Existing
+        files that fail the check, with fewer than IG_MAX_STEPS steps, are recomputed the same way.
+        """
         targets = range(config.N_TARGETS) if config.ATTR_TARGETS is None else config.ATTR_TARGETS
-        todo = [(c, b) for c in range(self.n_channels) for b in targets
-                if not paths.attribution_file(self.dirs, c, b).exists()]
+        todo = {}
+        for chan in range(self.n_channels):
+            for band in targets:
+                f = paths.attribution_file(self.dirs, chan, band)
+                if not f.exists():
+                    todo[chan, band] = config.IG_N_STEPS
+                    continue
+                saved = np.load(f)
+                steps = int(saved['n_steps']) if 'n_steps' in saved else config.IG_N_STEPS
+                if completeness_error(saved) > config.IG_MAX_ERROR and steps < config.IG_MAX_STEPS:
+                    todo[chan, band] = min(4 * steps, config.IG_MAX_STEPS)
         if not todo:
-            print('Attributions already saved', flush=True)
+            log('Attributions already saved')
             return
-        t, L = self.attr_targets, config.ATTR_HISTORY
-        X = torch.as_tensor(self.active_spikes.spkMat, device=self.device)
-        X_spont = torch.as_tensor(self.spikes(*self.session.spontaneous_times).spkMat, device=self.device)
-        baseline = self.ig_baseline(X.shape[1])
-        comp_ends = t['event_onset_bins'][:, None] + self.component_end_offsets()[None, :]     # events x components
-        peri_on = t['event_onset_bins'][:config.PERI_EVENTS]
-        peri_ends = peri_on[:, None] + self.peri_offsets()[None, :]                             # events x times
-        run = dict(history=L, baseline=baseline, batch_windows=self.ig_batch)
+
+        t = self.attr_targets
+        inputs = dict(X=torch.as_tensor(self.active_spikes.spkMat, device=self.device),
+                      X_spont=torch.as_tensor(self.spikes(*self.session.spontaneous_times).spkMat, device=self.device),
+                      comp_ends=t['event_onset_bins'][:, None] + self.component_end_offsets()[None, :],   # events x components
+                      peri_ends=t['event_onset_bins'][:config.PERI_EVENTS, None] + self.peri_offsets()[None, :])
+        inputs['baseline'] = self.ig_baseline(inputs['X'].shape[1])
         log(f'Attributing {len(todo)} models')
-        for chan, band in todo:
-            t0 = time.time()
-            ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=config.IG_N_STEPS)
-            out = {}
-            sampled = {}
-            for name, data in (('sampled_train', X), ('sampled_test', X), ('sampled_spont', X_spont)):
-                sampled[name] = attribute_targets(ig, data, t[name], keep_kernel=(name != 'sampled_spont'), **run)
-            comp = attribute_targets(ig, X, comp_ends.ravel(), target_bins=config.COMPONENT_TARGET_BINS,
-                                     keep_kernel=True, **run)
-            peri = attribute_targets(ig, X, peri_ends.ravel(), **run)
-            for name, res in sampled.items():
-                out[name + '_total'] = res['total'].astype(np.float16)
-            n_ev, n_comp = comp_ends.shape
-            out['components_total'] = comp['total'].reshape(n_ev, n_comp, -1).astype(np.float16)
-            peri_total = peri['total'].reshape(len(peri_on), peri_ends.shape[1], -1)
-            out['peri_mean'], out['peri_abs_mean'] = peri_total.mean(axis=0), np.abs(peri_total).mean(axis=0)
-            if band in config.PERI_PER_EVENT_TARGETS:
-                out['peri_total'] = peri_total.astype(np.float16)
-            n_kernel = len(t['sampled_train']) + len(t['sampled_test'])
-            k = config.LAG_KERNEL_BIN
-            out['kernel_mean'] = coarsen_lags(sampled['sampled_train']['kernel_sum'] + sampled['sampled_test']['kernel_sum'], k) / n_kernel
-            out['kernel_abs_mean'] = coarsen_lags(sampled['sampled_train']['kernel_abs_sum'] + sampled['sampled_test']['kernel_abs_sum'], k) / n_kernel
-            out['components_kernel_mean'] = coarsen_lags(comp['kernel_sum'], k) / len(comp['total'])
-            for name, res in list(sampled.items()) + [('components', comp), ('peri', peri)]:
-                for key in ('f_x', 'f_b', 'delta'):
-                    out[f'{name}_{key}'] = res[key].astype(np.float32)
+        for (chan, band), steps in todo.items():
+            while True:
+                t0 = time.time()
+                out = self.attribute_model(chan, band, steps, **inputs)
+                err = completeness_error(out)
+                log(f'attr chan {chan} band {band}: {steps} steps, {time.time() - t0:.0f} s, completeness error {err:.1e}')
+                if err <= config.IG_MAX_ERROR or steps >= config.IG_MAX_STEPS:
+                    break
+                steps = min(4 * steps, config.IG_MAX_STEPS)
+            if err > config.IG_MAX_ERROR:
+                log(f'  chan {chan} band {band} still above IG_MAX_ERROR at {steps} steps; saved with a flag')
             save_npz(paths.attribution_file(self.dirs, chan, band), compressed=True, **out)
-            err = relative_completeness_error(*(np.concatenate([out[f'{n}_{k}'] for n in ('sampled_train', 'sampled_test')])
-                                                for k in ('f_x', 'f_b', 'delta')))
-            n_windows = sum(len(t[n]) for n in sampled) + comp_ends.size + peri_ends.size
-            log(f'attr chan {chan} band {band}: {n_windows} windows, {time.time() - t0:.0f} s, '
-                f'median completeness error {err:.1e}')
+
+    def attribute_model(self, chan, band, n_steps, X, X_spont, comp_ends, peri_ends, baseline):
+        """All attribution outputs of one model (see the 'attr' stage), computed with n_steps integration steps."""
+        t = self.attr_targets
+        run = dict(history=config.ATTR_HISTORY, baseline=baseline, batch_windows=self.ig_batch)
+        ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=n_steps)
+        sampled = {name: attribute_targets(ig, data, t[name], keep_kernel=(name != 'sampled_spont'), **run)
+                   for name, data in (('sampled_train', X), ('sampled_test', X), ('sampled_spont', X_spont))}
+        comp = attribute_targets(ig, X, comp_ends.ravel(), target_bins=config.COMPONENT_TARGET_BINS,
+                                 keep_kernel=True, **run)
+        peri = attribute_targets(ig, X, peri_ends.ravel(), **run)
+
+        out = {'n_steps': np.array(n_steps)}
+        for name, res in sampled.items():
+            out[name + '_total'] = res['total'].astype(np.float16)
+        out['components_total'] = comp['total'].reshape(comp_ends.shape + (-1,)).astype(np.float16)
+        peri_total = peri['total'].reshape(peri_ends.shape + (-1,))
+        out['peri_mean'], out['peri_abs_mean'] = peri_total.mean(axis=0), np.abs(peri_total).mean(axis=0)
+        if band in config.PERI_PER_EVENT_TARGETS:
+            out['peri_total'] = peri_total.astype(np.float16)
+        n_kernel, k = len(t['sampled_train']) + len(t['sampled_test']), config.LAG_KERNEL_BIN
+        out['kernel_mean'] = coarsen_lags(sampled['sampled_train']['kernel_sum'] + sampled['sampled_test']['kernel_sum'], k) / n_kernel
+        out['kernel_abs_mean'] = coarsen_lags(sampled['sampled_train']['kernel_abs_sum'] + sampled['sampled_test']['kernel_abs_sum'], k) / n_kernel
+        out['components_kernel_mean'] = coarsen_lags(comp['kernel_sum'], k) / len(comp['total'])
+        for name, res in list(sampled.items()) + [('components', comp), ('peri', peri)]:
+            for key in ('f_x', 'f_b', 'delta'):
+                out[f'{name}_{key}'] = res[key].astype(np.float32)
+        return out
 
     def summaries(self):
         """
@@ -534,9 +566,7 @@ class SessionPipeline:
                     spikes = np.concatenate([t[n + '_spikes'] for n in names])
                     for k, v in unit_summaries(totals, spikes).items():
                         result[s][k][chan, band] = v
-                completeness[chan, band] = relative_completeness_error(
-                    *(np.concatenate([a[f'{n}_{key}'] for n in ('sampled_train', 'sampled_test', 'components')])
-                      for key in ('f_x', 'f_b', 'delta')))
+                completeness[chan, band] = completeness_error(a)
         for s, f in files.items():
             save_npz(f, **result[s])
         save_npy(self.dirs.attrs / 'attribution_completeness.npy', completeness)

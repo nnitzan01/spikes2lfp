@@ -84,3 +84,29 @@ def test_atomic_write_leaves_nothing_when_interrupted(tmp_path):
     assert not target.exists() and list(tmp_path.iterdir()) == []
     run_session.save_npy(target, np.arange(3))
     np.testing.assert_array_equal(np.load(target), [0, 1, 2])
+
+
+def test_attr_raises_integration_steps_until_complete(pipeline_module, session_dir, monkeypatch):
+    import config
+    run_session = pipeline_module
+    data_root, session_id = paths.parse_session_dir(session_dir)
+    dirs = paths.session_output_dirs(data_root, session_id)
+    monkeypatch.setattr(config, 'ATTR_TARGETS', [0])
+    pipe = run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=8)
+    pipe.train()
+
+    monkeypatch.setattr(config, 'IG_N_STEPS', 2)
+    monkeypatch.setattr(config, 'IG_MAX_ERROR', 1e-12)       # unreachable: steps escalate to the cap
+    monkeypatch.setattr(config, 'IG_MAX_STEPS', 8)
+    pipe.attr()
+    assert int(np.load(paths.attribution_file(dirs, 0, 0))['n_steps']) == 8
+
+    # an existing file that fails the check (and has fewer steps than the cap) is recomputed
+    monkeypatch.setattr(config, 'IG_MAX_STEPS', 32)
+    pipe.attr()
+    assert int(np.load(paths.attribution_file(dirs, 0, 0))['n_steps']) == 32
+    # one that passes is left alone
+    monkeypatch.setattr(config, 'IG_MAX_ERROR', 1.0)
+    before = paths.attribution_file(dirs, 0, 0).stat().st_mtime_ns
+    pipe.attr()
+    assert paths.attribution_file(dirs, 0, 0).stat().st_mtime_ns == before

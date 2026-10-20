@@ -50,7 +50,7 @@ def pipeline_module(monkeypatch):
     monkeypatch.setitem(sys.modules, 'process_session', types.SimpleNamespace(session=FakeSession))
     monkeypatch.setattr(preprocess_data.pp, 'load_lfp', fake_load_lfp)
     monkeypatch.setattr(config, 'NUM_EPOCHS', 1)
-    for name, value in dict(ATTR_SAMPLED=20, ATTR_EVENTS=12, PERI_EVENTS=4, IG_N_STEPS=4,
+    for name, value in dict(ATTR_SAMPLED=20, ATTR_EVENTS=12, PERI_EVENTS=4, IG_N_STEPS=4, IG_MAX_ERROR=1.0,
                             ATTR_TARGETS=config.ATTR_TARGETS).items():
         monkeypatch.setattr(config, name, value)
     import run_session

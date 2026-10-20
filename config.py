@@ -38,7 +38,9 @@ SPLIT_SEED = 42
 # --- History-aware attribution (integrated_gradients.SequenceIG; run_session stage 'attr') ----
 # Each target is a bin t; its input window is the ATTR_HISTORY bins ending at t (3 s, the training
 # sequence length), and the attributed quantity is the prediction at t.
-IG_N_STEPS = 50                         # integration steps (Gauss-Legendre)
+IG_N_STEPS = 50                         # integration steps (Gauss-Legendre) to start with
+IG_MAX_ERROR = 0.01                     # completeness error above which a model is redone with 4x the steps
+IG_MAX_STEPS = 400                      # upper limit for those retries
 IG_BASELINE = 'zero'                    # 'zero' (no spikes) or 'mean' (each unit's mean training input)
 IG_MAX_SEQUENCES = 2000                 # windows x steps sent through the model at once (GPU memory)
 IG_BATCH_WINDOWS = 256                  # windows built and attributed per batch
