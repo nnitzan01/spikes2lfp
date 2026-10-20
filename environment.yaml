@@ -19,5 +19,7 @@ dependencies:
 
   - pip:
       - allensdk==2.16.2   # also installs pynwb, used directly by process_probe.py
+      - pynwb==2.8.3       # read the NWB files (also used by allensdk)
+      - hdmf>=3.14.5,<4    # hdmf 6 cannot read NWB files with pynwb 2.x
       - torch==2.1.0+cu118
       - --extra-index-url https://download.pytorch.org/whl/cu118
