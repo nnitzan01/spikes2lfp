@@ -58,6 +58,7 @@ python run_session.py $SESSION --stages attr,peri    # a subset (stages always r
 | `ipd` | Regional instantaneous predictive dominance |
 
 Every stage skips outputs that already exist, so a failed cluster job can simply be resubmitted.
+On a Slurm cluster, use the array job in `cluster/` (see `cluster/README.md`).
 The module docstring of `run_session.py` lists every output file.
 
 Experiments, run from the repo root after the relevant pipeline stages:

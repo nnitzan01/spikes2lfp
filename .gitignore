@@ -10,3 +10,6 @@ __pycache__/
 .vscode/
 *.code-workspace
 .DS_Store
+
+# Slurm logs
+logs/
