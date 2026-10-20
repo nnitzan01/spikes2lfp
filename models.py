@@ -13,8 +13,8 @@ import config
 
 
 def build_lstm(input_size, device, seqlength=config.SEQLENGTH):
-    """The project's standard per-channel LSTM (architecture in config.LSTM_KWARGS), ready to train or load."""
-    return process_model(LSTMnet(input_size, seqlength=seqlength, **config.LSTM_KWARGS),
+    """The project's standard per-channel model (architecture in config.LSTM_KWARGS) on `device`, ready to train or load."""
+    return process_model(LSTMnet(input_size, seqlength=seqlength, **config.LSTM_KWARGS).to(device),
                          torch.nn.MSELoss(), device)
 
 
