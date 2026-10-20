@@ -142,12 +142,21 @@ class process_model:
         self.seqlength = model.seqlength
         self.trained = False
 
-    def train(self, train_dataloader, test_dataloader, numepochs, lr=.001, weight_decay=0.001):
-        """Adam training; returns per-epoch mean train and test losses. No early stopping."""
+    def train(self, train_dataloader, test_dataloader, numepochs, lr=.001, weight_decay=0.001,
+              select_best=False, patience=None):
+        """
+        Adam training; returns per-epoch mean losses on the training and monitoring data.
+
+        test_dataloader is only monitored. Pass a *validation* loader when select_best=True: the
+        weights of the epoch with the lowest monitoring loss are restored at the end (its index is
+        self.best_epoch), and with `patience` training stops after that many epochs without
+        improvement (remaining loss entries are NaN).
+        """
         self.model.to(self.device)
         optimizer = torch.optim.Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
-        train_losses = np.zeros(numepochs)
-        test_losses = np.zeros(numepochs)
+        train_losses = np.full(numepochs, np.nan)
+        test_losses = np.full(numepochs, np.nan)
+        best_loss, best_state, self.best_epoch = np.inf, None, numepochs - 1
 
         for epochi in range(numepochs):
             self.model.train()
@@ -177,8 +186,20 @@ class process_model:
                     batchlosses.append(self.criterion(torch.squeeze(y), torch.squeeze(yHat)).item())
             test_losses[epochi] = np.mean(batchlosses)
 
+            if select_best:
+                if test_losses[epochi] < best_loss:
+                    best_loss, self.best_epoch = test_losses[epochi], epochi
+                    best_state = {k: v.detach().clone() for k, v in self.model.state_dict().items()}
+                elif patience is not None and epochi - self.best_epoch >= patience:
+                    break
+
+        if select_best and best_state is not None:
+            self.model.load_state_dict(best_state)
         self.trained = True
         return train_losses, test_losses
+
+    def n_parameters(self):
+        return sum(p.numel() for p in self.model.parameters() if p.requires_grad)
 
     def evaluate(self, x_data, batch_size=1000, return_hidden=False):
         """

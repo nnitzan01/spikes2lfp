@@ -58,3 +58,20 @@ def test_transformer_is_causal():
                                     use_conv=True, conv_kernel_size=3, conv_out_channels=8)
     changes_past, changes_future = _future_perturbation_changes_past(net)
     assert not changes_past and changes_future
+
+
+def test_select_best_restores_lowest_validation_epoch():
+    import numpy as np
+    from preprocess_data import get_data_loaders
+    torch.manual_seed(0)
+    rng = np.random.default_rng(0)
+    X = rng.random((20, 10, 3)).astype(np.float32)
+    y = X.sum(axis=2, keepdims=True).astype(np.float32)
+    tr, va = get_data_loaders(X[:16], X[16:], y[:16], y[16:], batch_size=4)
+    model = models.build_lstm(3, 'cpu', seqlength=10)
+    _, val_losses = model.train(tr, va, 6, select_best=True)
+    assert model.best_epoch == int(np.nanargmin(val_losses))
+    with torch.no_grad():
+        Xv, yv = va.dataset.tensors
+        loss_now = torch.mean((model.model(Xv)[0] - yv) ** 2).item()
+    assert abs(loss_now - np.nanmin(val_losses)) < 1e-4

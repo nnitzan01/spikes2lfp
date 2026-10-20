@@ -20,11 +20,10 @@ import torch
 from sklearn.metrics import r2_score
 
 import config
-import models
 import paths
-from preprocess_data import chunk_and_reshape, get_data_loaders
 from run_session import SessionPipeline
 from spectral_analysis import bandpass_filter
+from splits import chunk_bins
 
 HIPPOCAMPAL = ('CA', 'DG', 'SUB', 'HPF', 'ProS', 'POST')   # substrings of hippocampal-formation acronyms
 # row names of units_counts_and_rates.csv (as read by pool_sessions.ipynb)
@@ -67,15 +66,10 @@ def run(pipeline):
         print(f'{name}: {mask.sum()} units', flush=True)
         if name in COUNT_ROWS:
             counts[COUNT_ROWS[name]] = [mask.sum(), units.loc[mask, 'firing_rate'].mean()]
-        X_train, X_test, y_train, y_test, _, test_idx = chunk_and_reshape(
-            spikes[:, mask], lfp, config.SEQLENGTH, return_indices=True)
-        # bins of the test chunks in the continuous recording
-        test_bins = (test_idx[:, None] * config.SEQLENGTH + np.arange(config.SEQLENGTH)).ravel()
+        test_bins = chunk_bins(pipeline.split['test'])     # test block in the continuous recording
         per_channel = {}
         for chan in range(lfp.shape[1]):
-            train_dl, test_dl = get_data_loaders(X_train, X_test, y_train[:, :, chan], y_test[:, :, chan])
-            model = models.build_lstm(int(mask.sum()), pipeline.device)
-            model.train(train_dl, test_dl, config.NUM_EPOCHS)
+            model, _ = pipeline.fit_and_score(spikes[:, mask], lfp[:, chan])
             prediction = model.evaluate(spikes[:, mask]).numpy()     # whole epoch, chunk by chunk
             per_channel[f'channel_{chan}'] = band_r2(lfp[:len(prediction), chan], prediction, test_bins)
         results[name] = pd.DataFrame(per_channel)

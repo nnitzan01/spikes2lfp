@@ -18,11 +18,20 @@ N_TARGETS = len(BANDS) + 1
 # --- Model and training -----------------------------------------------------------------
 SEQLENGTH = 750                         # bins per sequence (3 s); also the train/test chunk size
 LSTM_KWARGS = dict(num_hidden=50, num_layers=1, conv=False)
-NUM_EPOCHS = 15
+NUM_EPOCHS = 15                         # maximum; the epoch with the lowest validation loss is kept
+PATIENCE = 5                            # stop after this many epochs without validation improvement
 BATCH_SIZE = 32
-TEST_SIZE = 0.2                         # fraction of 3 s chunks held out
-SPLIT_SEED = 42                         # train/test split
-TORCH_SEED = 0                          # weight initialisation and batch shuffling
+N_SEEDS = 1                             # independently initialised fits per model (run_session --seeds)
+TORCH_SEED = 0                          # seed s uses TORCH_SEED + s (weights and batch order)
+
+# Blocked split of the active epoch (splits.py): train | buffer | validation | buffer | test
+TEST_FRACTION = 0.2                     # last 20% of the active epoch
+VAL_FRACTION = 0.1                      # the 10% before the test block
+BUFFER_CHUNKS = 2                       # 3 s chunks dropped between sets (6 s)
+
+# Legacy random chunk split (preprocess_data.chunk_and_reshape; notebooks only)
+TEST_SIZE = 0.2
+SPLIT_SEED = 42
 
 # --- Integrated gradients ---------------------------------------------------------------
 IG_N_STEPS = 50

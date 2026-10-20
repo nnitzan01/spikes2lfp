@@ -31,10 +31,16 @@ def test_all_stages(pipeline_module, session_dir):
         ipd = np.load(dirs.variables / f'regional_dominance_results{sfx}.npz')
         assert ipd['average_dominance'].shape == (4, ranks.shape[1], N_CHANNELS)
     assert len(list(dirs.plots.glob('*.png'))) > 0
+    for f in ('split.npz', 'split.json', 'spike_scaler.npz', 'target_scaler.npz', 'model_info.json', 'best_epoch.npy'):
+        assert (dirs.variables / f).exists(), f
+    split = np.load(dirs.variables / 'split.npz')
+    assert split['train'].max() < split['val'].min() < split['val'].max() < split['test'].min()   # past -> future
+    for f in ('r2_scores_passive.npy', 'r2_scores_spont.npy'):
+        assert np.load(dirs.variables / f).shape == (N_CHANNELS, config.N_TARGETS)
 
     # a rerun skips trained models and existing outputs
     rerun = run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=4)
-    before = (dirs.models / 'lstm_model_chan0_band0.pt').stat().st_mtime_ns
+    before = (dirs.models / 'lstm_model_chan0_band0_seed0.pt').stat().st_mtime_ns
     rerun.train()
-    assert (dirs.models / 'lstm_model_chan0_band0.pt').stat().st_mtime_ns == before
+    assert (dirs.models / 'lstm_model_chan0_band0_seed0.pt').stat().st_mtime_ns == before
     np.testing.assert_allclose(np.load(dirs.variables / 'r2_scores.npy'), r2, rtol=1e-6)

@@ -18,21 +18,15 @@ import numpy as np
 import torch
 
 import config
-import models
 import paths
-from preprocess_data import chunk_and_reshape, get_data_loaders
-from run_session import SessionPipeline, load_sparse, r2
+from run_session import SessionPipeline, load_sparse
 
 PERCENT_REMOVED = np.arange(5, 100, 5)
 
 
-def test_r2(spikes, lfp, keep, device):
-    """Train the standard LSTM on the kept units only and return its test R2."""
-    X_train, X_test, y_train, y_test = chunk_and_reshape(spikes[:, keep], lfp, config.SEQLENGTH)
-    train_dl, test_dl = get_data_loaders(X_train, X_test, y_train, y_test)
-    model = models.build_lstm(len(keep), device)
-    model.train(train_dl, test_dl, config.NUM_EPOCHS)
-    return r2(model, test_dl)
+def test_r2(pipeline, spikes, lfp, keep):
+    """Retrain the standard model on the kept units only (session's blocked split) and return its test R2."""
+    return pipeline.fit_and_score(spikes[:, keep], lfp)[1]
 
 
 def run_ablation(pipeline, chan, band, n_perm):
@@ -47,16 +41,16 @@ def run_ablation(pipeline, chan, band, n_perm):
     attrs = load_sparse(paths.attribution_file(pipeline.dirs, 'active', chan, band))
     by_attr = np.argsort(-np.mean(np.abs(attrs), axis=0), kind='stable')   # mean |attribution|, so signs don't cancel
 
-    r2_full = test_r2(spikes, lfp, np.arange(n_units), pipeline.device)
+    r2_full = test_r2(pipeline, spikes, lfp, np.arange(n_units))
     r2_rate, r2_attr = np.zeros((len(PERCENT_REMOVED), 1)), np.zeros((len(PERCENT_REMOVED), 1))
     r2_rand = np.zeros((len(PERCENT_REMOVED), n_perm))
     for i, percent in enumerate(PERCENT_REMOVED):
         n_removed = int(percent / 100 * n_units)
         print(f'{percent}% removed ({n_removed} units)', flush=True)
-        r2_rate[i, 0] = test_r2(spikes, lfp, np.sort(by_rate[n_removed:]), pipeline.device)
-        r2_attr[i, 0] = test_r2(spikes, lfp, np.sort(by_attr[n_removed:]), pipeline.device)
+        r2_rate[i, 0] = test_r2(pipeline, spikes, lfp, np.sort(by_rate[n_removed:]))
+        r2_attr[i, 0] = test_r2(pipeline, spikes, lfp, np.sort(by_attr[n_removed:]))
         for perm in range(n_perm):
-            r2_rand[i, perm] = test_r2(spikes, lfp, np.sort(rng.permutation(n_units)[n_removed:]), pipeline.device)
+            r2_rand[i, perm] = test_r2(pipeline, spikes, lfp, np.sort(rng.permutation(n_units)[n_removed:]))
     return r2_full, r2_rate, r2_attr, r2_rand
 
 

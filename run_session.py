@@ -3,18 +3,26 @@ Per-session pipeline: every result that is computed for one session and saved to
 
 usage:
     python run_session.py <data_root>/visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/<session_id>
-                          [--stages train,plots,...] [--retrain] [--ig-batch N] [--device cuda|cpu]
+                          [--stages train,plots,...] [--retrain] [--seeds N] [--ig-batch N] [--device cuda|cpu]
 
-Outputs go to <data_root>/spikes2lfp/<kind>/<session_id>/ (see paths.py). Stages run in the order
+Outputs go to <data_root>/spikes2lfp_v2/<kind>/<session_id>/ (see paths.py). Stages run in the order
 below. Each one skips outputs that already exist, so an interrupted job can simply be resubmitted,
 and later stages load what earlier ones saved.
 
-  train      one LSTM per VISp channel x model target, trained on the active epoch
-             (loaded instead when all model files exist, unless --retrain)
-             models/     lstm_model_chan{c}_band{b}.pt
-             variables/  r2_scores.npy (test R2, channels x targets), r2_scores_train.npy,
-                         losses_{train,test}.npy (channels x epochs x targets; only when trained),
-                         split_{train,test}_idx.npy (3 s chunks in each set), channels.csv
+Data handling: the active epoch is cut into 3 s chunks and split in time (splits.holdout_split):
+train | buffer | validation | buffer | test, with the test set the last 20%. Spike counts are
+min-max scaled per unit and targets z-scored per channel and target, both with statistics from the
+training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, split.json).
+
+  train      one causal CNN-LSTM per VISp channel x model target x seed, trained on the training
+             chunks; the epoch with the lowest validation loss is kept (models are loaded instead
+             when all files exist, unless --retrain)
+             models/     lstm_model_chan{c}_band{b}_seed{s}.pt
+             variables/  r2_scores.npy (test R2 of seed 0, channels x targets), r2_scores_seeds.npy,
+                         r2_scores_{val,train}.npy (seeds x channels x targets), losses_{train,val}.npy,
+                         best_epoch.npy, model_info.json, channels.csv
+  transfer   R2 of the active-epoch models on the passive replay and spontaneous epochs
+             variables/  r2_scores_passive.npy, r2_scores_spont.npy
   plots      diagnostic figures of the models on the active epoch -> plots/
   variables  model input and metadata -> variables/: spikes_sparse.npz (scaled active-epoch
              spikes), units.csv, timestamps.npy, stimulus_presentation_active.csv
@@ -30,6 +38,7 @@ and later stages load what earlier ones saved.
              variables/  regional_dominance_results{,_hvs}.npz
 """
 import argparse
+import json
 from functools import cached_property
 
 import numpy as np
@@ -37,6 +46,7 @@ import pandas as pd
 import torch
 from scipy.sparse import coo_matrix, load_npz, save_npz
 from sklearn.metrics import r2_score
+from torch.utils.data import DataLoader, TensorDataset
 
 import config
 import models
@@ -48,9 +58,10 @@ from analysis.peri_events import (event_start_indices, extract_snippets, proport
 from analysis.ranking import (EPSILON, baseline_reference_set, jaccard_consecutive, jaccard_to_reference,
                               rank_active_neurons, top_k_mask)
 from integrated_gradients import IntegratedGradient
-from preprocess_data import chunk_and_reshape, get_data_loaders, pre_process_lfp, pre_process_spikes
+from preprocess_data import SpikeScaler, Standardizer, pre_process_lfp, pre_process_spikes, take_chunks
+from splits import chunk_bins, describe, holdout_split
 
-STAGES = ['train', 'plots', 'variables', 'attr', 'summaries', 'peri', 'ipd']
+STAGES = ['train', 'transfer', 'plots', 'variables', 'attr', 'summaries', 'peri', 'ipd']
 
 # file-name prefix of the per-unit summaries of each summarised attribution window
 SUMMARY_PREFIX = {'active': 'attribution_scores', 'spontaneous': 'attribution_scores_spontaneous'}
@@ -73,6 +84,12 @@ def load_sparse(path):
     return load_npz(path).toarray()
 
 
+def make_loader(X, y, shuffle):
+    """DataLoader over (chunks x seqlength x units) inputs and (chunks x seqlength x 1) targets."""
+    return DataLoader(TensorDataset(torch.from_numpy(X).float(), torch.from_numpy(y).float()),
+                      batch_size=config.BATCH_SIZE, shuffle=shuffle)
+
+
 def r2(model, dataloader):
     """R2 over all bins of all sequences in the dataloader."""
     X, y = dataloader.dataset.tensors
@@ -80,8 +97,10 @@ def r2(model, dataloader):
 
 
 class SessionPipeline:
-    def __init__(self, data_root, session_id, device, retrain=False, ig_batch=config.IG_N_BATCH):
+    def __init__(self, data_root, session_id, device, retrain=False, ig_batch=config.IG_N_BATCH,
+                 n_seeds=config.N_SEEDS):
         self.data_root = data_root
+        self.n_seeds = n_seeds
         self.session_id = session_id
         self.device = device
         self.retrain = retrain
@@ -110,27 +129,78 @@ class SessionPipeline:
         targets = config.ATTR_WINDOWS[window]['targets']
         return range(config.N_TARGETS) if targets is None else targets
 
-    def spikes(self, start, stop, scaled=True):
-        """Binned spikes from start to stop (s), truncated to whole sequences; min-max scaled (model input) if scaled."""
+    def spike_counts(self, start, stop):
+        """Binned spike counts (bins x units) from start to stop (s), truncated to whole sequences."""
         sp = pre_process_spikes(self.session.units, self.session.spike_times)
         sp.getSpkMat(start, stop)
         sp.truncate(config.SEQLENGTH)
+        return sp
+
+    def spikes(self, start, stop, scaled=True):
+        """Binned spikes from start to stop (s); scaled with the training-data SpikeScaler (model input) if scaled."""
+        sp = self.spike_counts(start, stop)
         if scaled:
-            sp.minmax()
+            sp.spkMat = self.spike_scaler.transform(sp.spkMat)
         return sp
 
     @cached_property
+    def active_counts(self):
+        return self.spike_counts(*self.session.active_times)
+
+    @cached_property
+    def split(self):
+        """Blocked split of the active epoch's 3 s chunks (splits.holdout_split), saved on first use."""
+        f = self.dirs.variables / 'split.npz'
+        if f.exists():
+            return dict(np.load(f))
+        split = holdout_split(self.active_counts.spkMat.shape[0] // config.SEQLENGTH)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        np.savez(f, **split)
+        (f.parent / 'split.json').write_text(json.dumps(describe(split), indent=2))
+        return split
+
+    @cached_property
+    def spike_scaler(self):
+        """Per-unit min-max scaling fitted on the training chunks of the active epoch, saved on first use."""
+        f = self.dirs.variables / 'spike_scaler.npz'
+        if f.exists():
+            return SpikeScaler.from_state(np.load(f))
+        scaler = SpikeScaler().fit(self.active_counts.spkMat[chunk_bins(self.split['train'])])
+        np.savez(f, **scaler.state())
+        return scaler
+
+    @cached_property
     def active_spikes(self):
-        return self.spikes(*self.session.active_times)
+        sp = self.spike_counts(*self.session.active_times)
+        sp.spkMat = self.spike_scaler.transform(sp.spkMat)
+        return sp
+
+    def lfp_targets(self, start, stop, n_bins):
+        """
+        Model targets from start to stop (s): (bins x VISp channels x targets), raw (broadband LFP and
+        band power), anti-alias decimated to the spike bin rate and trimmed to n_bins.
+        """
+        lfp = pre_process_lfp(self.session_id, self.session.channels, start, stop, self.data_root)
+        lfp.filter_lfp(take_power=True, zscore_targets=False, downsample=config.LFP_DOWNSAMPLE)
+        lfp.align_lfp(n_bins)
+        return lfp
+
+    @cached_property
+    def target_scaler(self):
+        """z-scoring of every channel x target, fitted on the training chunks of the active epoch."""
+        f = self.dirs.variables / 'target_scaler.npz'
+        if f.exists():
+            return Standardizer.from_state(np.load(f))
+        raw = self.lfp_targets(*self.session.active_times, self.active_spikes.spkMat.shape[0]).lfpMat
+        scaler = Standardizer().fit(raw[chunk_bins(self.split['train'])])
+        np.savez(f, **scaler.state())
+        return scaler
 
     @cached_property
     def active_lfp(self):
-        """Model targets for the active epoch (bins x VISp channels x targets), aligned with active_spikes."""
-        lfp = pre_process_lfp(self.session_id, self.session.channels, *self.session.active_times, self.data_root)
-        lfp.filter_lfp(take_power=True)
-        lfp.downsample_lfp(config.LFP_DOWNSAMPLE)
-        lfp.truncate(config.SEQLENGTH)
-        lfp.align_lfp(self.active_spikes.spkMat.shape[0])
+        """Standardised model targets for the active epoch (bins x VISp channels x targets), aligned with active_spikes."""
+        lfp = self.lfp_targets(*self.session.active_times, self.active_spikes.spkMat.shape[0])
+        lfp.lfpMat = self.target_scaler.transform(lfp.lfpMat)
         return lfp
 
     @property
@@ -144,13 +214,12 @@ class SessionPipeline:
         units = pd.read_csv(saved) if saved.exists() else self.session.units
         return units['structure_acronym'].values
 
-    @cached_property
-    def models(self):
-        """Trained models {(channel, target): process_model} loaded from disk."""
+    def load_models(self, seed=0):
+        """Trained models {(channel, target): process_model} of one seed, loaded from disk."""
         loaded = {}
         for chan in range(self.n_channels):
             for band in range(config.N_TARGETS):
-                f = paths.model_file(self.dirs, chan, band)
+                f = paths.model_file(self.dirs, chan, band, seed)
                 if not f.exists():
                     raise FileNotFoundError(f'{f} not found; run the train stage first')
                 model = models.build_lstm(len(self.session.units), self.device)
@@ -158,45 +227,97 @@ class SessionPipeline:
                 loaded[chan, band] = model
         return loaded
 
+    @cached_property
+    def models(self):
+        """Seed-0 models, used by the attribution stages."""
+        return self.load_models(seed=0)
+
+    def fit_and_score(self, X, y, seed=0):
+        """
+        Train the standard model on inputs X (bins x features) for one target y (bins,) with this
+        session's blocked split and validation-based epoch selection. Returns (model, test R2).
+        Used by the experiments that retrain on modified inputs.
+        """
+        torch.manual_seed(config.TORCH_SEED + seed)
+        loaders = {part: make_loader(take_chunks(X, self.split[part]), take_chunks(y[:, None], self.split[part]),
+                                     shuffle=(part == 'train')) for part in ('train', 'val', 'test')}
+        model = models.build_lstm(X.shape[1], self.device)
+        model.train(loaders['train'], loaders['val'], config.NUM_EPOCHS, select_best=True, patience=config.PATIENCE)
+        return model, r2(model, loaders['test'])
+
     # ---- stages ------------------------------------------------------------------------------
 
     def train(self):
-        spikes, lfp = self.active_spikes.spkMat, self.active_lfp.lfpMat
+        """
+        Train (or load) one model per channel x target x seed on the training chunks, keeping the
+        epoch with the lowest validation loss, and score train / validation / test R2.
+        """
+        spikes, lfp, split = self.active_spikes.spkMat, self.active_lfp.lfpMat, self.split
         n_channels, input_size = lfp.shape[1], spikes.shape[1]
         self.dirs.models.mkdir(parents=True, exist_ok=True)
-        self.dirs.variables.mkdir(parents=True, exist_ok=True)
         self.active_lfp.channels.to_csv(self.dirs.variables / 'channels.csv', index=False)
+        X = {part: take_chunks(spikes, split[part]) for part in ('train', 'val', 'test')}
 
-        files = {(c, b): paths.model_file(self.dirs, c, b) for c in range(n_channels) for b in range(config.N_TARGETS)}
-        train_now = self.retrain or not all(f.exists() for f in files.values())
-        print('Training models' if train_now else 'Loading saved models', flush=True)
+        shape = (self.n_seeds, n_channels, config.N_TARGETS)
+        r2_scores = {part: np.full(shape, np.nan) for part in ('train', 'val', 'test')}
+        losses = {part: np.full(shape + (config.NUM_EPOCHS,), np.nan) for part in ('train', 'val')}
+        best_epoch = np.full(shape, -1)
+        for seed in range(self.n_seeds):
+            files = {(c, b): paths.model_file(self.dirs, c, b, seed) for c in range(n_channels) for b in range(config.N_TARGETS)}
+            train_now = self.retrain or not all(f.exists() for f in files.values())
+            print(f'seed {seed}: ' + ('training models' if train_now else 'loading saved models'), flush=True)
+            torch.manual_seed(config.TORCH_SEED + seed)
+            fitted = {}
+            for band in range(config.N_TARGETS):
+                y = {part: take_chunks(lfp[:, :, band], split[part]) for part in ('train', 'val', 'test')}
+                for chan in range(n_channels):
+                    train_dl, val_dl, test_dl = (make_loader(X[part], y[part][..., chan:chan + 1], shuffle=(part == 'train'))
+                                                 for part in ('train', 'val', 'test'))
+                    model = models.build_lstm(input_size, self.device)
+                    if train_now:
+                        loss_tr, loss_val = model.train(train_dl, val_dl, config.NUM_EPOCHS,
+                                                        select_best=True, patience=config.PATIENCE)
+                        losses['train'][seed, chan, band], losses['val'][seed, chan, band] = loss_tr, loss_val
+                        best_epoch[seed, chan, band] = model.best_epoch
+                        model.save_model(files[chan, band])
+                    else:
+                        model.load_model(files[chan, band])
+                    for part, dl in (('train', train_dl), ('val', val_dl), ('test', test_dl)):
+                        r2_scores[part][seed, chan, band] = r2(model, dl)
+                    fitted[chan, band] = model
+            if seed == 0:
+                self.__dict__['models'] = fitted     # reuse in later stages instead of reloading
 
-        torch.manual_seed(config.TORCH_SEED)
-        r2_test, r2_train = (np.zeros((n_channels, config.N_TARGETS)) for _ in range(2))
-        losses_train, losses_test = (np.zeros((n_channels, config.NUM_EPOCHS, config.N_TARGETS)) for _ in range(2))
-        trained = {}
-        for band in range(config.N_TARGETS):
-            X_train, X_test, y_train, y_test, train_idx, test_idx = chunk_and_reshape(
-                spikes, lfp[:, :, band], config.SEQLENGTH, return_indices=True)
-            for chan in range(n_channels):
-                train_dl, test_dl = get_data_loaders(X_train, X_test, y_train[:, :, chan], y_test[:, :, chan])
-                model = models.build_lstm(input_size, self.device)
-                if train_now:
-                    losses_train[chan, :, band], losses_test[chan, :, band] = model.train(train_dl, test_dl, config.NUM_EPOCHS)
-                    model.save_model(files[chan, band])
-                else:
-                    model.load_model(files[chan, band])
-                r2_test[chan, band], r2_train[chan, band] = r2(model, test_dl), r2(model, train_dl)
-                trained[chan, band] = model
-        self.__dict__['models'] = trained     # reuse in later stages instead of reloading
+        out = self.dirs.variables
+        np.save(out / 'r2_scores.npy', r2_scores['test'][0])          # seed 0: channels x targets
+        np.save(out / 'r2_scores_seeds.npy', r2_scores['test'])       # seeds x channels x targets
+        np.save(out / 'r2_scores_val.npy', r2_scores['val'])
+        np.save(out / 'r2_scores_train.npy', r2_scores['train'])
+        if np.any(best_epoch >= 0):
+            np.save(out / 'losses_train.npy', losses['train'])         # seeds x channels x targets x epochs
+            np.save(out / 'losses_val.npy', losses['val'])
+            np.save(out / 'best_epoch.npy', best_epoch)
+        (out / 'model_info.json').write_text(json.dumps(dict(
+            architecture=config.LSTM_KWARGS, n_parameters=models.build_lstm(input_size, 'cpu').n_parameters(),
+            n_units=int(input_size), seeds=self.n_seeds, max_epochs=config.NUM_EPOCHS, patience=config.PATIENCE,
+            batch_size=config.BATCH_SIZE), indent=2))
 
-        np.save(self.dirs.variables / 'r2_scores.npy', r2_test)
-        np.save(self.dirs.variables / 'r2_scores_train.npy', r2_train)
-        np.save(self.dirs.variables / 'split_train_idx.npy', train_idx)   # identical for every target
-        np.save(self.dirs.variables / 'split_test_idx.npy', test_idx)
-        if train_now:
-            np.save(self.dirs.variables / 'losses_train.npy', losses_train)
-            np.save(self.dirs.variables / 'losses_test.npy', losses_test)
+    def transfer(self):
+        """
+        Within-session transfer: R2 of the seed-0 active-epoch models on the passive replay and
+        spontaneous epochs, with inputs and targets scaled by the active training-data scalers.
+        """
+        for epoch, name in (('passive', 'r2_scores_passive.npy'), ('spontaneous', 'r2_scores_spont.npy')):
+            if (self.dirs.variables / name).exists():
+                continue
+            start, stop = {'passive': self.session.passive_times, 'spontaneous': self.session.spontaneous_times}[epoch]
+            spikes = self.spikes(start, stop).spkMat
+            lfp = self.target_scaler.transform(self.lfp_targets(start, stop, spikes.shape[0]).lfpMat)
+            scores = np.full((self.n_channels, config.N_TARGETS), np.nan)
+            for (chan, band), model in self.models.items():
+                prediction = model.evaluate(spikes).numpy()
+                scores[chan, band] = r2_score(lfp[:len(prediction), chan, band], prediction)
+            np.save(self.dirs.variables / name, scores)
 
     def plots(self):
         channels, lfp = self.active_lfp.channels, self.active_lfp.lfpMat
@@ -207,10 +328,11 @@ class SessionPipeline:
 
         r2_test = np.load(self.dirs.variables / 'r2_scores.npy')
         plots.plot_r2(r2_test, channels, config.BANDS, fig_name='r2_scores.png', **kw)
-        losses_file = self.dirs.variables / 'losses_test.npy'
+        losses_file = self.dirs.variables / 'losses_val.npy'
         if losses_file.exists():
+            val_losses = np.moveaxis(np.load(losses_file)[0], 2, 1)   # seed 0: channels x epochs x targets
             for band in range(config.N_TARGETS):
-                plots.plot_all_channel_loss(channels, config.BANDS, band, np.load(losses_file),
+                plots.plot_all_channel_loss(channels, config.BANDS, band, val_losses,
                                             fig_name=f'all_channel_loss_band{band}.png', **kw)
         for chan in range(len(channels)):
             plots.plot_lfp_prediction(lfp, yhat, chan, config.BANDS, start_time=20, end_time=30,
@@ -363,6 +485,7 @@ def main():
     parser.add_argument('--stages', default=','.join(STAGES), help=f'comma-separated subset of {STAGES}')
     parser.add_argument('--retrain', action='store_true', help='train even if saved models exist')
     parser.add_argument('--ig-batch', type=int, default=config.IG_N_BATCH, help='sequences per IG batch')
+    parser.add_argument('--seeds', type=int, default=config.N_SEEDS, help='independently initialised fits per model')
     parser.add_argument('--device', default='cuda' if torch.cuda.is_available() else 'cpu')
     args = parser.parse_args()
 
@@ -373,7 +496,7 @@ def main():
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     print(f'Session {session_id}, data root {data_root}, device {args.device}', flush=True)
-    pipeline = SessionPipeline(data_root, session_id, torch.device(args.device), args.retrain, args.ig_batch)
+    pipeline = SessionPipeline(data_root, session_id, torch.device(args.device), args.retrain, args.ig_batch, args.seeds)
     for stage in STAGES:                    # always in pipeline order
         if stage in stages:
             print(f'--- {stage}', flush=True)

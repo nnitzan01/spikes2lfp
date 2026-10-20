@@ -4,7 +4,7 @@ import process_probe as pp
 from scipy.stats import zscore
 from scipy.ndimage import gaussian_filter1d
 from sklearn.preprocessing import MinMaxScaler
-from scipy.signal import butter, filtfilt, hilbert
+from scipy.signal import butter, decimate, filtfilt, hilbert
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -44,6 +44,8 @@ class pre_process_spikes:
 
     def minmax(self):
         """
+        Legacy scaling used by the first models (the pipeline now uses SpikeScaler).
+
         Min-max scale each time bin across units (note the transposes: it is not per unit).
 
         With 4 ms bins nearly every count is 0 or 1 and the minimum across units is 0, so in
@@ -66,32 +68,33 @@ class pre_process_lfp:
         self.lfpMat = []
         self.sampling_rate = config.LFP_FS
 
-    def filter_lfp(self, bands=config.BANDS, take_power=False):
+    def filter_lfp(self, bands=config.BANDS, take_power=False, zscore_targets=True, downsample=1):
         """
-        Build lfpMat[:, :, 0] = z-scored broadband LFP and lfpMat[:, :, i] = z-scored band-passed
-        LFP (or its Hilbert power envelope if take_power) for bands[i-1]. Frees self.data.
+        Build lfpMat[:, :, 0] = broadband LFP and lfpMat[:, :, i] = band-passed LFP (or its Hilbert
+        power envelope if take_power) for bands[i-1]. Frees self.data.
+
+        downsample > 1 decimates each target right after it is computed, with an anti-alias
+        filter (see _decimate), so the full-rate array of all targets is never held in memory.
+        zscore_targets=False keeps raw values, so a Standardizer can be fitted on training data only.
         """
-        self.lfpMat = np.zeros((self.data.shape[0], self.data.shape[1], len(bands)+1))
-        self.lfpMat[:, :, 0] = zscore(self.data, axis=0)
+        def finish(target):
+            target = _decimate(target, downsample)
+            return zscore(target, axis=0) if zscore_targets else target
+
+        data = self.data.astype(np.float64)
+        n_out = len(range(0, data.shape[0], downsample))
+        self.lfpMat = np.zeros((n_out, data.shape[1], len(bands)+1))
+        self.lfpMat[:, :, 0] = finish(data)
         nyquist = self.sampling_rate / 2
         for i, (low_hz, high_hz) in enumerate(bands):
             b, a = butter(3, [low_hz / nyquist, high_hz / nyquist], btype='bandpass')
-            filt = filtfilt(b, a, self.data.astype(np.float64), axis=0)
-            if take_power:
-                power = np.abs(hilbert(filt, axis=0))**2
-                self.lfpMat[:, :, i+1] = zscore(power, axis=0)
-            else:
-                self.lfpMat[:, :, i+1] = zscore(filt, axis=0)
+            filt = filtfilt(b, a, data, axis=0)
+            self.lfpMat[:, :, i+1] = finish(np.abs(hilbert(filt, axis=0))**2 if take_power else filt)
         del self.data
 
     def downsample_lfp(self, factor):
-        """
-        Keep every factor-th sample (1250 Hz / 5 = 250 Hz, one sample per spike bin).
-
-        No anti-alias filter is applied: broadband content above the new Nyquist (125 Hz) folds
-        back into the target. Kept as-is so existing models stay comparable.
-        """
-        self.lfpMat = self.lfpMat[::factor,:,:]
+        """Decimate lfpMat by `factor` with an anti-alias filter (1250 Hz / 5 = 250 Hz, one sample per spike bin)."""
+        self.lfpMat = _decimate(self.lfpMat, factor)
 
     def truncate(self, seqlength):
         num_trials = int(self.lfpMat.shape[0] / seqlength)
@@ -102,6 +105,68 @@ class pre_process_lfp:
         if self.lfpMat.shape[0] < length:
             raise ValueError(f'LFP has {self.lfpMat.shape[0]} samples but spikes have {length} bins')
         self.lfpMat = self.lfpMat[:length,:,:]
+
+
+def _decimate(x, factor):
+    """
+    Low-pass below the new Nyquist (zero-phase FIR), then keep every factor-th sample along axis 0:
+    output sample k corresponds to input sample k * factor, as with plain slicing x[::factor].
+    """
+    if factor == 1:
+        return x
+    return decimate(x, factor, ftype='fir', axis=0, zero_phase=True)
+
+
+class SpikeScaler:
+    """
+    Per-unit min-max scaling of binned spike counts, (x - min) / (max - min), with min and max
+    taken from the training bins only. Units that never fire in training get 0. Values above the
+    training maximum are not clipped.
+    """
+    def fit(self, counts):
+        self.min_ = counts.min(axis=0).astype(np.float32)
+        self.range_ = (counts.max(axis=0) - self.min_).astype(np.float32)
+        return self
+
+    def transform(self, counts):
+        scaled = (counts - self.min_) / np.where(self.range_ > 0, self.range_, 1)
+        scaled[:, self.range_ == 0] = 0
+        return scaled.astype(np.float32)
+
+    def state(self):
+        return dict(min=self.min_, range=self.range_)
+
+    @classmethod
+    def from_state(cls, state):
+        scaler = cls()
+        scaler.min_, scaler.range_ = state['min'], state['range']
+        return scaler
+
+
+class Standardizer:
+    """z-scoring along axis 0 with mean and standard deviation taken from the training samples only."""
+    def fit(self, y):
+        self.mean_ = y.mean(axis=0)
+        self.std_ = y.std(axis=0)
+        return self
+
+    def transform(self, y):
+        return ((y - self.mean_) / np.where(self.std_ > 0, self.std_, 1)).astype(np.float32)
+
+    def state(self):
+        return dict(mean=self.mean_, std=self.std_)
+
+    @classmethod
+    def from_state(cls, state):
+        scaler = cls()
+        scaler.mean_, scaler.std_ = state['mean'], state['std']
+        return scaler
+
+
+def take_chunks(arr, chunks, seqlength=config.SEQLENGTH):
+    """Cut (bins x ...) into consecutive chunks of seqlength bins and return the selected ones: (chunks, seqlength, ...)."""
+    n_chunks = arr.shape[0] // seqlength
+    return arr[:n_chunks * seqlength].reshape((n_chunks, seqlength) + arr.shape[1:])[np.asarray(chunks)]
 
 
 def chunk_and_reshape(spikes, lfp, seqlength, test_size=config.TEST_SIZE, prediction_lag=0,
