@@ -41,12 +41,16 @@ training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, 
 """
 import argparse
 import json
+import os
+import time
+from contextlib import contextmanager
 from functools import cached_property
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 import torch
-from scipy.sparse import coo_matrix, save_npz
+from scipy import sparse
 from sklearn.metrics import r2_score
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -66,9 +70,55 @@ from splits import chunk_bins, describe, holdout_split
 
 STAGES = ['train', 'transfer', 'plots', 'variables', 'attr', 'summaries', 'peri', 'ipd']
 
-def save_sparse(path, matrix):
+def log(message):
+    print(f'[{time.strftime("%H:%M:%S")}] {message}', flush=True)
+
+
+def model_seed(seed, chan, band):
+    """Seed of one model (weights and batch order), independent of the order in which models are trained."""
+    return config.TORCH_SEED + 10_000 * seed + 100 * chan + band
+
+
+@contextmanager
+def atomic(path):
+    """
+    Yield a temporary file next to `path`, moved into place only when the block completes. An
+    interrupted job therefore never leaves a partial file that a resubmitted job would skip as done.
+    """
+    path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    save_npz(path, coo_matrix(matrix), compressed=True)
+    tmp = path.with_name(f'.{path.name}.part')
+    try:
+        yield tmp
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+
+
+def save_npy(path, array):
+    with atomic(path) as tmp, open(tmp, 'wb') as fh:
+        np.save(fh, array)
+
+
+def save_npz(path, compressed=False, **arrays):
+    with atomic(path) as tmp, open(tmp, 'wb') as fh:
+        (np.savez_compressed if compressed else np.savez)(fh, **arrays)
+
+
+def save_text(path, text):
+    with atomic(path) as tmp:
+        tmp.write_text(text)
+
+
+def save_csv(frame, path):
+    with atomic(path) as tmp:
+        frame.to_csv(tmp, index=False)
+
+
+def save_sparse(path, matrix):
+    with atomic(path) as tmp, open(tmp, 'wb') as fh:
+        sparse.save_npz(fh, sparse.coo_matrix(matrix), compressed=True)
 
 
 def make_loader(X, y, shuffle):
@@ -128,8 +178,8 @@ class SessionPipeline:
             return dict(np.load(f))
         split = holdout_split(self.active_counts.spkMat.shape[0] // config.SEQLENGTH)
         f.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(f, **split)
-        (f.parent / 'split.json').write_text(json.dumps(describe(split), indent=2))
+        save_npz(f, **split)
+        save_text(f.parent / 'split.json', json.dumps(describe(split), indent=2))
         return split
 
     @cached_property
@@ -139,7 +189,7 @@ class SessionPipeline:
         if f.exists():
             return SpikeScaler.from_state(np.load(f))
         scaler = SpikeScaler().fit(self.active_counts.spkMat[chunk_bins(self.split['train'])])
-        np.savez(f, **scaler.state())
+        save_npz(f, **scaler.state())
         return scaler
 
     @cached_property
@@ -166,7 +216,7 @@ class SessionPipeline:
             return Standardizer.from_state(np.load(f))
         raw = self.lfp_targets(*self.session.active_times, self.active_spikes.spkMat.shape[0]).lfpMat
         scaler = Standardizer().fit(raw[chunk_bins(self.split['train'])])
-        np.savez(f, **scaler.state())
+        save_npz(f, **scaler.state())
         return scaler
 
     @cached_property
@@ -224,11 +274,14 @@ class SessionPipeline:
         """
         Train (or load) one model per channel x target x seed on the training chunks, keeping the
         epoch with the lowest validation loss, and score train / validation / test R2.
+
+        Each model has its own seed (model_seed) and is saved as soon as it is trained, so a job
+        killed part-way can be resubmitted: existing models are loaded and only missing ones are
+        trained, with the same result as an uninterrupted run.
         """
         spikes, lfp, split = self.active_spikes.spkMat, self.active_lfp.lfpMat, self.split
         n_channels, input_size = lfp.shape[1], spikes.shape[1]
-        self.dirs.models.mkdir(parents=True, exist_ok=True)
-        self.active_lfp.channels.to_csv(self.dirs.variables / 'channels.csv', index=False)
+        save_csv(self.active_lfp.channels, self.dirs.variables / 'channels.csv')
         X = {part: take_chunks(spikes, split[part]) for part in ('train', 'val', 'test')}
 
         shape = (self.n_seeds, n_channels, config.N_TARGETS)
@@ -236,41 +289,49 @@ class SessionPipeline:
         losses = {part: np.full(shape + (config.NUM_EPOCHS,), np.nan) for part in ('train', 'val')}
         best_epoch = np.full(shape, -1)
         for seed in range(self.n_seeds):
-            files = {(c, b): paths.model_file(self.dirs, c, b, seed) for c in range(n_channels) for b in range(config.N_TARGETS)}
-            train_now = self.retrain or not all(f.exists() for f in files.values())
-            print(f'seed {seed}: ' + ('training models' if train_now else 'loading saved models'), flush=True)
-            torch.manual_seed(config.TORCH_SEED + seed)
             fitted = {}
             for band in range(config.N_TARGETS):
                 y = {part: take_chunks(lfp[:, :, band], split[part]) for part in ('train', 'val', 'test')}
                 for chan in range(n_channels):
+                    f = paths.model_file(self.dirs, chan, band, seed)
                     train_dl, val_dl, test_dl = (make_loader(X[part], y[part][..., chan:chan + 1], shuffle=(part == 'train'))
                                                  for part in ('train', 'val', 'test'))
-                    model = models.build_lstm(input_size, self.device)
-                    if train_now:
+                    if f.exists() and not self.retrain:
+                        model = models.build_lstm(input_size, self.device)
+                        history = model.load_model(f)
+                    else:
+                        torch.manual_seed(model_seed(seed, chan, band))    # before building: covers weight init too
+                        model = models.build_lstm(input_size, self.device)
+                        t0 = time.time()
                         loss_tr, loss_val = model.train(train_dl, val_dl, config.NUM_EPOCHS,
                                                         select_best=True, patience=config.PATIENCE)
-                        losses['train'][seed, chan, band], losses['val'][seed, chan, band] = loss_tr, loss_val
-                        best_epoch[seed, chan, band] = model.best_epoch
-                        model.save_model(files[chan, band])
-                    else:
-                        model.load_model(files[chan, band])
+                        # plain Python numbers, so the file loads with torch.load(weights_only=True)
+                        history = dict(train_losses=loss_tr.tolist(), val_losses=loss_val.tolist(),
+                                       best_epoch=int(model.best_epoch), seconds=float(time.time() - t0))
+                        with atomic(f) as tmp:
+                            model.save_model(tmp, **history)
+                    if 'train_losses' in history:
+                        losses['train'][seed, chan, band] = history['train_losses']
+                        losses['val'][seed, chan, band] = history['val_losses']
+                        best_epoch[seed, chan, band] = history['best_epoch']
                     for part, dl in (('train', train_dl), ('val', val_dl), ('test', test_dl)):
                         r2_scores[part][seed, chan, band] = r2(model, dl)
+                    if 'seconds' in history:
+                        log(f'seed {seed} chan {chan} band {band}: test R2 {r2_scores["test"][seed, chan, band]:.3f}, '
+                            f'best epoch {history["best_epoch"]}, {history["seconds"]:.0f} s')
                     fitted[chan, band] = model
             if seed == 0:
                 self.__dict__['models'] = fitted     # reuse in later stages instead of reloading
 
         out = self.dirs.variables
-        np.save(out / 'r2_scores.npy', r2_scores['test'][0])          # seed 0: channels x targets
-        np.save(out / 'r2_scores_seeds.npy', r2_scores['test'])       # seeds x channels x targets
-        np.save(out / 'r2_scores_val.npy', r2_scores['val'])
-        np.save(out / 'r2_scores_train.npy', r2_scores['train'])
-        if np.any(best_epoch >= 0):
-            np.save(out / 'losses_train.npy', losses['train'])         # seeds x channels x targets x epochs
-            np.save(out / 'losses_val.npy', losses['val'])
-            np.save(out / 'best_epoch.npy', best_epoch)
-        (out / 'model_info.json').write_text(json.dumps(dict(
+        save_npy(out / 'r2_scores.npy', r2_scores['test'][0])          # seed 0: channels x targets
+        save_npy(out / 'r2_scores_seeds.npy', r2_scores['test'])       # seeds x channels x targets
+        save_npy(out / 'r2_scores_val.npy', r2_scores['val'])
+        save_npy(out / 'r2_scores_train.npy', r2_scores['train'])
+        save_npy(out / 'losses_train.npy', losses['train'])            # seeds x channels x targets x epochs
+        save_npy(out / 'losses_val.npy', losses['val'])
+        save_npy(out / 'best_epoch.npy', best_epoch)
+        save_text(out / 'model_info.json', json.dumps(dict(
             architecture=config.LSTM_KWARGS, n_parameters=models.build_lstm(input_size, 'cpu').n_parameters(),
             n_units=int(input_size), seeds=self.n_seeds, max_epochs=config.NUM_EPOCHS, patience=config.PATIENCE,
             batch_size=config.BATCH_SIZE), indent=2))
@@ -290,7 +351,7 @@ class SessionPipeline:
             for (chan, band), model in self.models.items():
                 prediction = model.evaluate(spikes).numpy()
                 scores[chan, band] = r2_score(lfp[:len(prediction), chan, band], prediction)
-            np.save(self.dirs.variables / name, scores)
+            save_npy(self.dirs.variables / name, scores)
 
     def plots(self):
         channels, lfp = self.active_lfp.channels, self.active_lfp.lfpMat
@@ -316,11 +377,10 @@ class SessionPipeline:
 
     def variables(self):
         out = self.dirs.variables
-        out.mkdir(parents=True, exist_ok=True)
         save_sparse(out / 'spikes_sparse.npz', self.active_spikes.spkMat)
-        self.session.units.to_csv(out / 'units.csv', index=False)
-        np.save(out / 'timestamps.npy', self.active_spikes.timestamps)
-        self.session.active.to_csv(out / 'stimulus_presentation_active.csv', index=False)
+        save_csv(self.session.units, out / 'units.csv')
+        save_npy(out / 'timestamps.npy', self.active_spikes.timestamps)
+        save_csv(self.session.active, out / 'stimulus_presentation_active.csv')
 
     @cached_property
     def attr_targets(self):
@@ -372,7 +432,7 @@ class SessionPipeline:
             t[name + '_spikes'] = window_spike_counts(counts, t[name], L)
         t['sampled_spont_spikes'] = window_spike_counts(spont, t['sampled_spont'], L)
         f.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(f, **t)
+        save_npz(f, **t)
         return t
 
     @staticmethod
@@ -412,8 +472,9 @@ class SessionPipeline:
         peri_on = t['event_onset_bins'][:config.PERI_EVENTS]
         peri_ends = peri_on[:, None] + self.peri_offsets()[None, :]                             # events x times
         run = dict(history=L, baseline=baseline, batch_windows=self.ig_batch)
-        print(f'Attributing {len(todo)} models', flush=True)
+        log(f'Attributing {len(todo)} models')
         for chan, band in todo:
+            t0 = time.time()
             ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=config.IG_N_STEPS)
             out = {}
             sampled = {}
@@ -438,9 +499,12 @@ class SessionPipeline:
             for name, res in list(sampled.items()) + [('components', comp), ('peri', peri)]:
                 for key in ('f_x', 'f_b', 'delta'):
                     out[f'{name}_{key}'] = res[key].astype(np.float32)
-            f = paths.attribution_file(self.dirs, chan, band)
-            f.parent.mkdir(parents=True, exist_ok=True)
-            np.savez_compressed(f, **out)
+            save_npz(paths.attribution_file(self.dirs, chan, band), compressed=True, **out)
+            err = relative_completeness_error(*(np.concatenate([out[f'{n}_{k}'] for n in ('sampled_train', 'sampled_test')])
+                                                for k in ('f_x', 'f_b', 'delta')))
+            n_windows = sum(len(t[n]) for n in sampled) + comp_ends.size + peri_ends.size
+            log(f'attr chan {chan} band {band}: {n_windows} windows, {time.time() - t0:.0f} s, '
+                f'median completeness error {err:.1e}')
 
     def summaries(self):
         """
@@ -474,8 +538,8 @@ class SessionPipeline:
                     *(np.concatenate([a[f'{n}_{key}'] for n in ('sampled_train', 'sampled_test', 'components')])
                       for key in ('f_x', 'f_b', 'delta')))
         for s, f in files.items():
-            np.savez(f, **result[s])
-        np.save(self.dirs.attrs / 'attribution_completeness.npy', completeness)
+            save_npz(f, **result[s])
+        save_npy(self.dirs.attrs / 'attribution_completeness.npy', completeness)
 
     def peri(self):
         """
@@ -495,8 +559,8 @@ class SessionPipeline:
         tax = snippet_time_axis(config.STIM_WINDOW, config.BIN_SIZE)
         starts, _ = event_start_indices(counts.timestamps, stim.start_time[stim.active & (stim.image_name != 'omitted')].values,
                                         config.STIM_WINDOW, len(tax))
-        np.save(out / 'psth.npy', (extract_snippets(counts.spkMat, starts, len(tax)).mean(axis=0).T / config.BIN_SIZE).astype(np.float32))
-        np.save(out / 'peri_times.npy', t['peri_times'])
+        save_npy(out / 'psth.npy', (extract_snippets(counts.spkMat, starts, len(tax)).mean(axis=0).T / config.BIN_SIZE).astype(np.float32))
+        save_npy(out / 'peri_times.npy', t['peri_times'])
 
         n_base = int(np.sum(t['peri_times'] < config.STIM_BASELINE[1]))
         maps = [np.load(paths.attribution_file(self.dirs, c, 0))['peri_total'].astype(np.float32) for c in range(self.n_channels)]
@@ -513,9 +577,9 @@ class SessionPipeline:
             jac_ref[..., ci] = jaccard_to_reference(top, reference).reshape(n_ev, n_t)
             for e in range(n_ev):                       # consecutive times within each event only
                 jac_raw[e, :, ci] = jaccard_consecutive(top[e * n_t:(e + 1) * n_t])
-        np.save(out / 'rank_snippets.npy', ranks)
-        np.save(out / 'jaccard_raw_snippets.npy', jac_raw)
-        np.save(out / 'jaccard_ref_snippets.npy', jac_ref)
+        save_npy(out / 'rank_snippets.npy', ranks)
+        save_npy(out / 'jaccard_raw_snippets.npy', jac_raw)
+        save_npy(out / 'jaccard_ref_snippets.npy', jac_ref)
 
     def ipd(self):
         """Regional instantaneous predictive dominance from the peri-stimulus ranks -> variables/regional_dominance_results.npz."""
@@ -528,7 +592,7 @@ class SessionPipeline:
             dominance, regions = regional_dominance(ranks[..., ci], ranks[..., ci] > 0, self.unit_areas)
             per_channel.append(dominance.mean(axis=0))                  # average over events
         average_dominance = np.stack(per_channel, axis=-1)                # regions x times x channels
-        np.savez_compressed(out / 'regional_dominance_results.npz', average_dominance=average_dominance,
+        save_npz(out / 'regional_dominance_results.npz', compressed=True, average_dominance=average_dominance,
                             proportional_influence=proportional_influence(average_dominance),
                             region_names=regions, t=np.load(out / 'peri_times.npy'))
 
@@ -549,13 +613,19 @@ def main():
         parser.error(f'unknown stages: {sorted(unknown)}')
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
-    print(f'Session {session_id}, data root {data_root}, device {args.device}', flush=True)
+    if os.environ.get('SLURM_CPUS_PER_TASK'):        # use the CPUs the cluster allocated, not every core on the node
+        torch.set_num_threads(int(os.environ['SLURM_CPUS_PER_TASK']))
+    gpu = torch.cuda.get_device_name(0) if torch.device(args.device).type == 'cuda' else 'none'
+    log(f'Session {session_id}, data root {data_root}, device {args.device} (GPU: {gpu}), '
+        f'{torch.get_num_threads()} CPU threads, outputs in {paths.OUTPUT_SUBDIR}/')
     pipeline = SessionPipeline(data_root, session_id, torch.device(args.device), args.retrain, args.ig_batch, args.seeds)
     for stage in STAGES:                    # always in pipeline order
         if stage in stages:
-            print(f'--- {stage}', flush=True)
+            log(f'--- {stage}')
+            t0 = time.time()
             getattr(pipeline, stage)()
-    print('Session complete.', flush=True)
+            log(f'--- {stage} done in {(time.time() - t0) / 60:.1f} min')
+    log('Session complete.')
 
 
 if __name__ == '__main__':

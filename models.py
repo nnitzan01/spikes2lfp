@@ -255,13 +255,17 @@ class process_model:
     def device_is_cuda(self):
         return torch.device(self.device).type == 'cuda'
 
-    def save_model(self, filename):
-        torch.save(self.model.state_dict(), filename)
+    def save_model(self, filename, **extra):
+        """Save the weights, plus any extra entries (e.g. training history), with torch.save."""
+        torch.save(dict(state_dict=self.model.state_dict(), **extra), filename)
 
     def load_model(self, filename):
-        self.model.load_state_dict(torch.load(filename, map_location=self.device))
+        """Load weights saved by save_model (or a bare state_dict); returns the extra entries."""
+        saved = torch.load(filename, map_location=self.device)
+        state = saved.pop('state_dict') if 'state_dict' in saved else saved
+        self.model.load_state_dict(state)
         self.trained = True
-        return self.model
+        return saved if state is not saved else {}
 
 
 class LinearRegressionModel:

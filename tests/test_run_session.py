@@ -52,3 +52,35 @@ def test_all_stages(pipeline_module, session_dir):
     rerun.train()
     assert (dirs.models / 'lstm_model_chan0_band0_seed0.pt').stat().st_mtime_ns == before
     np.testing.assert_allclose(np.load(dirs.variables / 'r2_scores.npy'), r2, rtol=1e-6)
+
+
+def test_resume_retrains_only_missing_models_identically(pipeline_module, session_dir):
+    import torch
+    run_session = pipeline_module
+    data_root, session_id = paths.parse_session_dir(session_dir)
+    dirs = paths.session_output_dirs(data_root, session_id)
+    run_session.SessionPipeline(data_root, session_id, device='cpu').train()
+
+    lost, kept = paths.model_file(dirs, 1, 3), paths.model_file(dirs, 0, 0)
+    original = torch.load(lost)['state_dict']
+    kept_mtime = kept.stat().st_mtime_ns
+    lost.unlink()                                                   # as if the job died before saving it
+    run_session.SessionPipeline(data_root, session_id, device='cpu').train()
+    assert kept.stat().st_mtime_ns == kept_mtime                    # existing models are not retrained
+    retrained = torch.load(lost)['state_dict']
+    for k in original:                                              # per-model seed: same weights as before
+        torch.testing.assert_close(retrained[k], original[k])
+    assert 'best_epoch' in torch.load(lost)
+
+
+def test_atomic_write_leaves_nothing_when_interrupted(tmp_path):
+    import pytest
+    import run_session
+    target = tmp_path / 'out.npy'
+    with pytest.raises(RuntimeError):
+        with run_session.atomic(target) as tmp:
+            tmp.write_text('partial')
+            raise RuntimeError('job killed')
+    assert not target.exists() and list(tmp_path.iterdir()) == []
+    run_session.save_npy(target, np.arange(3))
+    np.testing.assert_array_equal(np.load(target), [0, 1, 2])
