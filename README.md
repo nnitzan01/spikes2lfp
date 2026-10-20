@@ -71,10 +71,9 @@ python -m experiments.spectral_r2 $SESSION
 
 | Notebook | Purpose |
 |---|---|
-| `start_notebook.ipynb` | Step-by-step walk-through on one session; compares linear, GRU, LSTM and transformer models |
-| `analyze_attribution_single_session.ipynb` | Rank, Jaccard and dominance analyses of one session |
-| `pool_sessions.ipynb` | Pooling results across sessions (reads per-session outputs gathered into shared folders) |
-| `plots_for_manuscript.ipynb`, `simulate_lfp_for_figure.ipynb` | Manuscript figures |
+| `start_notebook.ipynb` | Step-by-step walk-through on one session: model comparison (Fig. 3B), training, attribution, Jaccard stability (Fig. 4D) |
+| `pool_sessions.ipynb` | Pooled figures across sessions; starts with a section-to-figure map |
+| `plots_for_manuscript.ipynb`, `simulate_lfp_for_figure.ipynb` | Example-session panels (Fig. 1A, 4A) and the Fig. 3D schematic |
 
 ## Notes on the method
 
