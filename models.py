@@ -18,12 +18,30 @@ def build_lstm(input_size, device, seqlength=config.SEQLENGTH):
                          torch.nn.MSELoss(), device)
 
 
+class CausalConv1d(nn.Module):
+    """
+    Conv1d over time that only sees the present and past: (batch, time, channels) in and out.
+
+    The input is padded with kernel_size - 1 zeros on the left only, so the output at bin t
+    depends on bins t - kernel_size + 1 ... t and never on later bins.
+    """
+    def __init__(self, in_channels, out_channels, kernel_size):
+        super().__init__()
+        self.left_pad = kernel_size - 1
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size)
+
+    def forward(self, x):
+        x = nn.functional.pad(x.permute(0, 2, 1), (self.left_pad, 0))   # Conv1d wants (batch, channels, time)
+        return self.conv(x).permute(0, 2, 1)
+
+
 class LSTMnet(nn.Module):
     """
-    (batch, time, units) -> (batch, time, 1), with an optional Conv1d front end over time.
+    (batch, time, units) -> (batch, time, 1): optional causal Conv1d front end, then an LSTM and a
+    linear readout at every time step. Every output depends only on current and past inputs.
 
-    forward() also returns the final (h, c) and accepts them back, so integrated gradients can
-    step through a sequence one bin at a time.
+    forward() also returns the final (h, c) and accepts them back (used by the step-by-step
+    InstantaneousIG, which is only valid without the conv front end).
     """
     def __init__(self, input_size, num_hidden, num_layers, seqlength,
                  batchNorm=False, conv=False, kernel_size=3, out_channels=16, verbose=False):
@@ -37,7 +55,8 @@ class LSTMnet(nn.Module):
         self.seqlength = seqlength
 
         if self.conv:
-            self.conv1d = nn.Conv1d(in_channels=input_size, out_channels=out_channels, kernel_size=kernel_size, padding='same')
+            # temporal feature extraction and dimensionality reduction: units -> out_channels
+            self.conv1d = CausalConv1d(input_size, out_channels, kernel_size)
             self.input_size = out_channels   # the LSTM sees the conv channels instead of the units
 
         self.lstm = nn.LSTM(self.input_size, num_hidden, num_layers, batch_first=True)
@@ -50,7 +69,7 @@ class LSTMnet(nn.Module):
             print(f'Input: {list(x.shape)}')
 
         if self.conv:
-            x = self.conv1d(x.permute(0, 2, 1)).permute(0, 2, 1)   # Conv1d expects (batch, channels, time)
+            x = self.conv1d(x)
             if self.verbose:
                 print(f'Output for Conv1d: {list(x.shape)}')
 
@@ -279,11 +298,12 @@ class LinearRegressionModel:
 class SpikingTransformer(nn.Module):
     """
     Transformer encoder from spikes to LFP, with a learnable positional embedding and an
-    optional Conv1d after the embedding. Attention is bidirectional (non-causal): predictions
-    at time t also use spikes after t, unlike the recurrent models.
+    optional causal Conv1d after the embedding. With causal=True (default) each position attends
+    only to itself and earlier positions, so like the recurrent models the prediction at time t
+    uses no spikes after t.
     """
     def __init__(self, input_size, seqlength=750, embedding_dim=64, num_heads=8, num_layers=4, dropout=0.1,
-                 use_conv=False, conv_kernel_size=3, conv_out_channels=16):
+                 use_conv=False, conv_kernel_size=3, conv_out_channels=16, causal=True):
         super(SpikingTransformer, self).__init__()
 
         self.input_size = input_size
@@ -299,9 +319,9 @@ class SpikingTransformer(nn.Module):
         self.embedding = nn.Linear(input_size, embedding_dim)
         self.embedding_bn = nn.BatchNorm1d(embedding_dim)
 
+        self.causal = causal
         if self.use_conv:
-            self.conv1d = nn.Conv1d(in_channels=embedding_dim, out_channels=conv_out_channels,
-                                    kernel_size=conv_kernel_size, padding='same')
+            self.conv1d = CausalConv1d(embedding_dim, conv_out_channels, conv_kernel_size)
             self.embedding_dim = conv_out_channels   # downstream layers see the conv channels
 
         # one learnable position vector per bin; inputs longer than seqlength are not supported
@@ -336,10 +356,12 @@ class SpikingTransformer(nn.Module):
         embedded = self.dropout(embedded)
 
         if self.use_conv:
-            embedded = self.conv1d(embedded.permute(0, 2, 1)).permute(0, 2, 1)
+            embedded = self.conv1d(embedded)
 
         positions = torch.arange(0, seq_len, device=x.device).unsqueeze(0).expand(batch_size, seq_len)
         embedded = embedded + self.positional_embedding(positions)
 
-        transformer_output = self.transformer_encoder(embedded)  # (batch_size, sequence_length, embedding_dim)
+        # -inf above the diagonal: position t cannot attend to positions after t
+        mask = nn.Transformer.generate_square_subsequent_mask(seq_len, device=x.device) if self.causal else None
+        transformer_output = self.transformer_encoder(embedded, mask=mask)  # (batch_size, sequence_length, embedding_dim)
         return self.regression_head(transformer_output).squeeze(-1)  # (batch_size, sequence_length)

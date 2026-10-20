@@ -25,6 +25,9 @@ class IntegratedGradient():
     training mode. LSTMnet/GRUnet have no dropout, so train() does not change their output.
     """
     def __init__(self, forward_func, method='moving window', window_size=None, weight=False, tau=None, fs=250, seqlength=750):
+        if method == 'last time point' and getattr(forward_func, 'conv', False):
+            # stepping one bin at a time hides the conv kernel's history; use SequenceIG instead
+            raise ValueError("'last time point' needs a model without a conv front end; use SequenceIG")
         if method == 'last time point' and isinstance(forward_func, SpikingTransformer):
             # feeding one bin at a time removes the attention context, so the result is not meaningful
             raise ValueError("'last time point' needs a recurrent model; SpikingTransformer is not supported")
