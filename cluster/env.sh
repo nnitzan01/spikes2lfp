@@ -1,17 +1,15 @@
-# Cluster environment, sourced by run_sessions.sbatch (and handy interactively: `source cluster/env.sh`).
-# Edit the three settings below once for your account on the cluster.
+# Cluster environment (NYU BigPurple), sourced by run_sessions.sbatch; also handy interactively:
+#   source cluster/env.sh
 
-# 1. Software: load conda and activate the environment created from environment.yaml.
-#    `module avail miniconda` / `module avail anaconda` lists the conda modules installed.
-module purge
-module load miniconda3
-eval "$(conda shell.bash hook)"
+module load cuda/11.8
+module load anaconda3
+eval "$(conda shell.bash hook)"          # makes `conda activate` work in batch jobs (no `conda init` needed)
 conda activate spikes2lfp
 
-# 2. Data: the AllenSDK cache directory (contains visual-behavior-neuropixels-0.4.0/).
-#    Outputs are written to $SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/.
-export SPIKES2LFP_DATA_ROOT=/path/to/allen_cache
+# AllenSDK cache directory (contains visual-behavior-neuropixels-0.4.0/).
+# Outputs are written to $SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/ (first-version results stay in spikes2lfp/).
+export SPIKES2LFP_DATA_ROOT=/gpfs/data/buzsakilab/nitzan01/Allen2022
 
-# 3. Optional: keep numpy/BLAS from starting more threads than the CPUs Slurm allocated.
+# keep numpy/BLAS to the CPUs Slurm allocated
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
 export MKL_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}

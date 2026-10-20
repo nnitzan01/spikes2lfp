@@ -2,7 +2,7 @@
 Pre-flight check for the cluster: software, GPU code path and data, in about a minute.
 
 Run on a GPU node from the repository root, e.g.
-    srun --partition=a100_short --gres=gpu:1 --mem=16G --time=00:15:00 --pty bash
+    srun --gres=gpu:a100:1 --mem=16G --time=00:15:00 --pty bash
     source cluster/env.sh && python cluster/check_setup.py
 
 Every line starts with OK or FAIL; fix any FAIL before submitting the array job.
