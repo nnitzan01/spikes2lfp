@@ -1,3 +1,4 @@
+import pytest
 import numpy as np
 import torch
 
@@ -40,3 +41,11 @@ def test_unit_summaries_and_coarsening():
     np.testing.assert_allclose(s['share'], [(0.5 + 0.75) / 2, (0.5 + 0.25) / 2, 0.0])
     k = np.arange(7)[:, None].astype(float)                                  # lags 0..6, oldest first
     np.testing.assert_allclose(coarsen_lags(k, 3)[:, 0], [1 + 2 + 3, 4 + 5 + 6])   # oldest lag dropped
+
+
+def test_relative_completeness_error_is_robust_to_near_zero_changes():
+    from analysis.sequence_attribution import relative_completeness_error
+    f_b = np.zeros(5)
+    f_x = np.array([1.0, 1.0, 1.0, 1e-6, 1e-6])     # two targets where the prediction barely changes
+    delta = np.full(5, 1e-4)
+    assert relative_completeness_error(f_x, f_b, delta) == pytest.approx(1e-4)   # not ~100 from the tiny ones

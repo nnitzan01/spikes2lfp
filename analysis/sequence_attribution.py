@@ -94,7 +94,10 @@ def unit_summaries(totals, spikes):
 
 
 def relative_completeness_error(f_x, f_b, delta):
-    """Median |delta| / |f(x) - f(b)| over targets (targets with f(x) = f(b) are skipped)."""
-    diff = np.abs(np.asarray(f_x) - np.asarray(f_b))
-    ok = diff > 1e-8
-    return float(np.median(np.abs(np.asarray(delta)[ok]) / diff[ok])) if ok.any() else 0.0
+    """
+    Median |delta| over targets relative to the median |f(x) - f(b)|: the typical completeness error
+    as a fraction of the typical change in prediction being explained. (A median of per-target
+    ratios is dominated by targets where the prediction barely changes and is not used.)
+    """
+    scale = np.median(np.abs(np.asarray(f_x) - np.asarray(f_b)))
+    return float(np.median(np.abs(np.asarray(delta))) / scale) if scale > 0 else 0.0
