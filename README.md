@@ -5,8 +5,8 @@ visual and non-visual areas, and attributing the predictions to individual units
 
 Data: Allen Institute Visual Behavior Neuropixels (VBN), accessed through the AllenSDK S3 cache.
 For each VISp channel and each target (broadband LFP and the power envelopes of 8 frequency bands),
-an LSTM is trained on 4 ms binned spikes from the active task epoch. Integrated gradients then give
-each unit's contribution to the prediction in every time bin.
+a causal CNN-LSTM is trained on 4 ms binned spikes from the active task epoch. History-aware
+integrated gradients then attribute each prediction to every unit at every lag of the preceding 3 s.
 
 ## Setup
 
@@ -36,7 +36,8 @@ pytest            # unit and end-to-end tests on synthetic data; no Allen data n
 ## Running the pipeline
 
 Scripts take a session directory from the AllenSDK cache and write results to
-`<data_root>/spikes2lfp/{models,variables,attrs,plots}/<session_id>/`:
+`<data_root>/spikes2lfp_v2/{models,variables,attrs,plots}/<session_id>/` (results of the first
+model version are in `spikes2lfp/`):
 
 ```bash
 SESSION=<data_root>/visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/<session_id>
@@ -47,12 +48,13 @@ python run_session.py $SESSION --stages attr,peri    # a subset (stages always r
 
 | Stage | Output |
 |---|---|
-| `train` | One LSTM per channel x target (loaded if already saved; `--retrain` to force); test/train R2, losses, train/test split |
+| `train` | One causal CNN-LSTM per channel x target (x seed, `--seeds`); blocked split, training-only scaling, best-validation epoch; train/val/test R2 |
+| `transfer` | R2 of the active-epoch models on passive replay and spontaneous activity |
 | `plots` | Diagnostic figures of the trained models |
 | `variables` | Scaled spike matrix, units, timestamps, stimulus table |
-| `attr` | Raw attributions for each window in `config.ATTR_WINDOWS` (active 720 s, spontaneous 300 s, whole session) |
-| `summaries` | Per-unit mean, relative and per-spike (IPI) attribution for the active and spontaneous windows |
-| `peri` | Peri-stimulus and peri-HVS snippets: PSTH, ranks, top-K Jaccard, mean attribution and per-spike potency |
+| `attr` | History-aware attribution (SequenceIG) of shared targets: random training/test/spontaneous bins, CSD-component windows, peri-stimulus grid; lag kernels; completeness errors |
+| `summaries` | Per-unit mean, mean \|.\|, per-spike and share attribution for training, test, active and spontaneous targets |
+| `peri` | PSTH, peri-stimulus ranks and top-K Jaccard stability (broadband) |
 | `ipd` | Regional instantaneous predictive dominance |
 
 Every stage skips outputs that already exist, so a failed cluster job can simply be resubmitted.
@@ -61,7 +63,7 @@ The module docstring of `run_session.py` lists every output file.
 Experiments, run from the repo root after the relevant pipeline stages:
 
 ```bash
-python -m experiments.detect_cortical_oscillations $SESSION   # before the 'peri' stage, for HVS snippets
+python -m experiments.detect_cortical_oscillations $SESSION   # HVS events (not used by the pipeline)
 python -m experiments.ablation $SESSION --channel 5
 python -m experiments.firing_rate_contribution $SESSION --channel 5
 python -m experiments.spectral_r2 $SESSION
@@ -77,10 +79,16 @@ python -m experiments.spectral_r2 $SESSION
 
 ## Notes on the method
 
-- Spike input is min-max scaled per time bin across units (`pre_process_spikes.minmax`). With 4 ms
-  bins this is close to a binary spike indicator. It does not remove firing-rate effects from
-  attributions; the per-spike (IPI) summaries do.
-- With a zero baseline, a unit has non-zero attribution only in bins where it spiked. Silent units
-  are never ranked, so they cannot enter top-K sets.
-- The LFP is downsampled from 1250 Hz to 250 Hz without an anti-alias filter (kept so existing
-  models stay comparable).
+- **Model:** Conv1d over time (16 filters, kernel 3) -> LSTM (50 units) -> linear readout at every bin.
+  The conv is padded on the left only, so every prediction uses only current and past spikes
+  (tested in `tests/test_models.py`).
+- **Split:** the active epoch's 3 s chunks are split in time: training | validation | test (last 20%),
+  with 6 s buffers dropped between sets (`splits.py`). Spike counts are min-max scaled per unit and
+  targets z-scored, both with training statistics only. LFP targets are decimated to 250 Hz with an
+  anti-alias filter.
+- **Attribution:** for a target bin t, `SequenceIG` integrates gradients of the prediction at t with
+  respect to the whole preceding 3 s window, through the conv and the recurrence. The attributions
+  sum to f(x) - f(baseline) (completeness), and the error is saved for every target. With the zero
+  baseline only spikes receive attribution; `IG_BASELINE = 'mean'` also credits silence.
+- **Summaries** (`analysis/sequence_attribution.py`): per unit, the mean signed and mean absolute
+  contribution per target, the contribution per spike, and the share of all units' |attribution|.
