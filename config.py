@@ -45,6 +45,7 @@ IG_BASELINE = 'zero'                    # 'zero' (no spikes) or 'mean' (each uni
 IG_MAX_SEQUENCES = 2000                 # windows x steps sent through the model at once (GPU memory)
 IG_BATCH_WINDOWS = 256                  # windows built and attributed per batch
 ATTR_HISTORY = SEQLENGTH                # bins of input history per target
+ATTR_RECENT_BINS = 10                   # 'recent' attribution: sum over the last 10 lags (40 ms) instead of all
 ATTR_TARGETS = None                     # model targets to attribute (None = all)
 ATTR_SAMPLED = 500                      # random targets drawn from each of: training block, test block, spontaneous epoch
 ATTR_EVENTS = 500                       # image presentations whose CSD components are attributed

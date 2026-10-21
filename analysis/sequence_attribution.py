@@ -6,6 +6,7 @@ A *target* is a bin t of a continuous recording; its input window is the `histor
 over the last `target_bins` bins of the window. Attributions A[target, lag, unit] are reduced to:
 
     total[target, unit]   = sum over lags of A           (unit's contribution to that prediction)
+    recent[target, unit]  = sum over the last few lags   (contribution of the unit's most recent spikes)
     kernel[lag, unit]     = mean over targets of A       (how far back the unit's spikes matter)
 
 Per-unit summaries over a set of targets (all reported per channel x model target):
@@ -39,17 +40,18 @@ def valid_ends(candidates, n_bins, history):
 
 
 def attribute_targets(ig, X, ends, history, target_bins=1, baseline=0.0, batch_windows=256,
-                      keep_kernel=False, keep_full=False):
+                      keep_kernel=False, keep_full=False, recent_bins=None):
     """
     Run SequenceIG for every target in `ends` over the continuous input X (bins x units tensor on the
     model's device), building windows batch by batch to bound memory.
 
     Returns a dict of numpy arrays: total (n, units), f_x, f_b, delta (n,), and if keep_kernel the
     sums over targets of A and |A| (history, units) as kernel_sum / kernel_abs_sum; if keep_full,
-    A itself (n, history, units).
+    A itself (n, history, units); if recent_bins, the sum of A over the last recent_bins lags of each
+    window as recent (n, units).
     """
     ends = np.asarray(ends)
-    out = {k: [] for k in ('total', 'f_x', 'f_b', 'delta')}
+    out = {k: [] for k in ('total', 'f_x', 'f_b', 'delta') + (('recent',) if recent_bins else ())}
     kernel_sum = kernel_abs_sum = None
     full = []
     for start in range(0, len(ends), batch_windows):
@@ -59,6 +61,8 @@ def attribute_targets(ig, X, ends, history, target_bins=1, baseline=0.0, batch_w
         out['f_x'].append(f_x.numpy())
         out['f_b'].append(f_b.numpy())
         out['delta'].append(delta.numpy())
+        if recent_bins:
+            out['recent'].append(attr[:, -recent_bins:].sum(dim=1).numpy())
         if keep_kernel:
             s, a = attr.sum(dim=0).double().numpy(), attr.abs().sum(dim=0).double().numpy()
             kernel_sum = s if kernel_sum is None else kernel_sum + s

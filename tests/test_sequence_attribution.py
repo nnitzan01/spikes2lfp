@@ -23,10 +23,12 @@ def test_attribute_targets_matches_direct_call_and_batching():
     X = (torch.rand(200, 4) < 0.3).float()
     ends = np.array([30, 77, 120, 199, 45])
     ig = SequenceIG(net, n_steps=20)
-    res = attribute_targets(ig, X, ends, history=20, batch_windows=2, keep_kernel=True, keep_full=True)
+    res = attribute_targets(ig, X, ends, history=20, batch_windows=2, keep_kernel=True, keep_full=True,
+                            recent_bins=4)
     direct, *_ = ig.attribute(X[torch.as_tensor(window_index(ends, 20))])
     np.testing.assert_allclose(res['full'], direct.numpy(), rtol=1e-5, atol=1e-7)
     np.testing.assert_allclose(res['total'], direct.sum(dim=1).numpy(), rtol=1e-5, atol=1e-7)
+    np.testing.assert_allclose(res['recent'], direct[:, -4:].sum(dim=1).numpy(), rtol=1e-5, atol=1e-7)
     np.testing.assert_allclose(res['kernel_sum'], direct.sum(dim=0).numpy(), rtol=1e-5, atol=1e-6)
     assert res['total'].shape == (5, 4) and res['delta'].shape == (5,)
 

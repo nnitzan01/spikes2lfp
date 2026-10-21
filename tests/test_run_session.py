@@ -26,18 +26,24 @@ def test_all_stages(pipeline_module, session_dir):
     assert a['sampled_test_total'].shape == (len(t['sampled_test']), N_UNITS)
     assert a['components_total'].shape == (len(t['event_onsets']), len(config.COMPONENT_TIMES), N_UNITS)
     assert a['peri_total'].shape == (config.PERI_EVENTS, len(t['peri_times']), N_UNITS)
+    assert a['peri_recent'].shape == a['peri_total'].shape
+    assert a['sampled_test_recent'].shape == a['sampled_test_total'].shape
+    assert a['components_recent'].shape == a['components_total'].shape
+    assert t['sampled_test_recent_spikes'].shape == t['sampled_test_spikes'].shape
+    assert (t['sampled_test_recent_spikes'] <= t['sampled_test_spikes']).all()
     assert a['kernel_mean'].shape == (config.ATTR_HISTORY // config.LAG_KERNEL_BIN, N_UNITS)
     assert set(t['event_partition']) <= {'train', 'val', 'test', 'buffer'}
     assert np.nanmax(np.load(dirs.attrs / 'attribution_completeness.npy')) < 0.05
 
-    for s in ('train', 'test', 'active', 'spont'):
+    for s in ('train', 'test', 'active', 'spont', 'recent_train', 'recent_active', 'recent_spont'):
         u = np.load(dirs.attrs / f'unit_attribution_{s}.npz')
         assert u['mean_abs'].shape == (N_CHANNELS, config.N_TARGETS, N_UNITS) and np.isfinite(u['share']).all()
-    ranks = np.load(dirs.variables / 'rank_snippets.npy')
-    assert ranks.shape == (config.PERI_EVENTS, len(t['peri_times']), N_UNITS, N_CHANNELS)
-    assert np.nanmax(np.load(dirs.variables / 'jaccard_ref_snippets.npy')) <= 1
-    ipd = np.load(dirs.variables / 'regional_dominance_results.npz')
-    assert ipd['average_dominance'].shape == (4, len(t['peri_times']), N_CHANNELS)
+    for suffix in ('', '_recent'):
+        ranks = np.load(dirs.variables / f'rank_snippets{suffix}.npy')
+        assert ranks.shape == (config.PERI_EVENTS, len(t['peri_times']), N_UNITS, N_CHANNELS)
+        assert np.nanmax(np.load(dirs.variables / f'jaccard_ref_snippets{suffix}.npy')) <= 1
+        ipd = np.load(dirs.variables / f'regional_dominance_results{suffix}.npz')
+        assert ipd['average_dominance'].shape == (4, len(t['peri_times']), N_CHANNELS)
     assert len(list(dirs.plots.glob('*.png'))) > 0
     for f in ('split.npz', 'split.json', 'spike_scaler.npz', 'target_scaler.npz', 'model_info.json', 'best_epoch.npy'):
         assert (dirs.variables / f).exists(), f
@@ -110,6 +116,33 @@ def test_attr_raises_integration_steps_until_complete(pipeline_module, session_d
     before = paths.attribution_file(dirs, 0, 0).stat().st_mtime_ns
     pipe.attr()
     assert paths.attribution_file(dirs, 0, 0).stat().st_mtime_ns == before
+
+
+def test_files_without_recent_sums_are_upgraded(pipeline_module, session_dir, monkeypatch):
+    import config
+    run_session = pipeline_module
+    data_root, session_id = paths.parse_session_dir(session_dir)
+    dirs = paths.session_output_dirs(data_root, session_id)
+    monkeypatch.setattr(config, 'ATTR_TARGETS', [0])
+    monkeypatch.setattr(config, 'IG_MAX_ERROR', 1.0)          # no step escalation in this test
+    pipe = run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=8)
+    pipe.train()
+    pipe.attr()
+
+    # make the files look like ones saved before the recent-lag sums existed, with 8 steps
+    f, ft = paths.attribution_file(dirs, 0, 0), dirs.variables / 'attr_targets.npz'
+    old = {k: v for k, v in np.load(f).items() if 'recent' not in k}
+    old['n_steps'] = np.array(8)
+    run_session.save_npz(f, **old)
+    targets = {k: v for k, v in np.load(ft).items() if 'recent' not in k}
+    run_session.save_npz(ft, **targets)
+
+    run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=8).attr()
+    a, t = np.load(f), np.load(ft)
+    assert int(a['recent_bins']) == config.ATTR_RECENT_BINS and int(a['n_steps']) == 8    # redone with its own steps
+    assert 'peri_recent' in a and 'sampled_spont_recent_spikes' in t
+    for k, v in targets.items():                                    # the targets themselves are unchanged
+        np.testing.assert_array_equal(t[k], v)
 
 
 def test_downstream_stages_redo_when_attributions_change(pipeline_module, session_dir, monkeypatch):

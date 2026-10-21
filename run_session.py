@@ -31,13 +31,20 @@ training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, 
              3 s. Targets (the same for all models; variables/attr_targets.npz): random bins of the
              training block, the test block and the spontaneous epoch; the four CSD-component
              windows after ATTR_EVENTS image onsets; a peri-stimulus grid for PERI_EVENTS onsets.
-             attrs/  seqig_chan{c}_band{b}.npz (per-target unit totals, lag kernels, peri maps,
-                     f(x), f(b) and completeness error of every target)
+             attrs/  seqig_chan{c}_band{b}.npz (per-target unit totals over all lags and over the
+                     last ATTR_RECENT_BINS lags, lag kernels, peri maps, f(x), f(b) and completeness
+                     error of every target)
   summaries  per-unit summaries (mean, mean |.|, per spike, share; channels x targets x units)
-             attrs/  unit_attribution_{train,test,active,spont}.npz, attribution_completeness.npy
+             attrs/  unit_attribution_{train,test,active,spont}.npz, unit_attribution_recent_*.npz,
+                     attribution_completeness.npy
   peri       broadband peri-stimulus ranks and top-K Jaccard stability -> variables/: psth.npy,
-             peri_times.npy, rank_snippets.npy, jaccard_{raw,ref}_snippets.npy
+             peri_times.npy, rank_snippets.npy, jaccard_{raw,ref}_snippets.npy (and *_recent.npy)
   ipd        regional instantaneous predictive dominance -> variables/regional_dominance_results.npz
+             (and regional_dominance_results_recent.npz)
+
+Totals over all lags measure a unit's whole contribution to a prediction; recent totals (the last
+ATTR_RECENT_BINS lags) the contribution of its latest spikes, which follows fast changes such as
+the response to an image.
 """
 import argparse
 import json
@@ -413,10 +420,15 @@ class SessionPipeline:
                                        CSD-component targets; the first PERI_EVENTS also get
                                        peri-stimulus maps
           *_spikes                     spike counts of every unit in each target's window
+          *_recent_spikes              the same over the last ATTR_RECENT_BINS bins of the window
         """
         f = self.dirs.variables / 'attr_targets.npz'
         if f.exists():
-            return dict(np.load(f))
+            t = dict(np.load(f))
+            if int(t.get('recent_bins', -1)) != config.ATTR_RECENT_BINS:     # saved before (or with other) recent bins
+                self._add_recent_spike_counts(t)
+                save_npz(f, **t)
+            return t
         L, rng = config.ATTR_HISTORY, np.random.default_rng(config.TORCH_SEED)
         counts = self.active_counts.spkMat
         n_bins = counts.shape[0]
@@ -449,9 +461,18 @@ class SessionPipeline:
         for name in ('sampled_train', 'sampled_test'):
             t[name + '_spikes'] = window_spike_counts(counts, t[name], L)
         t['sampled_spont_spikes'] = window_spike_counts(spont, t['sampled_spont'], L)
+        self._add_recent_spike_counts(t)
         f.parent.mkdir(parents=True, exist_ok=True)
         save_npz(f, **t)
         return t
+
+    def _add_recent_spike_counts(self, t):
+        """Add the sampled targets' spike counts over the last ATTR_RECENT_BINS bins (for per-spike recent summaries)."""
+        spont = self.spike_counts(*self.session.spontaneous_times).spkMat
+        for name, counts in (('sampled_train', self.active_counts.spkMat), ('sampled_test', self.active_counts.spkMat),
+                             ('sampled_spont', spont)):
+            t[name + '_recent_spikes'] = window_spike_counts(counts, t[name], config.ATTR_RECENT_BINS)
+        t['recent_bins'] = np.array(config.ATTR_RECENT_BINS)
 
     @staticmethod
     def component_end_offsets():
@@ -481,6 +502,8 @@ class SessionPipeline:
         Integration steps adapt per model: starting from IG_N_STEPS, a model whose completeness
         error exceeds IG_MAX_ERROR is recomputed with 4x the steps (up to IG_MAX_STEPS). Existing
         files that fail the check, with fewer than IG_MAX_STEPS steps, are recomputed the same way.
+        Files without the recent-lag sums for the current ATTR_RECENT_BINS are recomputed with the
+        steps they used.
         """
         targets = range(config.N_TARGETS) if config.ATTR_TARGETS is None else config.ATTR_TARGETS
         todo = {}
@@ -492,7 +515,9 @@ class SessionPipeline:
                     continue
                 saved = np.load(f)
                 steps = int(saved['n_steps']) if 'n_steps' in saved else config.IG_N_STEPS
-                if completeness_error(saved) > config.IG_MAX_ERROR and steps < config.IG_MAX_STEPS:
+                if 'recent_bins' not in saved or int(saved['recent_bins']) != config.ATTR_RECENT_BINS:
+                    todo[chan, band] = steps
+                elif completeness_error(saved) > config.IG_MAX_ERROR and steps < config.IG_MAX_STEPS:
                     todo[chan, band] = min(4 * steps, config.IG_MAX_STEPS)
         if not todo:
             log('Attributions already saved')
@@ -521,7 +546,8 @@ class SessionPipeline:
     def attribute_model(self, chan, band, n_steps, X, X_spont, comp_ends, peri_ends, baseline):
         """All attribution outputs of one model (see the 'attr' stage), computed with n_steps integration steps."""
         t = self.attr_targets
-        run = dict(history=config.ATTR_HISTORY, baseline=baseline, batch_windows=self.ig_batch)
+        run = dict(history=config.ATTR_HISTORY, baseline=baseline, batch_windows=self.ig_batch,
+                   recent_bins=config.ATTR_RECENT_BINS)
         # start from the largest batch that fitted on this GPU so far (SequenceIG halves it on OOM)
         max_sequences = getattr(self, '_ig_max_sequences', config.IG_MAX_SEQUENCES)
         ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=n_steps, max_sequences=max_sequences)
@@ -532,14 +558,18 @@ class SessionPipeline:
         peri = attribute_targets(ig, X, peri_ends.ravel(), **run)
         self._ig_max_sequences = min(max_sequences, ig.windows_per_batch * n_steps)
 
-        out = {'n_steps': np.array(n_steps)}
+        out = {'n_steps': np.array(n_steps), 'recent_bins': np.array(config.ATTR_RECENT_BINS)}
         for name, res in sampled.items():
             out[name + '_total'] = res['total'].astype(np.float16)
+            out[name + '_recent'] = res['recent'].astype(np.float16)
         out['components_total'] = comp['total'].reshape(comp_ends.shape + (-1,)).astype(np.float16)
-        peri_total = peri['total'].reshape(peri_ends.shape + (-1,))
-        out['peri_mean'], out['peri_abs_mean'] = peri_total.mean(axis=0), np.abs(peri_total).mean(axis=0)
-        if band in config.PERI_PER_EVENT_TARGETS:
-            out['peri_total'] = peri_total.astype(np.float16)
+        out['components_recent'] = comp['recent'].reshape(comp_ends.shape + (-1,)).astype(np.float16)
+        for kind in ('total', 'recent'):                # all lags / the last ATTR_RECENT_BINS lags
+            maps = peri[kind].reshape(peri_ends.shape + (-1,))
+            prefix = 'peri' if kind == 'total' else 'peri_recent'
+            out[prefix + '_mean'], out[prefix + '_abs_mean'] = maps.mean(axis=0), np.abs(maps).mean(axis=0)
+            if band in config.PERI_PER_EVENT_TARGETS:
+                out[f'peri_{kind}'] = maps.astype(np.float16)
         n_kernel, k = len(t['sampled_train']) + len(t['sampled_test']), config.LAG_KERNEL_BIN
         out['kernel_mean'] = coarsen_lags(sampled['sampled_train']['kernel_sum'] + sampled['sampled_test']['kernel_sum'], k) / n_kernel
         out['kernel_abs_mean'] = coarsen_lags(sampled['sampled_train']['kernel_abs_sum'] + sampled['sampled_test']['kernel_abs_sum'], k) / n_kernel
@@ -554,18 +584,22 @@ class SessionPipeline:
         Per-unit attribution summaries (analysis/sequence_attribution.py) for each target set,
         as (channels x model targets x units) arrays, and the completeness error of every model.
           attrs/unit_attribution_{train,test,active,spont}.npz   keys: mean, mean_abs, per_spike, share
+          attrs/unit_attribution_recent_{...}.npz                 the same from the last ATTR_RECENT_BINS lags
+                                                                  (per_spike: per spike in those bins)
           attrs/attribution_completeness.npy                      channels x targets (median relative error)
         """
         t = self.attr_targets
         n_units = t['sampled_train_spikes'].shape[1]
         sets = {'train': ['sampled_train'], 'test': ['sampled_test'], 'active': ['sampled_train', 'sampled_test'],
                 'spont': ['sampled_spont']}
-        files = {s: self.dirs.attrs / f'unit_attribution_{s}.npz' for s in sets}
+        # (file prefix, attribution key suffix, spike count key suffix)
+        kinds = [('', '_total', '_spikes'), ('recent_', '_recent', '_recent_spikes')]
+        files = {(p, s): self.dirs.attrs / f'unit_attribution_{p}{s}.npz' for p, _, _ in kinds for s in sets}
         attr_files = list(self.dirs.attrs.glob('seqig_chan*_band*.npz'))
         if up_to_date(files.values(), attr_files):       # redone when any attribution file was (re)computed
             return
         shape = (self.n_channels, config.N_TARGETS, n_units)
-        result = {s: {k: np.full(shape, np.nan) for k in ('mean', 'mean_abs', 'per_spike', 'share')} for s in sets}
+        result = {key: {k: np.full(shape, np.nan) for k in ('mean', 'mean_abs', 'per_spike', 'share')} for key in files}
         completeness = np.full(shape[:2], np.nan)
         for chan in range(self.n_channels):
             for band in range(config.N_TARGETS):
@@ -573,14 +607,17 @@ class SessionPipeline:
                 if not f.exists():
                     continue
                 a = np.load(f)
-                for s, names in sets.items():
-                    totals = np.concatenate([a[n + '_total'] for n in names])
-                    spikes = np.concatenate([t[n + '_spikes'] for n in names])
-                    for k, v in unit_summaries(totals, spikes).items():
-                        result[s][k][chan, band] = v
+                for prefix, attr_key, spike_key in kinds:
+                    for s, names in sets.items():
+                        if any(n + attr_key not in a for n in names):
+                            continue                     # file from before the recent-lag sums
+                        totals = np.concatenate([a[n + attr_key] for n in names])
+                        spikes = np.concatenate([t[n + spike_key] for n in names])
+                        for k, v in unit_summaries(totals, spikes).items():
+                            result[prefix, s][k][chan, band] = v
                 completeness[chan, band] = completeness_error(a)
-        for s, f in files.items():
-            save_npz(f, **result[s])
+        for key, f in files.items():
+            save_npz(f, **result[key])
         save_npy(self.dirs.attrs / 'attribution_completeness.npy', completeness)
 
     def peri(self):
@@ -590,12 +627,14 @@ class SessionPipeline:
           variables/  psth.npy (units x bins, all active non-omitted images), peri_times.npy,
                       rank_snippets.npy (events x times x units x channels; 1 = largest |attribution|),
                       jaccard_raw_snippets.npy (consecutive peri times), jaccard_ref_snippets.npy
-                      (vs. the K units with the largest mean share over the pre-stimulus times)
+                      (vs. the K units with the largest mean share over the pre-stimulus times);
+                      the same with suffix _recent from the last ATTR_RECENT_BINS lags of each map
         """
         out = self.dirs.variables
         band0 = [paths.attribution_file(self.dirs, c, 0) for c in range(self.n_channels)]
-        if up_to_date([out / f for f in ('psth.npy', 'peri_times.npy', 'rank_snippets.npy',
-                                           'jaccard_raw_snippets.npy', 'jaccard_ref_snippets.npy')], band0):
+        results = [f'{name}{suffix}.npy' for suffix in ('', '_recent')
+                   for name in ('rank_snippets', 'jaccard_raw_snippets', 'jaccard_ref_snippets')]
+        if up_to_date([out / f for f in ['psth.npy', 'peri_times.npy'] + results], band0):
             return
         t = self.attr_targets
         stim = self.session.stimulus_presentation
@@ -607,7 +646,14 @@ class SessionPipeline:
         save_npy(out / 'peri_times.npy', t['peri_times'])
 
         n_base = int(np.sum(t['peri_times'] < config.STIM_BASELINE[1]))
-        maps = [np.load(paths.attribution_file(self.dirs, c, 0))['peri_total'].astype(np.float32) for c in range(self.n_channels)]
+        for key, suffix in (('peri_total', ''), ('peri_recent', '_recent')):
+            files = [np.load(f) for f in band0]
+            if all(key in a for a in files):
+                self._peri_rankings([a[key].astype(np.float32) for a in files], n_base, suffix)
+
+    def _peri_rankings(self, maps, n_base, suffix):
+        """Ranks and top-K Jaccard of per-event peri-stimulus maps (one per channel) -> variables/*{suffix}.npy."""
+        out = self.dirs.variables
         n_ev, n_t, n_u = maps[0].shape
         ranks = np.zeros((n_ev, n_t, n_u, self.n_channels), dtype=np.uint16)
         jac_raw = np.full((n_ev, n_t, self.n_channels), np.nan, dtype=np.float32)
@@ -621,25 +667,29 @@ class SessionPipeline:
             jac_ref[..., ci] = jaccard_to_reference(top, reference).reshape(n_ev, n_t)
             for e in range(n_ev):                       # consecutive times within each event only
                 jac_raw[e, :, ci] = jaccard_consecutive(top[e * n_t:(e + 1) * n_t])
-        save_npy(out / 'rank_snippets.npy', ranks)
-        save_npy(out / 'jaccard_raw_snippets.npy', jac_raw)
-        save_npy(out / 'jaccard_ref_snippets.npy', jac_ref)
+        save_npy(out / f'rank_snippets{suffix}.npy', ranks)
+        save_npy(out / f'jaccard_raw_snippets{suffix}.npy', jac_raw)
+        save_npy(out / f'jaccard_ref_snippets{suffix}.npy', jac_ref)
 
     def ipd(self):
-        """Regional instantaneous predictive dominance from the peri-stimulus ranks -> variables/regional_dominance_results.npz."""
+        """
+        Regional instantaneous predictive dominance from the peri-stimulus ranks ->
+        variables/regional_dominance_results.npz (all lags) and regional_dominance_results_recent.npz.
+        """
         out = self.dirs.variables
-        ranks = out / 'rank_snippets.npy'
-        if not ranks.exists() or up_to_date([out / 'regional_dominance_results.npz'], [ranks]):
-            return
-        ranks = np.load(out / 'rank_snippets.npy')
-        per_channel = []
-        for ci in range(ranks.shape[-1]):
-            dominance, regions = regional_dominance(ranks[..., ci], ranks[..., ci] > 0, self.unit_areas)
-            per_channel.append(dominance.mean(axis=0))                  # average over events
-        average_dominance = np.stack(per_channel, axis=-1)                # regions x times x channels
-        save_npz(out / 'regional_dominance_results.npz', compressed=True, average_dominance=average_dominance,
-                            proportional_influence=proportional_influence(average_dominance),
-                            region_names=regions, t=np.load(out / 'peri_times.npy'))
+        for suffix in ('', '_recent'):
+            ranks, result = out / f'rank_snippets{suffix}.npy', out / f'regional_dominance_results{suffix}.npz'
+            if not ranks.exists() or up_to_date([result], [ranks]):
+                continue
+            ranks = np.load(ranks)
+            per_channel = []
+            for ci in range(ranks.shape[-1]):
+                dominance, regions = regional_dominance(ranks[..., ci], ranks[..., ci] > 0, self.unit_areas)
+                per_channel.append(dominance.mean(axis=0))                  # average over events
+            average_dominance = np.stack(per_channel, axis=-1)                # regions x times x channels
+            save_npz(result, compressed=True, average_dominance=average_dominance,
+                     proportional_influence=proportional_influence(average_dominance),
+                     region_names=regions, t=np.load(out / 'peri_times.npy'))
 
 
 def main():
