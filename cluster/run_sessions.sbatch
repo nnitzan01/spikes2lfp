@@ -26,7 +26,8 @@
 # any GPU type, in whichever of these partitions can start the job first (all allow >= 3 days)
 #SBATCH --partition=a100_short,gl40s_short,gpu4_medium,gpu8_medium
 #SBATCH --gres=gpu:1
-#SBATCH --mem=64G
+# memory: the timing session (1047969464) peaked at 26 GB
+#SBATCH --mem=48G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=logs/%x_%j.out
 
