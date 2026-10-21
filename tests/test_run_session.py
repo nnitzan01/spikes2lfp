@@ -110,3 +110,29 @@ def test_attr_raises_integration_steps_until_complete(pipeline_module, session_d
     before = paths.attribution_file(dirs, 0, 0).stat().st_mtime_ns
     pipe.attr()
     assert paths.attribution_file(dirs, 0, 0).stat().st_mtime_ns == before
+
+
+def test_downstream_stages_redo_when_attributions_change(pipeline_module, session_dir, monkeypatch):
+    import os
+    import config
+    run_session = pipeline_module
+    data_root, session_id = paths.parse_session_dir(session_dir)
+    dirs = paths.session_output_dirs(data_root, session_id)
+    monkeypatch.setattr(config, 'ATTR_TARGETS', [0])
+    pipe = run_session.SessionPipeline(data_root, session_id, device='cpu', ig_batch=8)
+    for stage in ('train', 'attr', 'summaries', 'peri', 'ipd'):
+        getattr(pipe, stage)()
+    outputs = [dirs.attrs / 'unit_attribution_active.npz', dirs.variables / 'jaccard_ref_snippets.npy',
+               dirs.variables / 'regional_dominance_results.npz']
+    stamps = [o.stat().st_mtime_ns for o in outputs]
+
+    for stage in ('summaries', 'peri', 'ipd'):                     # nothing changed: all skipped
+        getattr(pipe, stage)()
+    assert [o.stat().st_mtime_ns for o in outputs] == stamps
+
+    f = paths.attribution_file(dirs, 0, 0)                          # as if attr had repaired this model
+    later = max(o.stat().st_mtime for o in outputs) + 10
+    os.utime(f, (later, later))
+    for stage in ('summaries', 'peri', 'ipd'):
+        getattr(pipe, stage)()
+    assert all(o.stat().st_mtime_ns != s for o, s in zip(outputs, stamps))   # all three redone

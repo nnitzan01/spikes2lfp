@@ -106,6 +106,14 @@ def completeness_error(attr_file_contents):
                                          for k in ('f_x', 'f_b', 'delta')))
 
 
+def up_to_date(outputs, inputs):
+    """True if every output exists and none is older than any existing input (so a rerun can be skipped)."""
+    outputs, inputs = [Path(o) for o in outputs], [Path(i) for i in inputs if Path(i).exists()]
+    if not all(o.exists() for o in outputs):
+        return False
+    return not inputs or min(o.stat().st_mtime for o in outputs) >= max(i.stat().st_mtime for i in inputs)
+
+
 def save_npy(path, array):
     with atomic(path) as tmp, open(tmp, 'wb') as fh:
         np.save(fh, array)
@@ -550,7 +558,8 @@ class SessionPipeline:
         sets = {'train': ['sampled_train'], 'test': ['sampled_test'], 'active': ['sampled_train', 'sampled_test'],
                 'spont': ['sampled_spont']}
         files = {s: self.dirs.attrs / f'unit_attribution_{s}.npz' for s in sets}
-        if all(f.exists() for f in files.values()):
+        attr_files = list(self.dirs.attrs.glob('seqig_chan*_band*.npz'))
+        if up_to_date(files.values(), attr_files):       # redone when any attribution file was (re)computed
             return
         shape = (self.n_channels, config.N_TARGETS, n_units)
         result = {s: {k: np.full(shape, np.nan) for k in ('mean', 'mean_abs', 'per_spike', 'share')} for s in sets}
@@ -581,7 +590,9 @@ class SessionPipeline:
                       (vs. the K units with the largest mean share over the pre-stimulus times)
         """
         out = self.dirs.variables
-        if (out / 'jaccard_ref_snippets.npy').exists():
+        band0 = [paths.attribution_file(self.dirs, c, 0) for c in range(self.n_channels)]
+        if up_to_date([out / f for f in ('psth.npy', 'peri_times.npy', 'rank_snippets.npy',
+                                           'jaccard_raw_snippets.npy', 'jaccard_ref_snippets.npy')], band0):
             return
         t = self.attr_targets
         stim = self.session.stimulus_presentation
@@ -614,7 +625,8 @@ class SessionPipeline:
     def ipd(self):
         """Regional instantaneous predictive dominance from the peri-stimulus ranks -> variables/regional_dominance_results.npz."""
         out = self.dirs.variables
-        if not (out / 'rank_snippets.npy').exists() or (out / 'regional_dominance_results.npz').exists():
+        ranks = out / 'rank_snippets.npy'
+        if not ranks.exists() or up_to_date([out / 'regional_dominance_results.npz'], [ranks]):
             return
         ranks = np.load(out / 'rank_snippets.npy')
         per_channel = []
