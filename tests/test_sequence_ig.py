@@ -65,3 +65,26 @@ def test_batching_does_not_change_results_and_transformer_is_supported():
     torch.testing.assert_close(a1, a2, rtol=1e-4, atol=1e-6)
     _, f_x, f_b, delta = SequenceIG(net, n_steps=50).attribute(x)
     assert (delta.abs() <= 1e-2 * (f_x - f_b).abs() + 1e-4).all()
+
+
+def test_out_of_memory_halves_the_batch_and_gives_the_same_result():
+    torch.manual_seed(3)
+    net = LSTMnet(5, 6, 1, 20, conv=True, kernel_size=3, out_channels=4)
+
+    class SmallGPU(nn.Module):
+        """Raises CUDA OOM whenever more than 12 sequences go through at once."""
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, x):
+            if x.shape[0] > 12:
+                raise torch.cuda.OutOfMemoryError('simulated')
+            return self.inner(x)
+
+    x = _spiky(7, 20, 5)
+    expected, *_ = SequenceIG(net, n_steps=4).attribute(x)
+    ig = SequenceIG(SmallGPU(net), n_steps=4, max_sequences=1000)     # starts at 250 windows per batch
+    attr, f_x, f_b, delta = ig.attribute(x)
+    assert ig.windows_per_batch * 4 <= 12
+    torch.testing.assert_close(attr, expected, rtol=1e-5, atol=1e-7)

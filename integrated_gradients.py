@@ -343,24 +343,45 @@ class SequenceIG:
                 m.train()
         out = {k: [] for k in ('attr', 'f_x', 'f_b', 'delta')}
         try:
-            for start in range(0, windows.shape[0], self.windows_per_batch):
+            start = 0
+            while start < windows.shape[0]:
                 x = windows[start:start + self.windows_per_batch]
-                b = baseline.expand_as(x)
-                n, L, U = x.shape
-                path = (b + alphas * (x - b)).reshape(self.n_steps * n, L, U).requires_grad_()
-                grads = torch.autograd.grad(self._f(path, target_bins).sum(), path)[0]
-                avg_grad = (grads.reshape(self.n_steps, n, L, U) * step_sizes).sum(dim=0)
-                attr = (x - b) * avg_grad
-                with torch.no_grad():
-                    f_x, f_b = self._f(x, target_bins), self._f(b, target_bins)
-                out['attr'].append(attr.detach().cpu())
+                try:
+                    attr, f_x, f_b = self._attribute_batch(x, baseline, alphas, step_sizes, target_bins)
+                    out_of_memory = False
+                except torch.cuda.OutOfMemoryError:
+                    if self.windows_per_batch == 1:
+                        raise
+                    out_of_memory = True
+                if out_of_memory:
+                    # The batch does not fit on this GPU: halve it and retry (results do not depend on
+                    # the batch size); the smaller size is kept for the rest of this object's use.
+                    # Done outside the except block, whose traceback still holds the failed batch's tensors.
+                    self.windows_per_batch = max(1, self.windows_per_batch // 2)
+                    torch.cuda.empty_cache()
+                    print(f'SequenceIG: out of GPU memory, retrying with {self.windows_per_batch} windows per batch',
+                          flush=True)
+                    continue
+                out['attr'].append(attr.cpu())
                 out['f_x'].append(f_x.cpu())
                 out['f_b'].append(f_b.cpu())
-                out['delta'].append((attr.sum(dim=(1, 2)) - (f_x - f_b)).detach().cpu())
-                del path, grads, avg_grad, attr
+                out['delta'].append((attr.sum(dim=(1, 2)) - (f_x - f_b)).cpu())
+                start += x.shape[0]
                 if device.type == 'cuda':
                     torch.cuda.empty_cache()
         finally:
             for m, training in modes.items():
                 m.training = training
         return tuple(torch.cat(out[k]) for k in ('attr', 'f_x', 'f_b', 'delta'))
+
+    def _attribute_batch(self, x, baseline, alphas, step_sizes, target_bins):
+        """Attributions, f(x) and f(b) for one batch of windows (all on the GPU, detached)."""
+        b = baseline.expand_as(x)
+        n, L, U = x.shape
+        path = (b + alphas * (x - b)).reshape(self.n_steps * n, L, U).requires_grad_()
+        grads = torch.autograd.grad(self._f(path, target_bins).sum(), path)[0]
+        avg_grad = (grads.reshape(self.n_steps, n, L, U) * step_sizes).sum(dim=0)
+        attr = ((x - b) * avg_grad).detach()
+        del path, grads, avg_grad
+        with torch.no_grad():
+            return attr, self._f(x, target_bins), self._f(b, target_bins)

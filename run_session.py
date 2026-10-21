@@ -522,12 +522,15 @@ class SessionPipeline:
         """All attribution outputs of one model (see the 'attr' stage), computed with n_steps integration steps."""
         t = self.attr_targets
         run = dict(history=config.ATTR_HISTORY, baseline=baseline, batch_windows=self.ig_batch)
-        ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=n_steps)
+        # start from the largest batch that fitted on this GPU so far (SequenceIG halves it on OOM)
+        max_sequences = getattr(self, '_ig_max_sequences', config.IG_MAX_SEQUENCES)
+        ig = SequenceIG(self.models[chan, band].model.to(self.device), n_steps=n_steps, max_sequences=max_sequences)
         sampled = {name: attribute_targets(ig, data, t[name], keep_kernel=(name != 'sampled_spont'), **run)
                    for name, data in (('sampled_train', X), ('sampled_test', X), ('sampled_spont', X_spont))}
         comp = attribute_targets(ig, X, comp_ends.ravel(), target_bins=config.COMPONENT_TARGET_BINS,
                                  keep_kernel=True, **run)
         peri = attribute_targets(ig, X, peri_ends.ravel(), **run)
+        self._ig_max_sequences = min(max_sequences, ig.windows_per_batch * n_steps)
 
         out = {'n_steps': np.array(n_steps)}
         for name, res in sampled.items():
