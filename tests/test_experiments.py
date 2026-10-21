@@ -81,5 +81,6 @@ def test_compare_versions(pipeline_module, session_dir, capsys):
     assert pdf.exists() and (pdf.parent / 'compare_v1_v2.json').exists()
     assert summary['v1_files']['r2'] and summary['v1_files']['ipi'] and not summary['v1_files']['r2_spont']
     assert set(summary['attribution_median_spearman']) == {'mean |attr|', 'per spike', 'share'}
+    assert set(summary['attribution_median_spearman_recent']) == {'mean |attr|', 'per spike', 'share'}
     assert summary['completeness']['models'] == n_ch          # broadband only in this test
     assert 'r2_test_median_v1' in capsys.readouterr().out

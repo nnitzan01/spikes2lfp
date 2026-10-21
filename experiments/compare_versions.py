@@ -79,8 +79,10 @@ def load_v2(dirs):
                r2_spont=np.load(v / 'r2_scores_spont.npy') if (v / 'r2_scores_spont.npy').exists() else None,
                areas=pd.read_csv(v / 'units.csv')['structure_acronym'].to_numpy(),
                jaccard_ref=np.load(v / 'jaccard_ref_snippets.npy') if (v / 'jaccard_ref_snippets.npy').exists() else None,
+               jaccard_ref_recent=(np.load(v / 'jaccard_ref_snippets_recent.npy')
+                                   if (v / 'jaccard_ref_snippets_recent.npy').exists() else None),
                peri_times=np.load(v / 'peri_times.npy') if (v / 'peri_times.npy').exists() else None)
-    for s in ('active', 'spont'):
+    for s in ('active', 'spont', 'recent_active'):
         f = dirs.attrs / f'unit_attribution_{s}.npz'
         out[f'units_{s}'] = dict(np.load(f)) if f.exists() else None
     n_ch = out['r2'].shape[0]
@@ -182,6 +184,12 @@ def compare(data_root, sid):
             summary['top10_overlap_median'] = dict(zip(BAND_NAMES, np.round(np.nanmedian(top_overlap, axis=0), 2).tolist()))
             summary['area_ranking_spearman_median'] = dict(zip(BAND_NAMES, np.round(np.nanmedian(area_rho, axis=0), 3).tolist()))
             summary['areas_ranked'] = keep_areas
+            if v2['units_recent_active'] is not None:         # the same from the last ATTR_RECENT_BINS lags
+                rho_recent, top_recent, area_recent, _ = attribution_agreement(v1['ipi'], v2['units_recent_active'], v2['areas'])
+                summary['attribution_median_spearman_recent'] = {
+                    m: dict(zip(BAND_NAMES, np.round(np.nanmedian(r, axis=0), 3).tolist())) for m, r in rho_recent.items()}
+                summary['top10_overlap_median_recent'] = dict(zip(BAND_NAMES, np.round(np.nanmedian(top_recent, axis=0), 2).tolist()))
+                summary['area_ranking_spearman_median_recent'] = dict(zip(BAND_NAMES, np.round(np.nanmedian(area_recent, axis=0), 3).tolist()))
 
     # 4. completeness
     comp = v2['completeness']
@@ -311,7 +319,10 @@ def _page_jaccard(pdf, v1_jac, v2, best):
         ax.plot(t1, np.nanmean(v1_jac[:, :, best], axis=0), 'k', label='v1 (ties among silent units, all trials)')
     if v2['jaccard_ref'] is not None:
         ax.plot(v2['peri_times'], np.nanmean(v2['jaccard_ref'][:, :, best], axis=0), 'r',
-                label=f'v2 ({v2["jaccard_ref"].shape[0]} images)')
+                label=f'v2, all lags ({v2["jaccard_ref"].shape[0]} images)')
+    if v2['jaccard_ref_recent'] is not None:
+        ax.plot(v2['peri_times'], np.nanmean(v2['jaccard_ref_recent'][:, :, best], axis=0), 'r--',
+                label=f'v2, last {config.ATTR_RECENT_BINS * config.BIN_SIZE * 1000:.0f} ms of lags')
     ax.axvline(0, color='gray', ls='--')
     ax.axvline(0.25, color='gray', ls='--')
     ax.set_xlabel('time from image onset (s)')
@@ -328,13 +339,17 @@ def print_summary(s):
     print('v1 files found:', {k: bool(v) for k, v in s['v1_files'].items()})
     rows = ['r2_test_median_v1', 'r2_test_median_v2', 'r2_test_max_v1', 'r2_test_max_v2', 'r2_val_median_v2',
             'r2_train_median_v2', 'r2_passive_median_v1', 'r2_passive_median_v2', 'r2_spont_median_v1',
-            'r2_spont_median_v2', 'r2_depth_profile_correlation', 'top10_overlap_median', 'area_ranking_spearman_median']
+            'r2_spont_median_v2', 'r2_depth_profile_correlation', 'top10_overlap_median', 'area_ranking_spearman_median',
+            'top10_overlap_median_recent', 'area_ranking_spearman_median_recent']
     table = pd.DataFrame({r: s[r] for r in rows if r in s}).T
     with pd.option_context('display.width', 200, 'display.max_columns', 20):
         print(table.round(3))
         if 'attribution_median_spearman' in s:
             print('\nmedian Spearman over channels, v1 IPI vs v2 measure:')
             print(pd.DataFrame(s['attribution_median_spearman']).T.round(3))
+        if 'attribution_median_spearman_recent' in s:
+            print('\nthe same, v2 from the last lags only:')
+            print(pd.DataFrame(s['attribution_median_spearman_recent']).T.round(3))
     if isinstance(s.get('attribution'), str):
         print(s['attribution'])
     print('\ncompleteness:', s['completeness'])
