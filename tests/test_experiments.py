@@ -57,3 +57,29 @@ def test_hvs_detection_finds_bursts():
     events = detect_oscillations(lfp, fs)
     assert len(events) == 3
     np.testing.assert_allclose(events[:, 1] / fs, centers, atol=0.3)
+
+
+def test_compare_versions(pipeline_module, session_dir, capsys):
+    from experiments import compare_versions
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    for stage in ('transfer', 'variables', 'peri', 'ipd'):
+        getattr(pipeline, stage)()
+    data_root, sid = pipeline.data_root, str(pipeline.session_id)
+    n_ch, n_units = np.load(pipeline.dirs.variables / 'r2_scores.npy').shape[0], N_UNITS
+
+    # v1 outputs with the published shapes
+    rng = np.random.default_rng(0)
+    v1 = data_root / 'spikes2lfp'
+    (v1 / 'variables' / sid).mkdir(parents=True)
+    (v1 / 'attrs' / sid).mkdir(parents=True)
+    np.save(v1 / 'variables' / sid / 'r2_scores.npy', rng.random((n_ch, 9)))
+    np.save(v1 / 'variables' / sid / 'jaccard_ref_snippets.npy', rng.random((5, 188, n_ch)))
+    np.save(v1 / 'attrs' / sid / 'attribution_scores_ipi_mean.npy', rng.normal(size=(n_ch, 9, n_units)))
+
+    summary, pdf = compare_versions.compare(data_root, sid)
+    compare_versions.print_summary(summary)
+    assert pdf.exists() and (pdf.parent / 'compare_v1_v2.json').exists()
+    assert summary['v1_files']['r2'] and summary['v1_files']['ipi'] and not summary['v1_files']['r2_spont']
+    assert set(summary['attribution_median_spearman']) == {'mean |attr|', 'per spike', 'share'}
+    assert summary['completeness']['models'] == n_ch          # broadband only in this test
+    assert 'r2_test_median_v1' in capsys.readouterr().out
