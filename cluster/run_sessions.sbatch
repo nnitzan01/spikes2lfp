@@ -45,7 +45,17 @@ STAGES=${STAGES:-train,transfer,variables,attr,summaries,peri,ipd}
 
 echo "job ${SLURM_JOB_ID} (array task ${SLURM_ARRAY_TASK_ID:-none}) on $(hostname)"
 echo "session ${SESSION_DIR}, stages ${STAGES}"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=name,memory.total,compute_mode --format=csv,noheader
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-unset}"
+
+# Fail within seconds, naming the node, if the GPU can't be used (e.g. a node whose GPU is held by
+# another process: "CUDA-capable device(s) is/are busy or unavailable"). Resubmit such tasks with
+# --exclude=<node>.
+if ! python -c "import torch; torch.zeros(1, device='cuda')" 2>/dev/null; then
+    echo "GPU UNUSABLE on node $(hostname); resubmit with --exclude=$(hostname)"
+    nvidia-smi
+    exit 3
+fi
 
 python run_session.py "${SESSION_DIR}" --stages "${STAGES}" ${EXTRA_ARGS:-}
 
