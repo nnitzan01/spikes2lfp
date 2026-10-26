@@ -26,6 +26,8 @@
 # any GPU type, in whichever of these partitions can start the job first (all allow >= 3 days)
 #SBATCH --partition=a100_short,gl40s_short,gpu4_medium,gpu8_medium
 #SBATCH --gres=gpu:1
+# nodes whose GPU was unusable ("CUDA-capable device(s) is/are busy or unavailable"), Oct 2026
+#SBATCH --exclude=a100-4012,a100-4033
 # memory: the timing session (1047969464) peaked at 26 GB
 #SBATCH --mem=48G
 #SBATCH --time=1-00:00:00
