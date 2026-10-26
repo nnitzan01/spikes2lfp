@@ -75,3 +75,25 @@ EXTRA_ARGS="--seeds 3" STAGES=train sbatch --array=1-10 cluster/run_sessions.sba
 
 Outputs: `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/{models,variables,attrs,plots}/<session_id>/`
 (the first, published model version stays in `spikes2lfp/`).
+
+## Checking the outputs and pooling sessions
+
+```bash
+source cluster/env.sh
+python -m experiments.pool_sessions check
+```
+
+lists every session with missing or stale outputs (models, attributions, summaries, unit ids, ...)
+and prints the `sbatch` commands that redo them; GPU stages go to the usual partitions, the
+CPU-only stages (`variables`, `summaries`, `peri`, `ipd`) to a CPU partition with `--gres=none`
+(check the partition name with `sinfo -s`). Resubmitting is safe: finished outputs are kept.
+
+When every session is complete, pool them on a CPU node (reads every attribution file; ~1 h):
+
+```bash
+srun --partition=cpu_short --mem=64G --time=04:00:00 bash -c "source cluster/env.sh && python -m experiments.pool_sessions pool"
+```
+
+Pooled arrays (channels aligned on the upper L4 border, one row per unit or per session) go to
+`$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/pooled/`; `python -m experiments.pool_sessions --help`
+describes each file. Only complete sessions are pooled.

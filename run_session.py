@@ -25,7 +25,7 @@ training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, 
              variables/  r2_scores_passive.npy, r2_scores_spont.npy
   plots      diagnostic figures of the models on the active epoch -> plots/
   variables  model input and metadata -> variables/: spikes_sparse.npz (scaled active-epoch
-             spikes), units.csv, timestamps.npy, stimulus_presentation_active.csv
+             spikes), units.csv (unit_id and area of every input, in input order), timestamps.npy, stimulus_presentation_active.csv
   attr       history-aware attribution (integrated_gradients.SequenceIG) of every model target:
              each target bin's prediction is attributed to every unit at every lag of the preceding
              3 s. Targets (the same for all models; variables/attr_targets.npz): random bins of the
@@ -403,7 +403,8 @@ class SessionPipeline:
     def variables(self):
         out = self.dirs.variables
         save_sparse(out / 'spikes_sparse.npz', self.active_spikes.spkMat)
-        save_csv(self.session.units, out / 'units.csv')
+        # one row per model input, in input order; the unit ids are the table's index
+        save_csv(self.session.units.rename_axis('unit_id').reset_index(), out / 'units.csv')
         save_npy(out / 'timestamps.npy', self.active_spikes.timestamps)
         save_csv(self.session.active, out / 'stimulus_presentation_active.csv')
 
