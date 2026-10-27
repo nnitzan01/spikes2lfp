@@ -91,9 +91,26 @@ CPU-only stages (`variables`, `summaries`, `peri`, `ipd`) to a CPU partition wit
 When every session is complete, pool them on a CPU node (reads every attribution file; ~1 h):
 
 ```bash
-srun --partition=cpu_short --mem=64G --time=04:00:00 bash -c "source cluster/env.sh && python -m experiments.pool_sessions pool"
+sbatch --partition=cpu_short --gres=none --cpus-per-task=4 --mem=64G --time=04:00:00 \
+       --job-name=pool --output=logs/pool_%j.out \
+       --wrap="source cluster/env.sh && python -m experiments.pool_sessions pool"
 ```
 
 Pooled arrays (channels aligned on the upper L4 border, one row per unit or per session) go to
 `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/pooled/`; `python -m experiments.pool_sessions --help`
 describes each file. Only complete sessions are pooled.
+
+## Pooled figures
+
+`pool_sessions.ipynb` makes the pooled manuscript figures from `pooled/` (sections 2, 3 and 13 also
+need `experiments/spectral_r2.py`, `ablation.py` and `firing_rate_contribution.py`, and are skipped
+until those have run). To run it without a browser (the classifier cells take a few hours on 16 cores):
+
+```bash
+sbatch --partition=cpu_short --gres=none --cpus-per-task=16 --mem=64G --time=12:00:00 \
+       --job-name=figures --output=logs/figures_%j.out \
+       --wrap="source cluster/env.sh && jupyter nbconvert --to notebook --execute --ExecutePreprocessor.timeout=-1 --output pool_sessions_run.ipynb pool_sessions.ipynb"
+```
+
+Figures are saved to `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/figures/`; the executed notebook, with
+every figure and printed result, is `pool_sessions_run.ipynb`.

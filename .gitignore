@@ -13,3 +13,4 @@ __pycache__/
 
 # Slurm logs
 logs/
+pool_sessions_run.ipynb
