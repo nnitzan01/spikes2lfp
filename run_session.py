@@ -26,6 +26,9 @@ training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, 
   plots      diagnostic figures of the models on the active epoch -> plots/
   variables  model input and metadata -> variables/: spikes_sparse.npz (scaled active-epoch
              spikes), units.csv (unit_id and area of every input, in input order), timestamps.npy, stimulus_presentation_active.csv
+  covariates behaviour and stimulus covariates on the spike-bin grid (covariates.py) ->
+             variables/covariates_{active,spont}.npz: behaviour (bins x running_speed, pupil_area,
+             licks, rewards), stimulus (bins x onset impulses; active only), and their column names
   attr       history-aware attribution (integrated_gradients.SequenceIG) of every model target:
              each target bin's prediction is attributed to every unit at every lag of the preceding
              3 s. Targets (the same for all models; variables/attr_targets.npz): random bins of the
@@ -62,6 +65,7 @@ from sklearn.metrics import r2_score
 from torch.utils.data import DataLoader, TensorDataset
 
 import config
+import covariates
 import models
 import paths
 import plots
@@ -75,7 +79,7 @@ from integrated_gradients import SequenceIG
 from preprocess_data import SpikeScaler, Standardizer, pre_process_lfp, pre_process_spikes, take_chunks
 from splits import chunk_bins, describe, holdout_split
 
-STAGES = ['train', 'transfer', 'plots', 'variables', 'attr', 'summaries', 'peri', 'ipd']
+STAGES = ['train', 'transfer', 'plots', 'variables', 'covariates', 'attr', 'summaries', 'peri', 'ipd']
 
 def log(message):
     print(f'[{time.strftime("%H:%M:%S")}] {message}', flush=True)
@@ -407,6 +411,35 @@ class SessionPipeline:
         save_csv(self.session.units.rename_axis('unit_id').reset_index(), out / 'units.csv')
         save_npy(out / 'timestamps.npy', self.active_spikes.timestamps)
         save_csv(self.session.active, out / 'stimulus_presentation_active.csv')
+
+    def covariates(self):
+        for epoch in ('active', 'spont'):
+            self.load_covariates(epoch)
+
+    def load_covariates(self, epoch):
+        """
+        Covariates of the 'active' or 'spont' epoch on its spike-bin grid, computed and saved on
+        first use: {'behaviour': DataFrame (bins x 4), 'stimulus': DataFrame (bins x onsets; active only)}.
+        """
+        f = self.dirs.variables / f'covariates_{epoch}.npz'
+        if f.exists():
+            saved = np.load(f, allow_pickle=False)
+            return {kind: pd.DataFrame(saved[kind], columns=saved[kind + '_names'])
+                    for kind in ('behaviour', 'stimulus') if kind in saved}
+        times = self.session.active_times if epoch == 'active' else self.session.spontaneous_times
+        bins = self.active_counts.timestamps if epoch == 'active' else self.spike_counts(*times).timestamps
+        s = self.session
+        out = {'behaviour': covariates.behaviour(s.running_speed, s.eye_tracking, s.licks, s.rewards, bins)}
+        if epoch == 'active':
+            stim = s.stimulus_presentation
+            out['stimulus'] = covariates.stimulus_onsets(stim[stim.active], bins)
+        arrays = {}
+        for kind, frame in out.items():
+            arrays[kind] = frame.to_numpy(np.float32)
+            arrays[kind + '_names'] = np.array(frame.columns, dtype=str)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        save_npz(f, compressed=True, **arrays)
+        return out
 
     @cached_property
     def attr_targets(self):

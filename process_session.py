@@ -57,3 +57,24 @@ class session:
         self.gabor_times = [int(self.gabor.start_time.values[0]), int(self.gabor.end_time.values[-1])]
 
         self.behavior_id = self.session.behavior_session_id
+
+    # behaviour tables, read from the NWB file on first use (covariates.py)
+    @property
+    def running_speed(self):
+        return self.session.running_speed           # timestamps, speed (cm/s)
+
+    @property
+    def eye_tracking(self):
+        """timestamps, pupil_area, likely_blink, ...; None if the session has no eye tracking."""
+        try:
+            return self.session.eye_tracking
+        except Exception:                           # missing or unreadable eye-tracking data
+            return None
+
+    @property
+    def licks(self):
+        return self.session.licks                   # timestamps
+
+    @property
+    def rewards(self):
+        return self.session.rewards                 # timestamps

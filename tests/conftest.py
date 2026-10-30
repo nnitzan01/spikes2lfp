@@ -30,9 +30,15 @@ class FakeSession:
         n = len(starts)
         self.stimulus_presentation = pd.DataFrame({
             'start_time': starts, 'active': starts < 60, 'is_change': np.arange(n) % 7 == 0,
-            'image_name': np.where(np.arange(n) % 10 == 0, 'omitted', 'im')})
+            'image_name': np.where(np.arange(n) % 10 == 0, 'omitted', np.where(np.arange(n) % 3 == 0, 'im_a', 'im_b'))})
         self.active = self.stimulus_presentation[self.stimulus_presentation.active]
         self.active_times, self.spontaneous_times, self.passive_times = [0, 60], [60, 75], [75, SESSION_LEN]
+        t_run, t_eye = np.arange(0, SESSION_LEN, 1 / 60), np.arange(0, SESSION_LEN, 1 / 30)
+        self.running_speed = pd.DataFrame({'timestamps': t_run, 'speed': 10 + 10 * np.sin(t_run / 5)})
+        self.eye_tracking = pd.DataFrame({'timestamps': t_eye, 'pupil_area': 100 + np.cos(t_eye / 7),
+                                          'likely_blink': rng.random(len(t_eye)) < 0.02})
+        self.licks = pd.DataFrame({'timestamps': np.sort(rng.uniform(0, SESSION_LEN, 200))})
+        self.rewards = pd.DataFrame({'timestamps': np.sort(rng.uniform(0, SESSION_LEN, 10))})
         self.channels = pd.DataFrame({'structure_acronym': ['VISp'] * N_CHANNELS + ['VISl'],
                                       'dorsal_ventral_ccf_coordinate': [100.0, 200.0, 300.0]})
 
