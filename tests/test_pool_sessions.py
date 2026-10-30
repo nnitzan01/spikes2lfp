@@ -62,9 +62,20 @@ def test_check_and_pool(pipeline_module, session_dir):
     dom = np.load(out / 'regional_dominance.npz')
     assert dom['dominance'].shape == (len(dom['regions']), len(peri['times']), ps.ALIGNED_CHANNELS)
     assert pd.read_csv(out / 'sessions.csv').n_channels.tolist() == [N_CHANNELS]
+    assert not (out / 'baselines.npz').exists()                      # no experiment results yet
+
+    # experiment results are pooled when present
+    np.savez(dirs.variables / 'baselines.npz', r2_units=np.ones((N_CHANNELS, config.N_TARGETS)),
+             r2_shuffle=np.zeros((3, N_CHANNELS, config.N_TARGETS)), n_inputs_units=np.array(N_UNITS))
+    ps.pool(data_root, [HVS_SESSION], alignment=alignment, units_info=info)
+    b = np.load(out / 'baselines.npz')
+    assert b['r2_units'].shape == (1, ps.ALIGNED_CHANNELS, config.N_TARGETS) and 'n_inputs_units' not in b
+    assert b['r2_shuffle'].shape == (1, 3, ps.ALIGNED_CHANNELS, config.N_TARGETS)
+    assert (b['r2_units'][0, ps.BELOW_L4 - 1:ps.BELOW_L4 + 1] == 1).all() and np.isnan(b['r2_units'][0, 0]).all()
 
     # the cached per-session arrays are reused until an input changes
     cache = out / 'sessions' / f'{HVS_SESSION}.npz'
+    ps.pool(data_root, [HVS_SESSION], alignment=alignment, units_info=info)
     before = cache.stat().st_mtime_ns
     ps.pool(data_root, [HVS_SESSION], alignment=alignment, units_info=info)
     assert cache.stat().st_mtime_ns == before

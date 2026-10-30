@@ -30,6 +30,11 @@ pool    aligns each complete session's VISp channels on the CSD-derived upper L4
                                     abs_mean, mean: rows x channels x targets x lags (rows = session x area)
           regional_dominance.npz    regional dominance (broadband): dominance, dominance_recent:
                                     rows x times x channels (rows = session x region)
+          stimulus_clock.npz, baselines.npz
+                                    the per-session results of experiments/stimulus_clock.py and
+                                    baselines.py, for the sessions that have them (session_ids):
+                                    every (... x channels x targets) array -> sessions x ... x
+                                    channels x targets; NaN where a session lacks an array
 
         Channel axes have ALIGNED_CHANNELS entries, deepest first; aligned channel BELOW_L4 is the upper
         L4 border. Channels a session does not have are NaN. Each session is first pooled into
@@ -58,6 +63,7 @@ TARGET_NAMES = ['broadband'] + [f'{lo}-{hi} Hz' for lo, hi in config.BANDS]
 SESSION_LIST = paths.REPO_DIR / 'cluster' / 'sessions.txt'
 ALIGNMENT_TABLE = paths.REPO_DIR / 'tables' / 'layer_4_borders_aligned.csv'
 UNITS_INFO = paths.REPO_DIR / 'tables' / 'units_info.csv'
+EXPERIMENT_FILES = ('stimulus_clock', 'baselines')   # optional per-session results, pooled when present
 
 
 def pooled_dir(data_root):
@@ -283,6 +289,14 @@ def pool_session(data_root, session_id, alignment_row):
         d = np.load(v / f'regional_dominance_results{k}.npz', allow_pickle=True)
         out[f'dominance{k}'] = al(d['average_dominance'], axis=2)            # regions x times x channels
         out['dominance_regions'] = d['region_names'].astype(str)
+
+    # optional experiment results: arrays ending in channels x targets
+    for name in EXPERIMENT_FILES:
+        f = v / f'{name}.npz'
+        if f.exists():
+            for key, x in np.load(f).items():
+                if x.ndim >= 2 and x.shape[-2:] == (n_ch, config.N_TARGETS):
+                    out[f'{name}__{key}'] = al(x, axis=x.ndim - 2)
     return out
 
 
@@ -358,6 +372,16 @@ def pool(data_root, session_ids, alignment=None, units_info=None, force=False):
     dom, dom_sessions, regions = stack_rows(per_session, 'dominance', 'dominance_regions')
     save_npz(out_dir / 'regional_dominance.npz', dominance=dom, dominance_recent=stack_rows(per_session, 'dominance_recent', 'dominance_regions')[0],
              session_ids=dom_sessions, regions=regions, times=per_session[sids[0]]['peri_times'])
+    for name in EXPERIMENT_FILES:
+        have = [sid for sid in sids if any(k.startswith(name + '__') for k in per_session[sid])]
+        if have:
+            keys = sorted({k for sid in have for k in per_session[sid] if k.startswith(name + '__')})
+            arrays = {}
+            for k in keys:
+                shape = next(per_session[sid][k].shape for sid in have if k in per_session[sid])
+                arrays[k.split('__', 1)[1]] = np.stack([per_session[sid].get(k, np.full(shape, np.nan, np.float32))
+                                                        for sid in have])
+            save_npz(out_dir / f'{name}.npz', session_ids=np.array(have), targets=np.array(TARGET_NAMES), **arrays)
     with atomic(out_dir / 'README.json') as tmp:
         tmp.write_text(json.dumps(dict(sessions=len(sids), units=len(units), aligned_channels=ALIGNED_CHANNELS,
                                        upper_l4_aligned_channel=BELOW_L4, recent_lag_ms=config.ATTR_RECENT_BINS * config.BIN_SIZE * 1000,

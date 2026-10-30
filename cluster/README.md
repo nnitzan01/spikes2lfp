@@ -100,6 +100,26 @@ Pooled arrays (channels aligned on the upper L4 border, one row per unit or per 
 `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/pooled/`; `python -m experiments.pool_sessions --help`
 describes each file. Only complete sessions are pooled.
 
+## Experiments
+
+`cluster/run_experiment.sbatch` runs one script from `experiments/` on every session (after the
+`train` stage). Each script's docstring says what it computes and saves to `variables/<session_id>/`.
+
+```bash
+EXPERIMENT=stimulus_clock sbatch --array=1-89%8 cluster/run_experiment.sbatch   # template, residual R2, shuffle / shift nulls
+EXPERIMENT=baselines sbatch --array=1-89%8 cluster/run_experiment.sbatch        # lagged ridge and region-rate LSTM baselines
+EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
+EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch
+EXPERIMENT=firing_rate_contribution sbatch --array=1-89%8 cluster/run_experiment.sbatch
+```
+
+Arguments for the script go in `EXTRA_ARGS`, e.g. `EXPERIMENT=baselines EXTRA_ARGS="--lstm none"`.
+`stimulus_clock` and `baselines` read the behaviour and stimulus covariates from
+`variables/<session_id>/covariates_active.npz`, computing it from the NWB file the first time.
+
+`tables/sessions.csv` (mouse, genotype and session number of each session, for grouped
+cross-validation and session-within-mouse statistics) is built by `python -m experiments.session_table`.
+
 ## Pooled figures
 
 `pool_sessions.ipynb` makes the pooled manuscript figures from `pooled/` (sections 2, 3 and 13 also
