@@ -84,3 +84,54 @@ def test_compare_versions(pipeline_module, session_dir, capsys):
     assert set(summary['attribution_median_spearman_recent']) == {'mean |attr|', 'per spike', 'share'}
     assert summary['completeness']['models'] == n_ch          # broadband only in this test
     assert 'r2_test_median_v1' in capsys.readouterr().out
+
+
+def test_covariates_stage(pipeline_module, session_dir):
+    data_root, session_id = paths.parse_session_dir(session_dir)
+    pipeline = pipeline_module.SessionPipeline(data_root, session_id, device='cpu')
+    pipeline.covariates()
+    active = pipeline.load_covariates('active')                     # read back from the saved file
+    n_bins = pipeline.active_counts.spkMat.shape[0]
+    assert active['behaviour'].shape == (n_bins, 4)
+    assert list(active['stimulus'].columns) == ['image_im_a', 'image_im_b', 'change', 'omitted']
+    stim = pipeline.session.active
+    assert active['stimulus'].to_numpy().sum() == len(stim)         # one impulse per active presentation
+    assert 'stimulus' not in pipeline.load_covariates('spont')
+
+
+def test_stimulus_clock(pipeline_module, session_dir):
+    from experiments import stimulus_clock
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = stimulus_clock.run(pipeline, n_shuffles=2, n_shifts=2, retrain_targets=[0])
+    n_ch = pipeline.n_channels
+    assert out['r2_model'].shape == (n_ch, 9) and np.isfinite(out['r2_model']).all()
+    assert out['r2_shuffle'].shape == (2, n_ch, 9) and np.isfinite(out['r2_residual_shift']).all()
+    assert np.isfinite(out['r2_retrained_residual'][:, 0]).all() and np.isnan(out['r2_retrained_residual'][:, 1]).all()
+    assert int(out['n_test_presentations']) > 5 and set(out['conditions']) == {'change', 'im_a', 'im_b', 'omitted'}
+    # R2 of the model from this experiment matches the train stage's test R2
+    np.testing.assert_allclose(out['r2_model'], np.load(pipeline.dirs.variables / 'r2_scores.npy'), atol=1e-4)
+
+
+def test_baselines(pipeline_module, session_dir):
+    from experiments import baselines
+    data_root, session_id = paths.parse_session_dir(session_dir)
+    pipeline = pipeline_module.SessionPipeline(data_root, session_id, device='cpu')
+    out = baselines.run_ridge(pipeline)
+    n_ch = pipeline.n_channels
+    for variant in baselines.RIDGE_VARIANTS:
+        assert out[f'r2_{variant}'].shape == (n_ch, 9) and np.isfinite(out[f'r2_{variant}']).all()
+    assert int(out['n_inputs_regions']) == 4 and int(out['n_inputs_units']) == N_UNITS
+    assert int(out['n_inputs_units_stimulus_behaviour']) == N_UNITS + 4 + 4
+    out = baselines.run_lstm(pipeline, ['regions'])
+    assert np.isfinite(out['r2_lstm_regions']).all()
+
+
+def test_session_table():
+    import pandas as pd
+    from experiments.session_table import build
+    meta = pd.DataFrame({'ecephys_session_id': [1, 2, 3], 'behavior_session_id': [11, 12, 13], 'mouse_id': [7, 7, 8],
+                         'genotype': ['Sst-IRES-Cre/wt;Ai32(RCL-ChR2(H134R)_EYFP)/wt', 'wt/wt', 'Vip-IRES-Cre/wt;Ai32/wt'],
+                         'sex': 'M', 'age_in_days': 100, 'session_number': [1, 2, 1], 'experience_level': 'Familiar',
+                         'image_set': 'G', 'prior_exposures_to_image_set': 3, 'equipment_name': 'NP.1'})
+    table = build(meta, [3, 1])
+    assert table.session_id.tolist() == [1, 3] and table.cre_line.tolist() == ['Sst', 'Vip']

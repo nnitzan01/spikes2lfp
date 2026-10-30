@@ -56,6 +56,13 @@ PERI_STEP_BINS = 3                      # peri-stimulus targets every 12 ms over
 PERI_PER_EVENT_TARGETS = [0]            # model targets whose per-event peri maps are kept (for Jaccard / dominance)
 LAG_KERNEL_BIN = 5                      # lag kernels are saved at 20 ms resolution
 
+# --- Stimulus clock and baselines (experiments/stimulus_clock.py, experiments/baselines.py) ----
+CLOCK_MAX_LAG = 0.75                    # s after an image onset covered by the stimulus template (one presentation cycle)
+RIDGE_HISTORY = 1.0                     # s of input history of the lagged ridge baselines
+RIDGE_N_BASIS = 8                       # raised-cosine lag basis functions over RIDGE_HISTORY
+RIDGE_TRAIN_STEP = 10                   # fit the ridge on every 10th training bin (40 ms apart; memory)
+RIDGE_ALPHAS = [1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1]   # penalties per training row tried; the best on validation is used
+
 # --- Peri-event analyses ----------------------------------------------------------------
 TOP_K = 40                              # size of the top-K influential set for Jaccard
 STIM_WINDOW = (-0.25, 0.5)              # s around image onset
