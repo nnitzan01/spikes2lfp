@@ -134,3 +134,10 @@ sbatch --partition=cpu_short --gres=none --cpus-per-task=16 --mem=64G --time=12:
 
 Figures are saved to `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/figures/`; the executed notebook, with
 every figure and printed result, is `pool_sessions_run.ipynb`.
+
+The cell-type, cluster and layer decoders and the Fig. 8 regression are cross-validated over mice
+(`analysis/decoders.py`, using `tables/sessions.csv`), each with a firing-rate-only control and a null
+from refits on labels shuffled within each session. `DECODER_PERMUTATIONS` (default 50) sets the
+number of shuffles; each costs about one refit per fold, so 50 shuffles add roughly 1.5 times the
+tuning time of the cell-type and layer decoders and the regression, and half that of the cluster
+decoder. `DECODER_PERMUTATIONS=0` skips the nulls (add it to `--wrap`, before `jupyter`).
