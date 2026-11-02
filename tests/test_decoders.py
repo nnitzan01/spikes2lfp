@@ -4,7 +4,7 @@ import pytest
 from sklearn.model_selection import StratifiedKFold
 
 from analysis.decoders import (SESSION_TABLE, cross_validate, evaluate, fixed_forest, grouped_folds, median_params,
-                               mouse_ids, permute_within, tuned_forest)
+                               mouse_ids, paired_gain, permute_within, tuned_forest)
 from sklearn.metrics import balanced_accuracy_score
 
 SMALL = dict(n_estimators=30, max_depth=6)
@@ -78,6 +78,22 @@ def test_evaluate_finds_real_signal_and_its_null_does_not():
     assert out['fold_scores'].mean() > 0.7
     assert out['null'].mean() < 0.6 and out['p'] == pytest.approx(0.1)
     assert len(decoder.params) == 5 and set(median_params(decoder.params)) == {'n_estimators', 'max_depth'}
+
+
+def test_paired_gain_compares_the_same_folds():
+    rng = np.random.default_rng(6)
+    sessions = np.repeat(real_sessions(8), 60)
+    y = rng.integers(0, 2, len(sessions))
+    rate = rng.normal(size=(len(y), 1))
+    signal = (y + 0.7 * rng.normal(size=len(y)))[:, None]
+    decoder = fixed_forest('classifier', SMALL)
+    alone = evaluate('rate', rate, y, sessions, decoder, 'classifier')
+    both = evaluate('rate + signal', np.hstack([rate, signal]), y, sessions, decoder, 'classifier')
+    gain = paired_gain('gain', both, alone)
+    assert len(gain) == 5 and (gain > 0.1).all()
+    other_folds = evaluate('rate', rate, y, sessions, decoder, 'classifier', seed=1)
+    with pytest.raises(ValueError):
+        paired_gain('gain', both, other_folds)
 
 
 def test_evaluate_regression():

@@ -170,6 +170,20 @@ def evaluate(name, X, y, session_ids, decoder, kind, n_permutations=0, null_deco
     return cv
 
 
+def paired_gain(name, with_features, without_features):
+    """
+    Fold-by-fold score difference between two evaluate() results on the same units and folds (e.g.
+    attribution plus firing rate against firing rate alone); prints and returns the per-fold gains.
+    """
+    for (_, a), (_, b) in zip(with_features['folds'], without_features['folds']):
+        if not np.array_equal(a, b):
+            raise ValueError('the two cross-validations used different folds')
+    gain = with_features['fold_scores'] - without_features['fold_scores']
+    print(f'{name}: {gain.mean():+.3f} +/- {gain.std():.3f}, higher in {np.sum(gain > 0)} of {len(gain)} '
+          f'mouse-grouped folds', flush=True)
+    return gain
+
+
 def summary(name, observed_folds, null=None, p=None):
     """One printed line: mean +/- sd over folds, and the null when there is one."""
     line = f'{name}: {observed_folds.mean():.3f} +/- {observed_folds.std():.3f} over {len(observed_folds)} mouse-grouped folds'
