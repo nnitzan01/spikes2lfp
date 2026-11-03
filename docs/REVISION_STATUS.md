@@ -187,7 +187,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Item | Answers | Status |
 |---|---|---|
 | **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | 🟡 code ready (`experiments/stimulus_clock.py`), not run |
-| **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | 🟡 code ready (`experiments/baselines.py`), not run |
+| **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | 🟡 one session run (`experiments/baselines.py`); 89 sessions to run |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
 | **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 code ready (`analysis/coupling_measures.py`, `experiments/ranked_ablation.py`), not run; session-level stats to add when pooling |
@@ -262,6 +262,26 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - Fig. 8: held-out permutation importance dominated by the VISp flag (0.33), then firing rate
   (0.06), distance from VISp, cluster_id. Under share: firing rate 1.26, VISp 1.10.
 
+### Baselines (one session, 1047969464; median test R² over channels)
+| Inputs | Broadband | 0.5–4 | 4–8 | 8–12 | > 12 Hz |
+|---|---|---|---|---|---|
+| Ridge, units, current bin only (v1-style linear) | 0.13 | 0.07 | 0.03 | 0.00 | ≈ 0 |
+| Ridge, units, 1 s lagged | 0.54 | 0.20 | 0.12 | −0.01 | ≈ 0 |
+| Ridge, 20 region counts, lagged | 0.43 | 0.19 | 0.10 | 0.06 | 0.00–0.04 |
+| Ridge, stimulus onsets | 0.07 | 0.23 | 0.06 | 0.01 | 0 |
+| Ridge, behaviour | 0.12 | 0.11 | 0.02 | 0.02 | 0 |
+| Ridge, stimulus + behaviour | 0.21 | 0.27 | 0.07 | 0.07 | ≈ 0 |
+| Ridge, regions + stimulus + behaviour | 0.48 | 0.29 | 0.12 | 0.11 | 0.00–0.05 |
+| Ridge, units + stimulus + behaviour | 0.54 | 0.19 | 0.11 | 0.01 | ≈ 0 |
+| CNN-LSTM, region counts | 0.34 | 0.12 | 0.07 | 0.02 | 0.00–0.03 |
+| CNN-LSTM, region counts + behaviour | 0.36 | 0.16 | 0.06 | 0.01 | 0.00–0.04 |
+- History is most of the linear model's performance (0.13 → 0.54): the v1 linear comparison was weak.
+- Covariates add nothing to the lagged unit ridge (0.54 → 0.54); alone they reach 0.21 broadband
+  and 0.27 at 0.5–4 Hz, more than the units for the delta envelope.
+- Region counts get 80% of the unit ridge broadband R².
+- The region-count CNN-LSTM is below the ridge on the same inputs (0.34 vs 0.43): see open issues.
+- The CNN-LSTM's own R² for this session is in `baselines.npz` (`model_r2`); not yet compared.
+
 ---
 
 ## 5. Open issues and decisions
@@ -283,6 +303,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
   of the 12 h `cpu_short` limit. Next rerun needs fewer cluster permutations or its own setting.
 - High-band (> 25 Hz) results: keep with null + threshold, or cut. Not decided.
 - `start_notebook.ipynb` still uses the old instantaneous IG.
+- Region-count CNN-LSTM below the ridge on the same 20 inputs (one session). Training on few,
+  large-valued inputs may be failing; check before it is used as a baseline.
 
 ---
 
@@ -300,6 +322,10 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** `baselines` ran on session 1 (1 h 13 min); results in section 4.
+- **2026-11-03** Experiment jobs failed: first a transient `module load` I/O error, then
+  `GLIBCXX_3.4.30 not found` (scripts importing torch before scipy loaded the system libstdc++).
+  Fixed in `cluster/env.sh` by preloading the environment's libstdc++.
 - **2026-11-03** Region removal (Phase 3) built and tested on synthetic data.
 - **2026-11-03** Ranked ablation (Phase 2C) built and tested on synthetic data; waiting for a
   one-session cluster test together with `stimulus_clock` and `baselines`.
