@@ -183,3 +183,19 @@ def test_training_length(pipeline_module, session_dir):
         assert out[key].shape == (n_ch, 9) and np.isfinite(out[key][:, 0]).all() and np.isnan(out[key][:, 1]).all()
     np.testing.assert_allclose(out['r2_saved'][:, 0], np.load(pipeline.dirs.variables / 'r2_scores.npy')[:, 0], atol=1e-4)
     assert (out['best_epoch_units'][:, 0] <= 2).all()
+
+
+def test_attribution_baseline(pipeline_module, session_dir, monkeypatch):
+    from experiments import attribution_baseline as ab
+    from experiments import ranked_ablation as ra
+    monkeypatch.setattr(ra, 'FRACTIONS', [0.1, 0.5])
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    _, scores = ra.run(pipeline, targets=[0], n_random=2, retrain_targets=[])
+    np.savez(pipeline.dirs.variables / 'ranked_ablation_measures.npz', **scores)
+    out = ab.run(pipeline, targets=[0], n_random=2, retrain_targets=[0], retrain_fractions=[0.25])
+    n_ch = pipeline.n_channels
+    assert out['r2_ablated'].shape == (2, len(ab.MEASURES), 2, n_ch, 9) and np.isfinite(out['r2_ablated'][..., 0]).all()
+    assert out['mean_abs'].shape == (n_ch, 9, N_UNITS) and np.isfinite(out['mean_abs'][:, 0]).all()
+    assert (out['completeness'][:, 0] <= 0.01).all() or (out['n_steps'][:, 0] == 400).all()
+    assert out['r2_retrained'].shape == (len(ab.MEASURES), 1, 1, n_ch, 9)
+    assert np.isfinite(out['spearman_zero_baseline'][:, 0]).all()

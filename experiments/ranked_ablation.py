@@ -102,14 +102,14 @@ def unit_scores(pipeline, targets):
     return scores
 
 
-def orders(scores, chan, band, n_random, rng):
+def orders(scores, chan, band, n_random, rng, measures=MEASURES):
     """Unit orderings for one model: measures (most important first), then n_random random ones."""
-    ranked = [cm.rank_order(scores[m][:, chan, band], rng) for m in MEASURES]
+    ranked = [cm.rank_order(scores[m][:, chan, band], rng) for m in measures]
     n_units = len(ranked[0])
     return ranked, [rng.permutation(n_units) for _ in range(n_random)]
 
 
-def inference_ablation(pipeline, scores, targets, n_random, rng):
+def inference_ablation(pipeline, scores, targets, n_random, rng, measures=MEASURES):
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
     n_ch, n_tg, n_units = Y.shape[1], Y.shape[2], X.shape[1]
     split = pipeline.split
@@ -118,14 +118,14 @@ def inference_ablation(pipeline, scores, targets, n_random, rng):
     X_test = torch.as_tensor(take_chunks(X, split['test']), dtype=torch.float32)
     y_test = take_chunks(Y, split['test']).reshape(-1, n_ch, n_tg)
     r2_full = np.full((n_ch, n_tg), np.nan)
-    r2_ablated = np.full((len(FILLS), len(MEASURES), len(FRACTIONS), n_ch, n_tg), np.nan)
+    r2_ablated = np.full((len(FILLS), len(measures), len(FRACTIONS), n_ch, n_tg), np.nan)
     r2_random = np.full((len(FILLS), n_random, len(FRACTIONS), n_ch, n_tg), np.nan)
 
     for band in targets:
         for chan in range(n_ch):
             model, y = pipeline.models[chan, band], y_test[:, chan, band]
             r2_full[chan, band] = r2_score(y, model.evaluate(X_test).numpy())
-            ranked, random_orders = orders(scores, chan, band, n_random, rng)
+            ranked, random_orders = orders(scores, chan, band, n_random, rng, measures)
             for f, fill in enumerate(FILLS):
                 for out, ords in ((r2_ablated, ranked), (r2_random, random_orders)):
                     for i, order in enumerate(ords):
@@ -137,20 +137,20 @@ def inference_ablation(pipeline, scores, targets, n_random, rng):
                             X_test[..., removed] = kept
             k = len(FRACTIONS) // 2
             log(f'chan {chan} band {band}: full {r2_full[chan, band]:.3f}, top {FRACTIONS[k]:.0%} removed (mean fill) '
-                + ', '.join(f'{m} {r2_ablated[0, i, k, chan, band]:.3f}' for i, m in enumerate(MEASURES)))
+                + ', '.join(f'{m} {r2_ablated[0, i, k, chan, band]:.3f}' for i, m in enumerate(measures)))
     return r2_full, r2_ablated, r2_random
 
 
-def retrained_ablation(pipeline, scores, targets, fractions, n_seeds, n_random, rng):
+def retrained_ablation(pipeline, scores, targets, fractions, n_seeds, n_random, rng, measures=MEASURES):
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
     n_ch, n_tg, n_units = Y.shape[1], Y.shape[2], X.shape[1]
-    r2 = np.full((len(MEASURES), len(fractions), n_seeds, n_ch, n_tg), np.nan)
+    r2 = np.full((len(measures), len(fractions), n_seeds, n_ch, n_tg), np.nan)
     r2_random = np.full((n_random, len(fractions), n_seeds, n_ch, n_tg), np.nan)
     r2_full = np.full((n_seeds, n_ch, n_tg), np.nan)
     for band in targets:
         for chan in range(n_ch):
             y = Y[:, chan, band]
-            ranked, random_orders = orders(scores, chan, band, n_random, rng)
+            ranked, random_orders = orders(scores, chan, band, n_random, rng, measures)
             for seed in range(n_seeds):
                 r2_full[seed, chan, band] = pipeline.fit_and_score(X, y, seed)[1]
                 for out, ords in ((r2, ranked), (r2_random, random_orders)):

@@ -358,7 +358,8 @@ Drop in R² when the top units by each measure are removed on the test block (in
 - Zero fill gives drops > R² (out of distribution) and orders the measures differently; not used.
 - Possible mismatch: IG uses a zero (no spikes) baseline, so attribution credits each unit's mean
   drive, which the mean-fill ablation does not remove. IG with the training-mean baseline (also an
-  "alternative IG baseline", R3) would match the test; to try on one session.
+  "alternative IG baseline", R3) would match the test: `experiments/attribution_baseline.py`
+  (one session, broadband to 4–8 Hz).
 
 ---
 
@@ -411,6 +412,8 @@ Drop in R² when the top units by each measure are removed on the test block (in
 ---
 
 ## 7. Change log
+- **2026-11-03** Added `experiments/attribution_baseline.py`: training-mean IG baseline in the
+  ranked ablation.
 - **2026-11-03** `ranked_ablation` ran on session 1: ridge weights beat attribution for broadband;
   attribution best or tied for the 0.5–8 Hz envelopes (section 4).
 - **2026-11-03** `region_ablation` ran on session 1 (3 h): visual cortex, VISp and hippocampus

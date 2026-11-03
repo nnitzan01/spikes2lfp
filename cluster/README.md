@@ -110,6 +110,7 @@ EXPERIMENT=stimulus_clock sbatch --array=1-89%8 cluster/run_experiment.sbatch   
 EXPERIMENT=baselines sbatch --array=1-89%8 cluster/run_experiment.sbatch        # lagged ridge and region-rate LSTM baselines
 EXPERIMENT=ranked_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch  # attribution vs stLFP, correlation, coupling, rate, ridge weight
 EXPERIMENT=region_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch  # each region removed, at inference and retrained, with and without covariates
+EXPERIMENT=attribution_baseline sbatch --array=1 cluster/run_experiment.sbatch # mean-baseline IG in the ranked ablation (after ranked_ablation)
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch
