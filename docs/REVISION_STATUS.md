@@ -341,6 +341,11 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
+- **Models may be undertrained.** Session 1047969464: 80% of broadband models (and about half at
+  0.5–4 and 4–8 Hz) keep epoch 13 or 14 of 15, validation loss still falling (0.382 → 0.371 over the
+  last five epochs). `experiments/training_length.py` retrains with a 40-epoch cap and also measures
+  the cost of each 3 s sequence starting with an empty LSTM memory (R² after the first 1 s). If the
+  gain is large, raise `NUM_EPOCHS` and retrain everything (models, attribution, experiments).
 - Region-count CNN-LSTM below the ridge on the same 20 inputs (one session). Training on few,
   large-valued inputs may be failing; check before it is used as a baseline.
 
@@ -360,6 +365,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** Session 1 best epochs: broadband models mostly stop at the 15-epoch cap. Added
+  `experiments/training_length.py` (40-epoch retrain, warm-up-excluded R²).
 - **2026-11-03** Channels past the track checked in all sessions; only session 1047969464 channel 15
   was pooled, now dropped. Pooling re-pools a session when its channel alignment changes.
 - **2026-11-03** Channel table of session 1: channels 15–24 are above the registered track; one-

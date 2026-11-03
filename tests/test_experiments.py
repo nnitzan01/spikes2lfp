@@ -172,3 +172,14 @@ def test_session_table():
                          'image_set': 'G', 'prior_exposures_to_image_set': 3, 'equipment_name': 'NP.1'})
     table = build(meta, [3, 1])
     assert table.session_id.tolist() == [1, 3] and table.cre_line.tolist() == ['Sst', 'Vip']
+
+
+def test_training_length(pipeline_module, session_dir):
+    from experiments import training_length
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = training_length.run(pipeline, targets=[0], num_epochs=3)
+    n_ch = pipeline.n_channels
+    for key in ('r2_saved', 'r2_warm_saved', 'r2_units', 'r2_warm_units', 'best_epoch_units', 'r2_regions'):
+        assert out[key].shape == (n_ch, 9) and np.isfinite(out[key][:, 0]).all() and np.isnan(out[key][:, 1]).all()
+    np.testing.assert_allclose(out['r2_saved'][:, 0], np.load(pipeline.dirs.variables / 'r2_scores.npy')[:, 0], atol=1e-4)
+    assert (out['best_epoch_units'][:, 0] <= 2).all()

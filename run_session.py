@@ -284,7 +284,7 @@ class SessionPipeline:
         """Seed-0 models, used by the attribution stages."""
         return self.load_models(seed=0)
 
-    def fit_and_score(self, X, y, seed=0):
+    def fit_and_score(self, X, y, seed=0, num_epochs=config.NUM_EPOCHS):
         """
         Train the standard model on inputs X (bins x features) for one target y (bins,) with this
         session's blocked split and validation-based epoch selection. Returns (model, test R2).
@@ -294,7 +294,7 @@ class SessionPipeline:
         loaders = {part: make_loader(take_chunks(X, self.split[part]), take_chunks(y[:, None], self.split[part]),
                                      shuffle=(part == 'train')) for part in ('train', 'val', 'test')}
         model = models.build_lstm(X.shape[1], self.device)
-        model.train(loaders['train'], loaders['val'], config.NUM_EPOCHS, select_best=True, patience=config.PATIENCE)
+        model.train(loaders['train'], loaders['val'], num_epochs, select_best=True, patience=config.PATIENCE)
         return model, r2(model, loaders['test'])
 
     # ---- stages ------------------------------------------------------------------------------

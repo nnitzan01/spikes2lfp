@@ -86,15 +86,21 @@ def run_ridge(pipeline, variants=RIDGE_VARIANTS):
     return out
 
 
+def lstm_inputs(pipeline, variant, train):
+    """inputs() for the CNN-LSTM, with region counts min-max scaled on the training bins like the unit inputs."""
+    Z = inputs(pipeline, variant, train).astype(np.float32)
+    if variant.startswith('regions'):
+        n_regions = len(region_counts(pipeline)[1])
+        Z[:, :n_regions] = SpikeScaler().fit(Z[train, :n_regions]).transform(Z[:, :n_regions])
+    return Z
+
+
 def run_lstm(pipeline, variants=LSTM_VARIANTS):
     Y = pipeline.active_lfp.lfpMat
     train = chunk_bins(pipeline.split['train'])
     out = {}
     for variant in variants:
-        Z = inputs(pipeline, variant, train).astype(np.float32)
-        if variant.startswith('regions'):                       # scale counts like the unit inputs
-            n_regions = len(region_counts(pipeline)[1])
-            Z[:, :n_regions] = SpikeScaler().fit(Z[train, :n_regions]).transform(Z[:, :n_regions])
+        Z = lstm_inputs(pipeline, variant, train)
         r2 = np.full(Y.shape[1:], np.nan)
         for band in range(Y.shape[2]):
             for chan in range(Y.shape[1]):
