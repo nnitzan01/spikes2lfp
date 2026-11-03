@@ -280,7 +280,13 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
   and 0.27 at 0.5–4 Hz, more than the units for the delta envelope.
 - Region counts get 80% of the unit ridge broadband R².
 - The region-count CNN-LSTM is below the ridge on the same inputs (0.34 vs 0.43): see open issues.
-- The CNN-LSTM's own R² for this session is in `baselines.npz` (`model_r2`); not yet compared.
+| **CNN-LSTM, all units (the main model)** | **0.54** | **0.34** | **0.14** | **0.08** | 0.01–0.06 |
+- **The main model's broadband R² equals the lagged unit ridge (0.538 vs 0.537).** It is higher on
+  17 of 25 channels, by 0.02–0.06 on the deep ones and by more on a few noisy ones, and lower on
+  channels 14, 15, 18 and 20–24. It is clearly better only for the band envelopes: 0.34 vs 0.20 at
+  0.5–4 Hz, and 0.08 vs −0.01 at 8–12 Hz. One session; needs all 89 before deciding the framing.
+- Channels 20–24 alternate between R² ≈ 0.65 and ≈ 0.1 in both models: check channel order and
+  quality for this session.
 
 ---
 
@@ -303,6 +309,9 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
   of the 12 h `cpu_short` limit. Next rerun needs fewer cluster permutations or its own setting.
 - High-band (> 25 Hz) results: keep with null + threshold, or cut. Not decided.
 - `start_notebook.ipynb` still uses the old instantaneous IG.
+- **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
+  argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
+  whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
 - Region-count CNN-LSTM below the ridge on the same 20 inputs (one session). Training on few,
   large-valued inputs may be failing; check before it is used as a baseline.
 
@@ -322,7 +331,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
-- **2026-11-03** `baselines` ran on session 1 (1 h 13 min); results in section 4.
+- **2026-11-03** `baselines` ran on session 1 (1 h 13 min); results in section 4. Broadband CNN-LSTM
+  equals the lagged unit ridge on this session; the envelopes are better with the CNN-LSTM.
 - **2026-11-03** Experiment jobs failed: first a transient `module load` I/O error, then
   `GLIBCXX_3.4.30 not found` (scripts importing torch before scipy loaded the system libstdc++).
   Fixed in `cluster/env.sh` by preloading the environment's libstdc++.
