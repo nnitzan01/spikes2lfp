@@ -79,6 +79,10 @@ def test_check_and_pool(pipeline_module, session_dir):
     before = cache.stat().st_mtime_ns
     ps.pool(data_root, [HVS_SESSION], alignment=alignment, units_info=info)
     assert cache.stat().st_mtime_ns == before
+    # ...or the channel alignment changes
+    ps.pool(data_root, [HVS_SESSION], alignment=alignment.assign(last_channel_index=0), units_info=info)
+    assert np.load(cache)['src'].tolist() == [0]
+    assert np.isnan(np.load(out / 'baselines.npz')['r2_units'][0, ps.BELOW_L4]).all()
 
 
 def test_check_reports_what_to_redo(pipeline_module, session_dir):

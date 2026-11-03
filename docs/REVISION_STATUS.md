@@ -282,8 +282,7 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - The region-count CNN-LSTM is below the ridge on the same inputs (0.34 vs 0.43): see open issues.
 | **CNN-LSTM, all units (the main model)** | **0.54** | **0.34** | **0.14** | **0.08** | 0.01–0.06 |
 - The medians in this table are over all 25 channels, including 16–24, which lie above the
-  registered end of the probe track (see below) and are never pooled. Over the pooled channels
-  (1–15) broadband is **CNN-LSTM 0.587 vs lagged unit ridge 0.539**: higher on 13 of 15 channels,
+  registered end of the probe track (see below) and are never pooled. Over channels 1–15 broadband is **CNN-LSTM 0.587 vs lagged unit ridge 0.539**: higher on 13 of 15 channels,
   median paired gain +0.037; lower only on channels 14–15. The CNN-LSTM is clearly better for the
   band envelopes: 0.34 vs 0.20 at 0.5–4 Hz, 0.08 vs −0.01 at 8–12 Hz. One session; needs all 89.
 
@@ -312,14 +311,17 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - Channels 13–24 have no stimulus-locked response (template ≤ 0.07), yet channels 20, 22 and 23
   reach R² 0.54–0.66 while 19, 21 and 24 are ≤ 0.17. The channel table explains it: from channel 15
   up (probe 3400–3800 µm) every channel has the same CCF coordinates, i.e. lies beyond the
-  registered end of the track, above the cortical surface. Channels 16–24 are outside the pooled
-  range (1–15) for this session; 15 (and probably 13–14) is inside it.
+  registered end of the track, above the cortical surface. 16–24 were never pooled; 15 is now
+  dropped too (decisions). 13–14 also lack an evoked response but are inside the track.
 
 ---
 
 ## 5. Open issues and decisions
 
 ### Decisions taken
+- Channels past the registered probe track are not pooled. Checked in all 89 sessions: only
+  1047969464 has any (channels 15–24, labelled VISp but with clamped CCF coordinates); its pooled
+  range was cut from 1–15 to 1–14 in `tables/layer_4_borders_aligned.csv` (2026-11-03). Re-pool.
 - Rebuild from scratch with causal models and history-aware IG; per-neuron min-max scaling fit on
   training; last 20% as test; all 9 targets attributed.
 - per_spike is the main attribution measure.
@@ -339,10 +341,6 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
-- **Channels above the cortical surface.** In session 1047969464 channels 15–24 share one CCF
-  coordinate (beyond the registered track) and have no evoked response; the pooled range goes up to
-  15. Check every session: first channel with clamped coordinates vs the pooled `last_channel_index`,
-  and drop pooled channels above the surface if there are any.
 - Region-count CNN-LSTM below the ridge on the same 20 inputs (one session). Training on few,
   large-valued inputs may be failing; check before it is used as a baseline.
 
@@ -362,6 +360,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** Channels past the track checked in all sessions; only session 1047969464 channel 15
+  was pooled, now dropped. Pooling re-pools a session when its channel alignment changes.
 - **2026-11-03** Channel table of session 1: channels 15–24 are above the registered track; one-
   session medians recomputed over the pooled channels 1–15.
 - **2026-11-03** `stimulus_clock` ran on session 1 (1 h 22 min): the prediction is trial-specific

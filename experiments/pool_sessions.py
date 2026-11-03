@@ -306,10 +306,13 @@ def session_inputs(data_root, session_id):
 
 
 def pooled_session(data_root, session_id, alignment_row, force=False):
-    """pool_session, cached in pooled/sessions/<session_id>.npz until any input changes."""
+    """pool_session, cached in pooled/sessions/<session_id>.npz until any input or the channel alignment changes."""
     f = pooled_dir(data_root) / 'sessions' / f'{session_id}.npz'
     if not force and f.exists() and f.stat().st_mtime >= max(i.stat().st_mtime for i in session_inputs(data_root, session_id)):
-        return dict(np.load(f, allow_pickle=False))
+        cached = dict(np.load(f, allow_pickle=False))
+        src, dst = channel_alignment(alignment_row, int(cached['n_channels']))
+        if np.array_equal(cached['src'], src) and np.array_equal(cached['dst'], dst):
+            return cached
     out = pool_session(data_root, session_id, alignment_row)
     save_npz(f, **out)
     return out
