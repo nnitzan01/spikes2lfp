@@ -186,7 +186,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 ### Phase 2: the decisive analyses (set the framing)
 | Item | Answers | Status |
 |---|---|---|
-| **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | 🟡 code ready (`experiments/stimulus_clock.py`), not run |
+| **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | 🟡 one session run (`experiments/stimulus_clock.py`); 89 sessions to run |
 | **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | 🟡 one session run (`experiments/baselines.py`); 89 sessions to run |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
@@ -286,7 +286,29 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
   channels 14, 15, 18 and 20–24. It is clearly better only for the band envelopes: 0.34 vs 0.20 at
   0.5–4 Hz, and 0.08 vs −0.01 at 8–12 Hz. One session; needs all 89 before deciding the framing.
 - Channels 20–24 alternate between R² ≈ 0.65 and ≈ 0.1 in both models: check channel order and
-  quality for this session.
+  quality for this session (they also have no stimulus-locked response).
+
+### Stimulus clock (one session, 1047969464; 959 test presentations, 10 conditions)
+| Median over channels | Broadband | 0.5–4 | 4–8 | 8–12 | 12–25 |
+|---|---|---|---|---|---|
+| Model R² | 0.538 | 0.336 | 0.141 | 0.077 | 0.022 |
+| Template (stimulus clock) R² | 0.211 | 0.211 | 0.067 | 0.00 | 0.00 |
+| Residual R² (model on what the template leaves) | 0.353 | 0.155 | 0.047 | 0.084 | 0.019 |
+| Model retrained on the residual | 0.330 | 0.109 | 0.024 | 0.025 | 0.009 |
+| Model given spikes + template | 0.554 | 0.335 | 0.151 | 0.090 | 0.032 |
+| Spikes swapped between presentations of the same condition | −0.008 | 0.042 | 0.00 | −0.008 | −0.013 |
+| Spikes shifted 30–120 s | −0.49 | −0.22 | −0.10 | −0.10 | −0.05 |
+- Broadband: the stimulus clock explains 0.21 of the variance; the model explains 35% of what is
+  left, and a model trained only on the residual gets 0.33. Adding the template as an input gains
+  0.016: the model already contains the stimulus clock. Swapping spikes between presentations of
+  the same image drops R² to ≈ 0, below the template itself: the prediction is trial-specific.
+  Caveat: the swap also breaks slow state (arousal, running) along with the spikes; the baselines
+  say behaviour adds nothing over the units, which limits this.
+- 0.5–4 Hz envelope: mostly stimulus-locked (template 0.21 of the model's 0.34).
+- Per-presentation R² is meaningful for broadband only (0.38 model vs 0.17 template); for the
+  envelopes a 750 ms presentation is too short (negative for both).
+- Channels 13–24 have no stimulus-locked response (template ≤ 0.07), yet channels 20, 22 and 23
+  reach R² 0.54–0.66 while 19, 21 and 24 are ≤ 0.17. Checking the channel table (open issues).
 
 ---
 
@@ -331,6 +353,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** `stimulus_clock` ran on session 1 (1 h 22 min): the prediction is trial-specific
+  beyond the stimulus clock (section 4).
 - **2026-11-03** `baselines` ran on session 1 (1 h 13 min); results in section 4. Broadband CNN-LSTM
   equals the lagged unit ridge on this session; the envelopes are better with the CNN-LSTM.
 - **2026-11-03** Experiment jobs failed: first a transient `module load` I/O error, then
