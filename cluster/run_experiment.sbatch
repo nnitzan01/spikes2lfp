@@ -5,6 +5,7 @@
 #   EXPERIMENT=baselines sbatch --array=1-89%8 cluster/run_experiment.sbatch
 #   EXPERIMENT=baselines EXTRA_ARGS="--lstm none" sbatch --array=1 cluster/run_experiment.sbatch
 #   EXPERIMENT=ranked_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch
+#   EXPERIMENT=region_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch
 #   EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 #
 # An array task runs line N of cluster/sessions.txt. The experiments need the session's 'train'

@@ -197,7 +197,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Item | Answers | Status |
 |---|---|---|
 | Ground-truth simulation (synthetic LFP from known real spike trains through laminar kernels with lags, shared arousal term, redundant units); score recovery for instantaneous IG, sequence IG, ridge, stLFP | R3 #7, R2 #2 | ⬜ `experiments/simulation.py` |
-| Region removal at inference time and retrained; covariates as inputs; do APN/MRN, DG/POST, component-4 subcortical results survive? | R3 #5 | ⬜ `experiments/region_ablation.py` |
+| Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | 🟡 code ready (`experiments/region_ablation.py`), not run |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
@@ -300,6 +300,7 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** Region removal (Phase 3) built and tested on synthetic data.
 - **2026-11-03** Ranked ablation (Phase 2C) built and tested on synthetic data; waiting for a
   one-session cluster test together with `stimulus_clock` and `baselines`.
 - **2026-11-03** Document created. Grouped-CV decoders with nulls reviewed; PYR vs INT dropped;

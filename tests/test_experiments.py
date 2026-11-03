@@ -141,6 +141,28 @@ def test_ranked_ablation(pipeline_module, session_dir, monkeypatch):
     np.testing.assert_allclose(out['spearman_with_attribution'][0, :, 0], 1)     # attribution with itself
 
 
+def test_region_ablation(pipeline_module, session_dir):
+    from experiments import region_ablation as ra
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    areas = pipeline.session.units['structure_acronym'].to_numpy().astype(str)
+    out = ra.run(pipeline, targets=[0], retrain_targets=[0], retrain_regions=['VISp'])
+    n_ch, r_visp = pipeline.n_channels, ra.REGIONS.index('VISp')
+    present = [r for r in ra.REGIONS if ra.region_masks(areas)[r].any()]
+    assert out['region_n_units'][r_visp] == (areas == 'VISp').sum() > 0
+    assert out['r2_removed'].shape == (2, len(ra.REGIONS), n_ch, 9)
+    for i, region in enumerate(ra.REGIONS):
+        assert np.isfinite(out['r2_removed'][:, i, :, 0]).all() == (region in present)
+    assert np.isnan(out['r2_removed'][..., 1]).all()
+    np.testing.assert_allclose(out['r2_full'][:, 0], np.load(pipeline.dirs.variables / 'r2_scores.npy')[:, 0], atol=1e-4)
+    for key in ('r2_retrained_removed', 'r2_cov_removed'):
+        assert np.isfinite(out[key][r_visp, :, :, 0]).all()
+        assert np.isnan(np.delete(out[key], r_visp, axis=0)).all()
+    assert out['covariate_names'][-1] == 'population' and 'running_speed' in out['covariate_names']
+    masks = ra.region_masks(np.array(['VISp', 'SCig', 'LG', 'CA1', 'VISl', 'XYZ']))
+    assert masks['midbrain'].tolist() == [0, 1, 0, 0, 0, 0] and masks['SC'][1] and masks['other'].tolist() == [0, 0, 0, 0, 0, 1]
+    assert masks['visual_cortex_other'][4] and not masks['visual_cortex_other'][0]
+
+
 def test_session_table():
     import pandas as pd
     from experiments.session_table import build
