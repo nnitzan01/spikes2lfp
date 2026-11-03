@@ -108,6 +108,7 @@ describes each file. Only complete sessions are pooled.
 ```bash
 EXPERIMENT=stimulus_clock sbatch --array=1-89%8 cluster/run_experiment.sbatch   # template, residual R2, shuffle / shift nulls
 EXPERIMENT=baselines sbatch --array=1-89%8 cluster/run_experiment.sbatch        # lagged ridge and region-rate LSTM baselines
+EXPERIMENT=ranked_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch  # attribution vs stLFP, correlation, coupling, rate, ridge weight
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=firing_rate_contribution sbatch --array=1-89%8 cluster/run_experiment.sbatch

@@ -85,20 +85,27 @@ def r2_columns(Y, P):
         return np.where(ss > 0, 1 - ((Y - P) ** 2).sum(axis=0) / ss, np.nan)
 
 
-def fit_select_predict(Z, Y, basis, train_rows, val_rows, test_rows, alphas, columns_per_pass=64):
+def fit_select(Z, Y, basis, train_rows, val_rows, alphas, columns_per_pass=64):
     """
-    Fit the lagged ridge on train_rows, choose each target's penalty on val_rows and predict
-    test_rows, building the test features block by block. Z: inputs (bins x columns), Y: targets
-    (bins x targets). Returns (test predictions: len(test_rows) x targets, chosen alpha per target,
-    validation R2 per alpha x target).
+    Fit the lagged ridge on train_rows and choose each target's penalty on val_rows. Z: inputs
+    (bins x columns), Y: targets (bins x targets). Returns (RidgePath, standardised weights at the
+    chosen penalties: features x targets, chosen alpha per target, validation R2 per alpha x target).
     """
     path = RidgePath(lagged_features(Z, basis, train_rows, columns_per_pass), Y[train_rows], alphas)
     F_val = lagged_features(Z, basis, val_rows, columns_per_pass)
     val_r2 = np.stack([r2_columns(Y[val_rows], path.predict(F_val, path.weights(a))) for a in alphas])
     best = np.nanargmax(np.where(np.isfinite(val_r2), val_r2, -np.inf), axis=0)
     W = np.stack([path.weights(a) for a in alphas])[best, :, np.arange(Y.shape[1])].T     # features x targets
-    del F_val
-    return predict_lagged(path, W, Z, basis, test_rows, columns_per_pass), np.asarray(alphas)[best], val_r2
+    return path, W, np.asarray(alphas)[best], val_r2
+
+
+def fit_select_predict(Z, Y, basis, train_rows, val_rows, test_rows, alphas, columns_per_pass=64):
+    """
+    fit_select, then predict test_rows, building the test features block by block. Returns (test
+    predictions: len(test_rows) x targets, chosen alpha per target, validation R2 per alpha x target).
+    """
+    path, W, alpha, val_r2 = fit_select(Z, Y, basis, train_rows, val_rows, alphas, columns_per_pass)
+    return predict_lagged(path, W, Z, basis, test_rows, columns_per_pass), alpha, val_r2
 
 
 def predict_lagged(path, W, Z, basis, rows, columns_per_pass=64):

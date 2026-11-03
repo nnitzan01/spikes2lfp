@@ -126,6 +126,21 @@ def test_baselines(pipeline_module, session_dir):
     assert np.isfinite(out['r2_lstm_regions']).all()
 
 
+def test_ranked_ablation(pipeline_module, session_dir, monkeypatch):
+    from experiments import ranked_ablation as ra
+    monkeypatch.setattr(ra, 'FRACTIONS', [0.1, 0.5])
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out, scores = ra.run(pipeline, targets=[0], n_random=2, retrain_targets=[0], retrain_fractions=[0.25])
+    n_ch = pipeline.n_channels
+    assert set(scores) == set(ra.MEASURES) and scores['stlfp'].shape == (N_UNITS, n_ch, 9)
+    assert np.isfinite(scores['ridge_weight'][:, :, 0]).all() and np.isnan(scores['ridge_weight'][:, :, 1]).all()
+    assert out['r2_ablated'].shape == (2, len(ra.MEASURES), 2, n_ch, 9) and out['r2_random'].shape == (2, 2, 2, n_ch, 9)
+    assert np.isfinite(out['r2_ablated'][..., 0]).all() and np.isnan(out['r2_ablated'][..., 1]).all()
+    assert out['r2_retrained'].shape == (len(ra.MEASURES), 1, 1, n_ch, 9) and np.isfinite(out['r2_retrained'][..., 0]).all()
+    np.testing.assert_allclose(out['r2_full'][:, 0], np.load(pipeline.dirs.variables / 'r2_scores.npy')[:, 0], atol=1e-4)
+    np.testing.assert_allclose(out['spearman_with_attribution'][0, :, 0], 1)     # attribution with itself
+
+
 def test_session_table():
     import pandas as pd
     from experiments.session_table import build

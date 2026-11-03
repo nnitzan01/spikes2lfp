@@ -63,7 +63,7 @@ TARGET_NAMES = ['broadband'] + [f'{lo}-{hi} Hz' for lo, hi in config.BANDS]
 SESSION_LIST = paths.REPO_DIR / 'cluster' / 'sessions.txt'
 ALIGNMENT_TABLE = paths.REPO_DIR / 'tables' / 'layer_4_borders_aligned.csv'
 UNITS_INFO = paths.REPO_DIR / 'tables' / 'units_info.csv'
-EXPERIMENT_FILES = ('stimulus_clock', 'baselines')   # optional per-session results, pooled when present
+EXPERIMENT_FILES = ('stimulus_clock', 'baselines', 'ranked_ablation')   # optional per-session results, pooled when present
 
 
 def pooled_dir(data_root):

@@ -190,7 +190,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | 🟡 code ready (`experiments/baselines.py`), not run |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
-| **C. Does attribution beat simpler measures?** Rank units by attribution, stLFP, coherence, coupling, firing rate, ridge weight; ablate in rank order at inference time (+ retrained subset, seeds); ranking chosen on one block, scored on another; session-level stats | R2 #1, R1 | ⬜ `analysis/coupling_measures.py`, `experiments/ranked_ablation.py` |
+| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 code ready (`analysis/coupling_measures.py`, `experiments/ranked_ablation.py`), not run; session-level stats to add when pooling |
 | Framing decision after A and C | R1, R2 | ⬜ |
 
 ### Phase 3: validation and robustness
@@ -300,5 +300,7 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** Ranked ablation (Phase 2C) built and tested on synthetic data; waiting for a
+  one-session cluster test together with `stimulus_clock` and `baselines`.
 - **2026-11-03** Document created. Grouped-CV decoders with nulls reviewed; PYR vs INT dropped;
   layer-controlled cluster decoder tabled.
