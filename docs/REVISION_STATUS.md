@@ -281,12 +281,11 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - Region counts get 80% of the unit ridge broadband R².
 - The region-count CNN-LSTM is below the ridge on the same inputs (0.34 vs 0.43): see open issues.
 | **CNN-LSTM, all units (the main model)** | **0.54** | **0.34** | **0.14** | **0.08** | 0.01–0.06 |
-- **The main model's broadband R² equals the lagged unit ridge (0.538 vs 0.537).** It is higher on
-  17 of 25 channels, by 0.02–0.06 on the deep ones and by more on a few noisy ones, and lower on
-  channels 14, 15, 18 and 20–24. It is clearly better only for the band envelopes: 0.34 vs 0.20 at
-  0.5–4 Hz, and 0.08 vs −0.01 at 8–12 Hz. One session; needs all 89 before deciding the framing.
-- Channels 20–24 alternate between R² ≈ 0.65 and ≈ 0.1 in both models: check channel order and
-  quality for this session (they also have no stimulus-locked response).
+- The medians in this table are over all 25 channels, including 16–24, which lie above the
+  registered end of the probe track (see below) and are never pooled. Over the pooled channels
+  (1–15) broadband is **CNN-LSTM 0.587 vs lagged unit ridge 0.539**: higher on 13 of 15 channels,
+  median paired gain +0.037; lower only on channels 14–15. The CNN-LSTM is clearly better for the
+  band envelopes: 0.34 vs 0.20 at 0.5–4 Hz, 0.08 vs −0.01 at 8–12 Hz. One session; needs all 89.
 
 ### Stimulus clock (one session, 1047969464; 959 test presentations, 10 conditions)
 | Median over channels | Broadband | 0.5–4 | 4–8 | 8–12 | 12–25 |
@@ -298,17 +297,23 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 | Model given spikes + template | 0.554 | 0.335 | 0.151 | 0.090 | 0.032 |
 | Spikes swapped between presentations of the same condition | −0.008 | 0.042 | 0.00 | −0.008 | −0.013 |
 | Spikes shifted 30–120 s | −0.49 | −0.22 | −0.10 | −0.10 | −0.05 |
-- Broadband: the stimulus clock explains 0.21 of the variance; the model explains 35% of what is
-  left, and a model trained only on the residual gets 0.33. Adding the template as an input gains
-  0.016: the model already contains the stimulus clock. Swapping spikes between presentations of
-  the same image drops R² to ≈ 0, below the template itself: the prediction is trial-specific.
+- Table medians are over all 25 channels. **Over the pooled channels 1–15** (broadband): model
+  0.587, template 0.350, residual R² 0.361, retrained on the residual 0.336, spikes + template 0.593
+  (+0.006), swapped spikes 0.095, shifted spikes ≈ −0.6.
+- Broadband: the stimulus clock explains 0.35 of the model's 0.59 (60%); the model explains 36% of
+  what is left, and a model trained only on the residual gets 0.34. Adding the template as an input
+  gains < 0.02: the model already contains the stimulus clock. Swapping spikes between presentations
+  of the same image drops R² to 0.10, far below the template: the prediction is trial-specific.
   Caveat: the swap also breaks slow state (arousal, running) along with the spikes; the baselines
   say behaviour adds nothing over the units, which limits this.
 - 0.5–4 Hz envelope: mostly stimulus-locked (template 0.21 of the model's 0.34).
 - Per-presentation R² is meaningful for broadband only (0.38 model vs 0.17 template); for the
   envelopes a 750 ms presentation is too short (negative for both).
 - Channels 13–24 have no stimulus-locked response (template ≤ 0.07), yet channels 20, 22 and 23
-  reach R² 0.54–0.66 while 19, 21 and 24 are ≤ 0.17. Checking the channel table (open issues).
+  reach R² 0.54–0.66 while 19, 21 and 24 are ≤ 0.17. The channel table explains it: from channel 15
+  up (probe 3400–3800 µm) every channel has the same CCF coordinates, i.e. lies beyond the
+  registered end of the track, above the cortical surface. Channels 16–24 are outside the pooled
+  range (1–15) for this session; 15 (and probably 13–14) is inside it.
 
 ---
 
@@ -334,6 +339,10 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
+- **Channels above the cortical surface.** In session 1047969464 channels 15–24 share one CCF
+  coordinate (beyond the registered track) and have no evoked response; the pooled range goes up to
+  15. Check every session: first channel with clamped coordinates vs the pooled `last_channel_index`,
+  and drop pooled channels above the surface if there are any.
 - Region-count CNN-LSTM below the ridge on the same 20 inputs (one session). Training on few,
   large-valued inputs may be failing; check before it is used as a baseline.
 
@@ -353,6 +362,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** Channel table of session 1: channels 15–24 are above the registered track; one-
+  session medians recomputed over the pooled channels 1–15.
 - **2026-11-03** `stimulus_clock` ran on session 1 (1 h 22 min): the prediction is trial-specific
   beyond the stimulus clock (section 4).
 - **2026-11-03** `baselines` ran on session 1 (1 h 13 min); results in section 4. Broadband CNN-LSTM
