@@ -11,6 +11,13 @@ conda activate spikes2lfp
 # refuse to run with. Drop those entries.
 export LD_LIBRARY_PATH=$(printf '%s' "${LD_LIBRARY_PATH:-}" | tr ':' '\n' | grep -v '/apps/cuda/' | paste -sd: -)
 
+# Use the environment's libstdc++, not the older system one in /lib64. A script that imports torch
+# before scipy otherwise gets the system library (torch loads it first) and scipy then fails with
+# "GLIBCXX_3.4.30 not found". run_session.py happened to import pandas first, which hid this.
+if [[ -f "${CONDA_PREFIX}/lib/libstdc++.so.6" ]]; then
+    export LD_PRELOAD="${CONDA_PREFIX}/lib/libstdc++.so.6${LD_PRELOAD:+:${LD_PRELOAD}}"
+fi
+
 # AllenSDK cache directory (contains visual-behavior-neuropixels-0.4.0/).
 # Outputs are written to $SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/ (first-version results stay in spikes2lfp/).
 export SPIKES2LFP_DATA_ROOT=/gpfs/data/buzsakilab/nitzan01/Allen2022
