@@ -190,7 +190,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | 🟡 one session run (`experiments/baselines.py`); 89 sessions to run |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
-| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 code ready (`analysis/coupling_measures.py`, `experiments/ranked_ablation.py`), not run; session-level stats to add when pooling |
+| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 one session run (`analysis/coupling_measures.py`, `experiments/ranked_ablation.py`); session-level stats to add when pooling |
 | Framing decision after A and C | R1, R2 | ⬜ |
 
 ### Phase 3: validation and robustness
@@ -335,6 +335,31 @@ Full model 0.591. Drop in R² when the region is removed:
   look at it by depth when pooled. Among single areas VISl matters most (0.068 at inference).
 - Run time 3 h 05 min per session (mostly the retraining).
 
+### Ranked ablation (one session, 1047969464; median over pooled channels 1–14)
+Drop in R² when the top units by each measure are removed on the test block (inference, mean fill):
+| Broadband, fraction removed | 1% | 2% | 5% | 10% | 20% | Retrained 5% | Retrained 20% |
+|---|---|---|---|---|---|---|---|
+| Attribution (mean \|attr\|) | 0.055 | 0.083 | 0.170 | 0.301 | 0.481 | 0.041 | 0.138 |
+| Attribution per spike | 0.058 | 0.089 | 0.173 | 0.251 | 0.358 | 0.073 | 0.097 |
+| Ridge weight | **0.076** | **0.140** | **0.263** | **0.377** | **0.502** | **0.097** | **0.198** |
+| Spike–LFP correlation | 0.015 | 0.064 | 0.216 | 0.362 | 0.494 | 0.051 | 0.195 |
+| Population coupling | 0.013 | 0.028 | 0.081 | 0.177 | 0.308 | 0.019 | 0.098 |
+| stLFP | 0.000 | 0.005 | 0.016 | 0.077 | 0.260 | 0.005 | 0.093 |
+| Firing rate | 0.001 | 0.010 | 0.022 | 0.050 | 0.172 | 0.005 | 0.049 |
+| Random | 0.002 | 0.005 | 0.011 | 0.025 | 0.068 | −0.003 | 0.021 |
+- **Broadband: ridge weights find the units the CNN-LSTM depends on better than its own
+  attribution**, at inference and retrained; spike–LFP correlation is as good as attribution from 5%.
+  Consistent with broadband CNN-LSTM ≈ lagged ridge.
+- **0.5–4 and 4–8 Hz envelopes (where the CNN-LSTM beats ridge): attribution is best or tied** at
+  1–5% (0.5–4 Hz at 5%: attribution 0.191, correlation 0.191, ridge 0.138; 4–8 Hz: 0.197, 0.177, 0.177).
+- Every measure is far above random; stLFP and firing rate are the weakest.
+- Spearman with attribution (broadband): firing rate 0.81, correlation 0.59, ridge 0.58, per spike
+  0.37, stLFP −0.14. Mean |attribution| is largely firing rate.
+- Zero fill gives drops > R² (out of distribution) and orders the measures differently; not used.
+- Possible mismatch: IG uses a zero (no spikes) baseline, so attribution credits each unit's mean
+  drive, which the mean-fill ablation does not remove. IG with the training-mean baseline (also an
+  "alternative IG baseline", R3) would match the test; to try on one session.
+
 ---
 
 ## 5. Open issues and decisions
@@ -386,6 +411,8 @@ Full model 0.591. Drop in R² when the region is removed:
 ---
 
 ## 7. Change log
+- **2026-11-03** `ranked_ablation` ran on session 1: ridge weights beat attribution for broadband;
+  attribution best or tied for the 0.5–8 Hz envelopes (section 4).
 - **2026-11-03** `region_ablation` ran on session 1 (3 h): visual cortex, VISp and hippocampus
   carry information beyond the covariates; thalamus none (section 4).
 - **2026-11-03** Session 1 best epochs: broadband models mostly stop at the 15-epoch cap. Added
