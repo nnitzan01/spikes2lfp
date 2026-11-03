@@ -314,6 +314,27 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
   registered end of the track, above the cortical surface. 16–24 were never pooled; 15 is now
   dropped too (decisions). 13–14 also lack an evoked response but are inside the track.
 
+### Region removal (one session, 1047969464; broadband unless stated; median over pooled channels 1–14)
+Full model 0.591. Drop in R² when the region is removed:
+| Region | Units | At inference (mean fill) | Retrained | Retrained with covariates | Region alone (inference) |
+|---|---|---|---|---|---|
+| VISp | 21 | 0.111 | 0.056 | 0.052 | 0.094 |
+| Other visual cortex | 304 | 0.231 | 0.115 | 0.090 | 0.327 |
+| Hippocampus | 232 | 0.071 | 0.059 | 0.036 | 0.028 |
+| Thalamus | 89 | 0.011 | −0.006 | 0.003 | 0.010 |
+| Midbrain | 180 | 0.033 | 0.023 | 0.018 | 0.061 |
+| Other | 23 | 0.011 | 0.001 | −0.006 | −0.012 |
+- Covariates (stimulus onsets, running, pupil, licks, rewards, summed population) add nothing to the
+  full retrained model (0.586 → 0.589) and shrink the drops only modestly: the regions carry
+  information beyond stimulus timing, arousal and global activity.
+- Per unit, VISp is the most important region (0.056 for 21 units vs 0.115 for 304 other visual
+  cortex units), consistent with attribution ranking VISp first.
+- Inference drops exceed retrained drops (redundancy: other units compensate when retrained).
+  Zero fill gives much larger drops (other visual cortex 0.65): out of distribution; use mean fill.
+- Hippocampus costs 0.036 even with covariates: possibly volume conduction into deep channels;
+  look at it by depth when pooled. Among single areas VISl matters most (0.068 at inference).
+- Run time 3 h 05 min per session (mostly the retraining).
+
 ---
 
 ## 5. Open issues and decisions
@@ -365,6 +386,8 @@ All p = 1/51 ≈ 0.02 (the minimum with 50 permutations).
 ---
 
 ## 7. Change log
+- **2026-11-03** `region_ablation` ran on session 1 (3 h): visual cortex, VISp and hippocampus
+  carry information beyond the covariates; thalamus none (section 4).
 - **2026-11-03** Session 1 best epochs: broadband models mostly stop at the 15-epoch cap. Added
   `experiments/training_length.py` (40-epoch retrain, warm-up-excluded R²).
 - **2026-11-03** Channels past the track checked in all sessions; only session 1047969464 channel 15
