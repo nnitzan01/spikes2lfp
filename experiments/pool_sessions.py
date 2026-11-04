@@ -30,7 +30,7 @@ pool    aligns each complete session's VISp channels on the CSD-derived upper L4
                                     abs_mean, mean: rows x channels x targets x lags (rows = session x area)
           regional_dominance.npz    regional dominance (broadband): dominance, dominance_recent:
                                     rows x times x channels (rows = session x region)
-          stimulus_clock.npz, baselines.npz
+          stimulus_clock.npz, baselines.npz, ranked_ablation.npz, region_ablation.npz, attribution_baseline.npz
                                     the per-session results of experiments/stimulus_clock.py and
                                     baselines.py, for the sessions that have them (session_ids):
                                     every (... x channels x targets) array -> sessions x ... x
@@ -63,7 +63,7 @@ TARGET_NAMES = ['broadband'] + [f'{lo}-{hi} Hz' for lo, hi in config.BANDS]
 SESSION_LIST = paths.REPO_DIR / 'cluster' / 'sessions.txt'
 ALIGNMENT_TABLE = paths.REPO_DIR / 'tables' / 'layer_4_borders_aligned.csv'
 UNITS_INFO = paths.REPO_DIR / 'tables' / 'units_info.csv'
-EXPERIMENT_FILES = ('stimulus_clock', 'baselines', 'ranked_ablation', 'region_ablation')   # optional per-session results, pooled when present
+EXPERIMENT_FILES = ('stimulus_clock', 'baselines', 'ranked_ablation', 'region_ablation', 'attribution_baseline')   # optional per-session results, pooled when present
 
 
 def pooled_dir(data_root):

@@ -361,11 +361,52 @@ Drop in R² when the top units by each measure are removed on the test block (in
   "alternative IG baseline", R3) would match the test: `experiments/attribution_baseline.py`
   (one session, broadband to 4–8 Hz).
 
+### Baselines over sessions (34 of 89 so far; per-session median over pooled channels, then median over sessions)
+| | Broadband | 0.5–4 | 4–8 |
+|---|---|---|---|
+| CNN-LSTM | 0.631 | 0.370 | 0.336 |
+| Ridge, units, 1 s lagged | 0.612 | 0.330 | 0.277 |
+| Ridge, units + stimulus + behaviour | 0.616 | 0.344 | 0.282 |
+| Ridge, regions + stimulus + behaviour | 0.554 | 0.301 | 0.265 |
+| Ridge, region counts | 0.502 | 0.172 | 0.140 |
+| Ridge, stimulus + behaviour | 0.267 | 0.271 | 0.210 |
+| Ridge, units, current bin only | 0.200 | 0.042 | 0.034 |
+- CNN-LSTM minus lagged unit ridge: +0.034 / +0.029 / +0.036, higher in 30 / 26 / 26 of 34 sessions,
+  Wilcoxon p < 0.001 for each. A small but consistent nonlinear gain; history is the larger factor
+  (0.20 → 0.61 for the linear model).
+- Covariates add ≈ 0.004 to the unit ridge.
+
+### Training length (session 1047969464, channels 1–14)
+- Raising the epoch cap from 15 to 40: broadband +0.014 (higher on 13 of 14 channels; best epoch
+  median 24), 0.5–4 Hz −0.009, 4–8 Hz +0.007. Leaving out the first 1 s of each test sequence
+  changes R² by ≤ 0.016. **Decision: keep the 15-epoch models**; report the 40-epoch gain as a
+  sensitivity result. The CNN-LSTM's advantage over ridge is, if anything, underestimated.
+- Region-count CNN-LSTM at 40 epochs: broadband 0.451 (best epoch 34, 43% in the last 3), 4–8 Hz
+  0.304 (above the unit model's 0.247). It converges slowly; rerun it with `--lstm-epochs 60`.
+
+### Attribution baseline (session 1047969464, channels 1–14)
+Mean |attribution| with the training-mean IG baseline, in the ranked ablation (drop in R²):
+| | 1% | 2% | 5% | 10% | 20% | Retrained 5% | Retrained 20% |
+|---|---|---|---|---|---|---|---|
+| Broadband, mean baseline | 0.073 | **0.144** | **0.268** | **0.394** | 0.496 | 0.065 | 0.167 |
+| Broadband, zero baseline | 0.055 | 0.083 | 0.170 | 0.301 | 0.481 | 0.041 | 0.138 |
+| Broadband, ridge weight | **0.076** | 0.140 | 0.263 | 0.377 | **0.502** | **0.097** | **0.199** |
+| 0.5–4 Hz, mean baseline | **0.082** | **0.137** | **0.245** | **0.334** | **0.414** | | |
+| 0.5–4 Hz, ridge weight | 0.043 | 0.056 | 0.138 | 0.268 | 0.340 | | |
+| 4–8 Hz, mean baseline | **0.115** | **0.157** | **0.243** | **0.297** | **0.339** | | |
+| 4–8 Hz, ridge weight | 0.071 | 0.113 | 0.177 | 0.238 | 0.285 | | |
+- With the mean baseline, attribution ties with ridge weights for broadband and is clearly best for
+  the 0.5–4 and 4–8 Hz envelopes at inference. Retrained, ridge weights stay ahead for broadband:
+  attribution finds what this model uses, ridge what can't be replaced by other units.
+- Mean-baseline per-spike attribution is poor (by construction: the baseline already contains the
+  average drive). Completeness ≈ 0 at 50 steps; Spearman with the zero-baseline ranking 0.96 / 0.92 / 0.81.
+
 ---
 
 ## 5. Open issues and decisions
 
 ### Decisions taken
+- Keep the 15-epoch models (40 epochs: broadband +0.014 on one session); report as sensitivity (2026-11-04).
 - Channels past the registered probe track are not pooled. Checked in all 89 sessions: only
   1047969464 has any (channels 15–24, labelled VISp but with clamped CCF coordinates); its pooled
   range was cut from 1–15 to 1–14 in `tables/layer_4_borders_aligned.csv` (2026-11-03). Re-pool.
@@ -388,13 +429,12 @@ Drop in R² when the top units by each measure are removed on the test block (in
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
-- **Models may be undertrained.** Session 1047969464: 80% of broadband models (and about half at
-  0.5–4 and 4–8 Hz) keep epoch 13 or 14 of 15, validation loss still falling (0.382 → 0.371 over the
-  last five epochs). `experiments/training_length.py` retrains with a 40-epoch cap and also measures
-  the cost of each 3 s sequence starting with an empty LSTM memory (R² after the first 1 s). If the
-  gain is large, raise `NUM_EPOCHS` and retrain everything (models, attribution, experiments).
-- Region-count CNN-LSTM below the ridge on the same 20 inputs (one session). Training on few,
-  large-valued inputs may be failing; check before it is used as a baseline.
+- **IG baseline for the importance claims.** Mean-baseline total attribution matches or beats every
+  other measure in the inference ablation (one session). Proposal: keep zero-baseline per_spike for
+  the descriptive maps; use mean-baseline total attribution for "which units the model depends on";
+  run `attribution_baseline` on all sessions. To decide.
+- Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
+- 55 of 89 `baselines` tasks left no `baselines.npz`: find out why and resubmit.
 
 ---
 
@@ -412,6 +452,9 @@ Drop in R² when the top units by each measure are removed on the test block (in
 ---
 
 ## 7. Change log
+- **2026-11-04** Training-length, attribution-baseline (one session) and 34-session baselines
+  reviewed (section 4). Baselines: `--lstm-epochs`, `--lstm-targets`. `attribution_baseline` pooled.
+  Added `experiments/summarize.py`.
 - **2026-11-03** Added `experiments/attribution_baseline.py`: training-mean IG baseline in the
   ranked ablation.
 - **2026-11-03** `ranked_ablation` ran on session 1: ridge weights beat attribution for broadband;

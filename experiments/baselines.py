@@ -15,9 +15,12 @@ lags, penalty chosen on the validation block) on these inputs:
 LSTM (the standard CNN-LSTM, fit_and_score) on:
   lstm_regions               population counts per area, min-max scaled with training statistics
   lstm_regions_behaviour     the same plus the behavioural covariates
+  (--lstm-epochs sets their epoch cap, saved as epochs_lstm_<variant>; with region counts the model
+  converges more slowly than with units: best epoch 34 of 40 on the timing session)
 
 usage (from the repo root):
     python -m experiments.baselines <session_dir> [--ridge all|units,regions,...] [--lstm regions,... | none]
+                                    [--lstm-targets 0,1,2] [--lstm-epochs 60]
 
 Needs the 'train' and 'covariates' stages. Saves variables/<session_id>/baselines.npz:
 r2_<variant> (channels x targets, test R2), alpha_<variant> (chosen penalty, ridge only),
@@ -95,17 +98,19 @@ def lstm_inputs(pipeline, variant, train):
     return Z
 
 
-def run_lstm(pipeline, variants=LSTM_VARIANTS):
+def run_lstm(pipeline, variants=LSTM_VARIANTS, targets=None, num_epochs=config.NUM_EPOCHS):
     Y = pipeline.active_lfp.lfpMat
+    targets = range(Y.shape[2]) if targets is None else targets
     train = chunk_bins(pipeline.split['train'])
     out = {}
     for variant in variants:
         Z = lstm_inputs(pipeline, variant, train)
         r2 = np.full(Y.shape[1:], np.nan)
-        for band in range(Y.shape[2]):
+        for band in targets:
             for chan in range(Y.shape[1]):
-                r2[chan, band] = pipeline.fit_and_score(Z, Y[:, chan, band])[1]
+                r2[chan, band] = pipeline.fit_and_score(Z, Y[:, chan, band], num_epochs=num_epochs)[1]
         out[f'r2_lstm_{variant}'] = r2
+        out[f'epochs_lstm_{variant}'] = np.array(num_epochs)
         out[f'n_inputs_lstm_{variant}'] = np.array(Z.shape[1])
         print(f'lstm {variant}: median test R2 by target {np.round(np.nanmedian(r2, axis=0), 3)}', flush=True)
     return out
@@ -126,13 +131,17 @@ def main():
     parser.add_argument('session_dir')
     parser.add_argument('--ridge', default='all', help=f"'all', 'none' or a comma-separated subset of {RIDGE_VARIANTS}")
     parser.add_argument('--lstm', default='all', help=f"'all', 'none' or a comma-separated subset of {LSTM_VARIANTS}")
+    parser.add_argument('--lstm-targets', default='all', help="model targets of the LSTM baselines, e.g. 0,1,2")
+    parser.add_argument('--lstm-epochs', type=int, default=config.NUM_EPOCHS,
+                        help='epoch cap of the LSTM baselines (region counts converge more slowly than units)')
     args = parser.parse_args()
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pipeline = SessionPipeline(data_root, session_id, device)
     out = run_ridge(pipeline, parse(args.ridge, RIDGE_VARIANTS))
-    out.update(run_lstm(pipeline, parse(args.lstm, LSTM_VARIANTS)))
+    lstm_targets = None if args.lstm_targets == 'all' else [int(t) for t in args.lstm_targets.split(',')]
+    out.update(run_lstm(pipeline, parse(args.lstm, LSTM_VARIANTS), lstm_targets, args.lstm_epochs))
     model_r2 = pipeline.dirs.variables / 'r2_scores.npy'
     if model_r2.exists():
         out['model_r2'] = np.load(model_r2)
