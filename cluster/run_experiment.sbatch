@@ -18,7 +18,7 @@
 #SBATCH --partition=a100_short,gl40s_short,gpu4_medium,gpu8_medium
 #SBATCH --gres=gpu:1
 # nodes with an unusable GPU (see run_sessions.sbatch)
-#SBATCH --exclude=a100-4012,a100-4033,gn-0020
+#SBATCH --exclude=a100-4012,a100-4033,gn-0020,gl40s-8009
 #SBATCH --mem=64G
 #SBATCH --time=12:00:00
 #SBATCH --output=logs/%x_%j.out

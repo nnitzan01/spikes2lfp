@@ -28,7 +28,7 @@
 #SBATCH --gres=gpu:1
 # nodes with an unusable GPU ("CUDA-capable device(s) is/are busy or unavailable"; on gn-0020 an
 # uncorrectable ECC error), Oct 2026
-#SBATCH --exclude=a100-4012,a100-4033,gn-0020
+#SBATCH --exclude=a100-4012,a100-4033,gn-0020,gl40s-8009
 # memory: the timing session (1047969464) peaked at 26 GB
 #SBATCH --mem=48G
 #SBATCH --time=1-00:00:00

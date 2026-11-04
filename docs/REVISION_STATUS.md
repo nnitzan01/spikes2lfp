@@ -434,7 +434,6 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
   the descriptive maps; use mean-baseline total attribution for "which units the model depends on";
   run `attribution_baseline` on all sessions. To decide.
 - Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
-- 55 of 89 `baselines` tasks left no `baselines.npz`: find out why and resubmit.
 
 ---
 
@@ -447,11 +446,13 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
   (test one session first with `--array=1`).
 - Figures: `pool_sessions.ipynb` via nbconvert on `cpu_short` (see `cluster/README.md`);
   `ATTR_MEASURE`, `DECODER_PERMUTATIONS` environment variables.
-- Excluded bad GPU nodes: a100-4012, a100-4033, gn-0020.
+- Excluded bad GPU nodes: a100-4012, a100-4033, gn-0020, gl40s-8009.
 
 ---
 
 ## 7. Change log
+- **2026-11-04** 55 `baselines` tasks failed within seconds on node gl40s-8009 (GPU unusable);
+  node excluded in both sbatch files; resubmitting. Attribution baseline: 1 h 23 min per session.
 - **2026-11-04** Training-length, attribution-baseline (one session) and 34-session baselines
   reviewed (section 4). Baselines: `--lstm-epochs`, `--lstm-targets`. `attribution_baseline` pooled.
   Added `experiments/summarize.py`.
