@@ -65,31 +65,23 @@ def n_removed(fraction, n_units):
     return max(1, int(round(fraction * n_units)))
 
 
-def unit_scores(pipeline, targets):
-    """Every measure's per-unit score: {measure: units x channels x targets}, NaN for targets not in `targets`."""
+def coupling_scores(pipeline, Y):
+    """
+    The measures that don't need the model, for the targets in the columns of Y (bins x targets),
+    from the training block: {measure: units x targets}.
+    """
     counts, X = pipeline.active_counts.spkMat, pipeline.active_spikes.spkMat
-    Y3 = pipeline.active_lfp.lfpMat
-    n_bins, n_ch, n_tg = Y3.shape
-    n_units = counts.shape[1]
+    n_units, n_targets = counts.shape[1], Y.shape[1]
     train = chunk_bins(pipeline.split['train'])
-    Y = Y3[:, :, targets].reshape(n_bins, n_ch * len(targets))
-
-    def per_model(x):                    # (units x n_ch * len(targets)) -> units x channels x all targets
-        out = np.full((n_units, n_ch, n_tg), np.nan)
-        out[:, :, targets] = x.reshape(n_units, n_ch, len(targets))
-        return out
 
     def per_unit(x):
-        return per_model(np.repeat(np.asarray(x)[:, None], n_ch * len(targets), axis=1))
+        return np.repeat(np.asarray(x, dtype=float)[:, None], n_targets, axis=1)
 
     scores = {}
-    attr = np.load(pipeline.dirs.attrs / 'unit_attribution_train.npz')      # channels x targets x units
-    scores['attribution'] = np.moveaxis(attr['mean_abs'], 2, 0)
-    scores['attribution_per_spike'] = np.abs(np.moveaxis(attr['per_spike'], 2, 0))
     log('spike-triggered targets and correlations')
     lp = cm.lagged_products(counts, Y, train, STA_LAGS)
-    scores['stlfp'] = per_model(cm.max_abs_over_lags(cm.spike_triggered_target(lp)))
-    scores['spike_lfp_correlation'] = per_model(cm.max_abs_over_lags(cm.spike_lfp_correlation(lp)))
+    scores['stlfp'] = cm.max_abs_over_lags(cm.spike_triggered_target(lp))
+    scores['spike_lfp_correlation'] = cm.max_abs_over_lags(cm.spike_lfp_correlation(lp))
     scores['population_coupling'] = per_unit(cm.population_coupling(counts, train))
     scores['firing_rate'] = per_unit(cm.firing_rate(counts, train, config.BIN_SIZE))
     log('lagged ridge')
@@ -98,7 +90,26 @@ def unit_scores(pipeline, targets):
     step = config.RIDGE_TRAIN_STEP
     val = chunk_bins(pipeline.split['val'])
     _, W, _, _ = fit_select(X, Y, basis, train[::step], val[::step], config.RIDGE_ALPHAS)
-    scores['ridge_weight'] = per_model(cm.ridge_weight_norms(W, basis.shape[1]))
+    scores['ridge_weight'] = cm.ridge_weight_norms(W, basis.shape[1])
+    return scores
+
+
+def unit_scores(pipeline, targets):
+    """Every measure's per-unit score: {measure: units x channels x targets}, NaN for targets not in `targets`."""
+    Y3 = pipeline.active_lfp.lfpMat
+    n_bins, n_ch, n_tg = Y3.shape
+    n_units = pipeline.active_counts.spkMat.shape[1]
+
+    def per_model(x):                    # (units x n_ch * len(targets)) -> units x channels x all targets
+        out = np.full((n_units, n_ch, n_tg), np.nan)
+        out[:, :, targets] = x.reshape(n_units, n_ch, len(targets))
+        return out
+
+    attr = np.load(pipeline.dirs.attrs / 'unit_attribution_train.npz')      # channels x targets x units
+    scores = {'attribution': np.moveaxis(attr['mean_abs'], 2, 0),
+              'attribution_per_spike': np.abs(np.moveaxis(attr['per_spike'], 2, 0))}
+    Y = Y3[:, :, targets].reshape(n_bins, n_ch * len(targets))
+    scores.update({m: per_model(s) for m, s in coupling_scores(pipeline, Y).items()})
     return scores
 
 

@@ -196,7 +196,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
 |---|---|---|
-| Ground-truth simulation (synthetic LFP from known real spike trains through laminar kernels with lags, shared arousal term, redundant units); score recovery for instantaneous IG, sequence IG, ridge, stLFP | R3 #7, R2 #2 | ⬜ `experiments/simulation.py` |
+| Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 code ready (`experiments/simulation.py`), not run |
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | 🟡 code ready (`experiments/region_ablation.py`), not run |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
@@ -451,6 +451,8 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
 ---
 
 ## 7. Change log
+- **2026-11-04** Ground-truth simulation built and tested on synthetic data (`experiments/simulation.py`;
+  `python -m experiments.summarize simulation`).
 - **2026-11-04** 55 `baselines` tasks failed within seconds on node gl40s-8009 (GPU unusable);
   node excluded in both sbatch files; resubmitting. Attribution baseline: 1 h 23 min per session.
 - **2026-11-04** Training-length, attribution-baseline (one session) and 34-session baselines

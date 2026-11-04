@@ -43,6 +43,22 @@ MEASURES = ['attribution_mean_baseline', 'attribution_mean_baseline_per_spike', 
             'attribution_per_spike', 'ridge_weight', 'spike_lfp_correlation']
 
 
+def attribute_with_retries(model, X, ends, baseline, batch_windows, **kwargs):
+    """
+    attribute_targets with IG_N_STEPS integration steps, redone with 4x the steps (up to
+    IG_MAX_STEPS) while the completeness error exceeds IG_MAX_ERROR, as in the attr stage.
+    Returns (result, completeness error, steps).
+    """
+    steps = config.IG_N_STEPS
+    while True:
+        ig = SequenceIG(model.to(X.device), n_steps=steps, max_sequences=config.IG_MAX_SEQUENCES)
+        res = attribute_targets(ig, X, ends, config.ATTR_HISTORY, baseline=baseline, batch_windows=batch_windows, **kwargs)
+        err = relative_completeness_error(res['f_x'], res['f_b'], res['delta'])
+        if err <= config.IG_MAX_ERROR or steps >= config.IG_MAX_STEPS:
+            return res, err, steps
+        steps = min(4 * steps, config.IG_MAX_STEPS)
+
+
 def mean_baseline_attribution(pipeline, targets):
     """Mean-baseline IG of the training-block targets: per-unit summaries (channels x targets x units) and completeness."""
     t = pipeline.attr_targets
@@ -55,16 +71,8 @@ def mean_baseline_attribution(pipeline, targets):
     out['completeness'], out['n_steps'] = np.full(shape, np.nan), np.zeros(shape, int)
     for band in targets:
         for chan in range(n_ch):
-            steps = config.IG_N_STEPS
-            while True:
-                ig = SequenceIG(pipeline.models[chan, band].model.to(pipeline.device), n_steps=steps,
-                                max_sequences=config.IG_MAX_SEQUENCES)
-                res = attribute_targets(ig, X, t['sampled_train'], config.ATTR_HISTORY, baseline=baseline,
-                                        batch_windows=pipeline.ig_batch)
-                err = relative_completeness_error(res['f_x'], res['f_b'], res['delta'])
-                if err <= config.IG_MAX_ERROR or steps >= config.IG_MAX_STEPS:
-                    break
-                steps = min(4 * steps, config.IG_MAX_STEPS)
+            res, err, steps = attribute_with_retries(pipeline.models[chan, band].model, X, t['sampled_train'], baseline,
+                                                     pipeline.ig_batch)
             summary = unit_summaries(res['total'], t['sampled_train_spikes'])
             out['mean_abs'][chan, band], out['per_spike'][chan, band] = summary['mean_abs'], summary['per_spike']
             out['completeness'][chan, band], out['n_steps'][chan, band] = err, steps

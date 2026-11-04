@@ -6,6 +6,7 @@ usage (from the repo root, after source cluster/env.sh):
     python -m experiments.summarize training_length [--session 1047969464]
     python -m experiments.summarize attribution_baseline [--session 1047969464]
     python -m experiments.summarize baselines          # every session with baselines.npz
+    python -m experiments.summarize simulation [--session 1047969464]
 """
 import argparse
 
@@ -80,6 +81,20 @@ def attribution_baseline(session_id):
     print('Spearman with firing rate    ', channel_median(d['spearman_firing_rate'], ch)[targets])
 
 
+def simulation(session_id):
+    d = np.load(variables_dir(session_id) / 'simulation.npz')
+    measures, lag_measures = list(d['measures']), list(d['lag_measures'])
+    print(f'session {session_id}; mean over {d["r2"].shape[1]} draws of drivers')
+    for ci, c in enumerate(d['conditions']):
+        print(f'=== {c}: model test R2 {np.nanmean(d["r2"][ci]):.3f}')
+        print(f'{"":24s}' + ''.join(f'{m:>20s}' for m in d['metrics']))
+        for i, m in enumerate(measures):
+            print(f'{m:24s}' + ''.join(f'{np.nanmean(d[k][ci, :, i]):20.3f}' for k in d['metrics']))
+        for i, m in enumerate(lag_measures):
+            print(f'{m:24s} peak lag vs true latency: Spearman {np.nanmean(d["lag_spearman"][ci, :, i]):.2f}, '
+                  f'median error {np.nanmean(d["lag_error_ms"][ci, :, i]):.0f} ms')
+
+
 def baselines():
     sessions = [int(s) for s in open(paths.REPO_DIR / 'cluster' / 'sessions.txt').read().split()]
     keys = ['model_r2', 'r2_units', 'r2_units_instant', 'r2_regions', 'r2_stimulus_behaviour',
@@ -110,7 +125,7 @@ def baselines():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('what', choices=['training_length', 'attribution_baseline', 'baselines'])
+    parser.add_argument('what', choices=['training_length', 'attribution_baseline', 'baselines', 'simulation'])
     parser.add_argument('--session', type=int, default=1047969464)
     args = parser.parse_args()
     if args.what == 'baselines':

@@ -199,3 +199,43 @@ def test_attribution_baseline(pipeline_module, session_dir, monkeypatch):
     assert (out['completeness'][:, 0] <= 0.01).all() or (out['n_steps'][:, 0] == 400).all()
     assert out['r2_retrained'].shape == (len(ab.MEASURES), 1, 1, n_ch, 9)
     assert np.isfinite(out['spearman_zero_baseline'][:, 0]).all()
+
+
+def test_simulation(pipeline_module, session_dir):
+    from experiments import simulation as sim
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = sim.run(pipeline, conditions=['linear', 'nonlinear_arousal'], draws=1, n_drivers=3)
+    n_m = len(sim.MEASURES)
+    for m in sim.METRICS:
+        assert out[m].shape == (2, 1, n_m)
+    assert np.isfinite(out['auc']).all() and ((out['auc'] >= 0) & (out['auc'] <= 1)).all()
+    assert np.isfinite(out['r2']).all() and out['lag_error_ms'].shape == (2, 1, len(sim.LAG_MEASURES))
+    assert out['is_driver'].sum(axis=-1).tolist() == [[3], [3]]
+    # the same drivers in every condition, and the truth is zero outside them
+    np.testing.assert_array_equal(out['is_driver'][0], out['is_driver'][1])
+    assert (out['true_total'][~out['is_driver']] == 0).all()
+
+
+def test_simulated_kernels_and_truth():
+    from experiments import simulation as sim
+    h = sim.alpha_kernel(latency=5, tau=2, length=20)
+    assert h[:6].max() == 0 and h.argmax() == 7 and np.isclose(h.max(), 1)
+    # a kernel's attribution peak lag: oldest lag first, so the last row is lag 0
+    k = np.zeros((10, 2)); k[-1, 0] = 1; k[-4, 1] = 1
+    np.testing.assert_allclose(sim.kernel_peak_lag_ms(k), [0, 3 * sim.config.BIN_SIZE * 1e3])
+
+
+def test_simulation_metrics_of_a_perfect_and_a_confounded_measure():
+    from experiments import simulation as sim
+    rng = np.random.default_rng(0)
+    n = 50
+    true = dict(is_driver=np.arange(n) < 10, total=np.r_[rng.random(10) + 1, np.zeros(40)])
+    true['total_centred'], true['per_spike'] = true['total'], true['total'] * 2
+    confound = np.arange(40, 50)
+    scores = {m: true['total'] + 0.01 * rng.random(n) for m in sim.MEASURES}
+    scores['firing_rate'] = np.r_[np.zeros(40), np.ones(10)]          # credits only the confound units
+    out = sim.score_metrics(scores, true, confound)
+    perfect, confounded = sim.MEASURES.index('ig_zero'), sim.MEASURES.index('firing_rate')
+    np.testing.assert_allclose(out[:4, perfect], 1, atol=1e-9)
+    assert out[sim.METRICS.index('confound_percentile'), confounded] > 0.8
+    assert out[sim.METRICS.index('auc'), confounded] < 0.5
