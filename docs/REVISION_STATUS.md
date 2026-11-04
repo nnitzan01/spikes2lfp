@@ -455,6 +455,7 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
   `python -m experiments.summarize simulation`).
 - **2026-11-04** 55 `baselines` tasks failed within seconds on node gl40s-8009 (GPU unusable);
   node excluded in both sbatch files; resubmitting. Attribution baseline: 1 h 23 min per session.
+  HPC confirmed a GPU hardware error and drained the node; the exclusion stays as a safeguard.
 - **2026-11-04** Training-length, attribution-baseline (one session) and 34-session baselines
   reviewed (section 4). Baselines: `--lstm-epochs`, `--lstm-targets`. `attribution_baseline` pooled.
   Added `experiments/summarize.py`.
