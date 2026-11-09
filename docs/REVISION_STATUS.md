@@ -186,18 +186,18 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 ### Phase 2: the decisive analyses (set the framing)
 | Item | Answers | Status |
 |---|---|---|
-| **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | 🟡 one session run (`experiments/stimulus_clock.py`); 89 sessions to run |
-| **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | 🟡 one session run (`experiments/baselines.py`); 89 sessions to run |
+| **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | 🟡 89 sessions run (`experiments/stimulus_clock.py`); `summarize stimulus_clock` to review |
+| **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | ✅ 89 sessions (section 4); region-count LSTM only on session 1 |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
-| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 one session run (`analysis/coupling_measures.py`, `experiments/ranked_ablation.py`); session-level stats to add when pooling |
+| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); `summarize ranked_ablation` / `attribution_baseline` to review |
 | Framing decision after A and C | R1, R2 | ⬜ |
 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
 |---|---|---|
 | Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 code ready (`experiments/simulation.py`), not run |
-| Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | 🟡 code ready (`experiments/region_ablation.py`), not run |
+| Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | 🟡 89 sessions run (`experiments/region_ablation.py`); `summarize region_ablation` to review |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
@@ -361,20 +361,25 @@ Drop in R² when the top units by each measure are removed on the test block (in
   "alternative IG baseline", R3) would match the test: `experiments/attribution_baseline.py`
   (one session, broadband to 4–8 Hz).
 
-### Baselines over sessions (34 of 89 so far; per-session median over pooled channels, then median over sessions)
+### Baselines over all 89 sessions (per-session median over pooled channels, then median over sessions)
 | | Broadband | 0.5–4 | 4–8 |
 |---|---|---|---|
-| CNN-LSTM | 0.631 | 0.370 | 0.336 |
-| Ridge, units, 1 s lagged | 0.612 | 0.330 | 0.277 |
-| Ridge, units + stimulus + behaviour | 0.616 | 0.344 | 0.282 |
-| Ridge, regions + stimulus + behaviour | 0.554 | 0.301 | 0.265 |
-| Ridge, region counts | 0.502 | 0.172 | 0.140 |
-| Ridge, stimulus + behaviour | 0.267 | 0.271 | 0.210 |
-| Ridge, units, current bin only | 0.200 | 0.042 | 0.034 |
-- CNN-LSTM minus lagged unit ridge: +0.034 / +0.029 / +0.036, higher in 30 / 26 / 26 of 34 sessions,
-  Wilcoxon p < 0.001 for each. A small but consistent nonlinear gain; history is the larger factor
-  (0.20 → 0.61 for the linear model).
-- Covariates add ≈ 0.004 to the unit ridge.
+| CNN-LSTM | 0.631 | 0.380 | 0.320 |
+| Ridge, units + stimulus + behaviour | 0.600 | 0.339 | 0.271 |
+| Ridge, units, 1 s lagged | 0.598 | 0.321 | 0.266 |
+| Ridge, regions + stimulus + behaviour | 0.556 | 0.299 | 0.260 |
+| Ridge, region counts | 0.499 | 0.170 | 0.136 |
+| Ridge, stimulus + behaviour | 0.267 | 0.269 | 0.210 |
+| Ridge, units, current bin only | 0.201 | 0.040 | 0.034 |
+- CNN-LSTM minus lagged unit ridge (paired, per session): +0.027 / +0.028 / +0.042, higher in
+  80 / 67 / 72 of 89 sessions, Wilcoxon p < 0.001 for each. Against the strongest ridge (units +
+  stimulus + behaviour): +0.024 / +0.020 / +0.036, higher in 79 / 57 / 68 of 89 (p < 0.001).
+  The nonlinear gain is small but consistent, and relatively largest in the slow bands; history is
+  the larger factor (0.20 → 0.60 for the linear model).
+- Stimulus and behaviour alone reach the model's level in no session for broadband (89 / 89 lower)
+  and add ≈ 0.002 to the unit ridge.
+- Unit identity matters: region counts lose 0.13–0.19 against the CNN-LSTM (87–88 of 89 sessions).
+- Region-count CNN-LSTM: only session 1 (0.404 at 15 epochs); the other sessions ran with `--lstm none`.
 
 ### Training length (session 1047969464, channels 1–14)
 - Raising the epoch cap from 15 to 40: broadband +0.014 (higher on 13 of 14 channels; best epoch
@@ -451,6 +456,9 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
 ---
 
 ## 7. Change log
+- **2026-11-09** All 89-session experiment runs finished (baselines, stimulus_clock, ranked_ablation,
+  attribution_baseline, region_ablation); sessions re-pooled (89 sessions, 65,995 units). Baselines
+  reviewed (section 4). Added the 89-session summaries to `experiments/summarize.py`.
 - **2026-11-04** Ground-truth simulation built and tested on synthetic data (`experiments/simulation.py`;
   `python -m experiments.summarize simulation`).
 - **2026-11-04** 55 `baselines` tasks failed within seconds on node gl40s-8009 (GPU unusable);
