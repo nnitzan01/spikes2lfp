@@ -34,9 +34,7 @@ def variables_dir(session_id):
 
 def channel_median(a, ch):
     """Median over the pooled channels of a (... x channels x targets) array -> (... x targets)."""
-    with warnings.catch_warnings():         # targets, regions or measures that were not run are all NaN
-        warnings.simplefilter('ignore', RuntimeWarning)
-        return np.nanmedian(a[..., ch, :], axis=-2)
+    return np.nanmedian(a[..., ch, :], axis=-2)
 
 
 def training_length(session_id):
@@ -287,6 +285,7 @@ def main():
     parser.add_argument('--session', type=int, help='one session (default: every session where possible, '
                                                     'otherwise 1047969464)')
     args = parser.parse_args()
+    warnings.simplefilter('ignore', RuntimeWarning)     # targets, regions and measures not run are all-NaN slices
     if args.what in SESSION_SUMMARIES and (args.session or args.what not in ALL_SESSIONS):
         SESSION_SUMMARIES[args.what](args.session or 1047969464)
     else:

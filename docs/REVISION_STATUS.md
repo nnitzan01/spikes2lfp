@@ -190,14 +190,14 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | ✅ 89 sessions (section 4); region-count LSTM only on session 1 |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
-| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); `summarize ranked_ablation` / `attribution_baseline` to review |
+| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); attribution baseline reviewed (section 4); `summarize ranked_ablation` to review |
 | Framing decision after A and C | R1, R2 | ⬜ |
 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
 |---|---|---|
 | Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 code ready (`experiments/simulation.py`), not run |
-| Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | 🟡 89 sessions run (`experiments/region_ablation.py`); `summarize region_ablation` to review |
+| Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
@@ -406,6 +406,48 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
 - Mean-baseline per-spike attribution is poor (by construction: the baseline already contains the
   average drive). Completeness ≈ 0 at 50 steps; Spearman with the zero-baseline ranking 0.96 / 0.92 / 0.81.
 
+### Attribution baseline over all 89 sessions (`summarize attribution_baseline`)
+Inference ablation, mean fill: mean R² drop over 1–20% of units removed (median over sessions),
+paired difference from ridge weight, and sessions where the measure is best of the six:
+| | Broadband | 0.5–4 Hz | 4–8 Hz |
+|---|---|---|---|
+| Attribution, mean baseline | **0.360** (+0.017, 70/89, p 2e-8; best 63) | **0.235** (+0.033, 73/89, p 3e-11; best 61) | **0.227** (+0.047, 87/89, p 3e-16; best 84) |
+| Attribution, zero baseline | 0.324 (−0.019, 24/89) | 0.196 (−0.013, 33/89) | 0.196 (+0.019, 71/89) |
+| Ridge weight | 0.331 (best 18) | 0.207 (best 14) | 0.165 (best 2) |
+| Spike–LFP correlation | 0.321 (−0.011, 26/89) | 0.207 (−0.002, 43/89) | 0.155 (−0.013, 28/89) |
+| Attribution per spike (zero / mean baseline) | 0.287 / 0.207 | 0.147 / 0.157 | 0.130 / 0.130 |
+| Random | 0.016 at 10% | | |
+- **At inference, mean-baseline attribution is the best ranking in all three bands** and beats ridge
+  weights in most sessions. Zero-baseline attribution is slightly worse than ridge for broadband and
+  0.5–4 Hz and better for 4–8 Hz. Per-spike measures rank poorly here, as expected: removal tests
+  total contribution, and per spike discounts the rate.
+- **Retrained (broadband), ridge weight is ahead:** drop at 5% / 20% removed 0.073 / 0.173, vs
+  mean-baseline attribution 0.069 / 0.140 (−0.003, 31/89; −0.027, 6/89). Spike–LFP correlation is best
+  at 20% (0.196; +0.017, 70/89): removing every correlated unit takes away the redundant copies a
+  retrained model would otherwise use. Attribution measures what this model relies on; ridge weights
+  and correlation find information other units cannot replace. The paper should claim the former.
+- Completeness error ≈ 0. Spearman of the mean-baseline ranking with the zero-baseline one
+  0.95 / 0.94 / 0.94, with firing rate 0.65 / 0.48 / 0.51.
+
+### Region removal over all 89 sessions (`summarize region_ablation`; R² drop, median over sessions)
+| Region (median units) | Inference, broadband | 0.5–4 Hz | 4–8 Hz | Region alone | Retrained | Retrained + covariates |
+|---|---|---|---|---|---|---|
+| VISp (49) | 0.353 (89/89) | 0.123 | 0.081 | 0.385 | 0.084 (89/89) | 0.076 (89/89) |
+| Other visual cortex (230) | 0.108 (89/89) | 0.161 | 0.179 | 0.154 | 0.029 (89/89) | 0.025 (88/89) |
+| Hippocampus (198) | 0.024 (89/89) | 0.000 | 0.003 | 0.001 | 0.024 (87/89) | 0.016 (83/89) |
+| Thalamus (110; 84 sessions) | 0.004 | 0.007 | 0.011 | ≈ 0 | 0.002 (56/84) | 0.002 (51/84) |
+| Midbrain (112; 85 sessions) | 0.007 | 0.018 | 0.016 | ≈ 0 | 0.004 (60/85) | 0.001 (54/85) |
+| Other (18; 83 sessions) | 0.000 | 0.001 | 0.001 | ≈ 0 | 0.001 | 0.000 (n.s.) |
+- Single areas at inference (broadband / 4–8 Hz): VISl 0.023 / 0.038, VISal 0.012 / 0.024, VISpm
+  0.009 / 0.021; every subcortical area ≤ 0.006 (DG 0.006, APN 0.003 / 0.009, MRN, SUB, POST, SC ≈ 0).
+- **R3 #5:** the subcortical contributions (APN/MRN, DG/POST, thalamus, midbrain) are statistically
+  detectable in many sessions but ≤ 0.01 R², and they shrink further once stimulus timing, behaviour
+  and population activity are given to the model. Claims about them must be reworded or dropped.
+- **Hippocampus is the exception:** removing it costs 0.024 broadband in 87 of 89 retrained sessions,
+  0.016 with the covariates, but ≈ 0 for the 0.5–8 Hz envelopes, and it predicts nothing alone. Its
+  contribution is to the broadband signal only (faster components?); see the depth analysis (open).
+- Covariates add 0.001 to the full model; visual cortex carries the prediction (VISp alone 0.385).
+
 ---
 
 ## 5. Open issues and decisions
@@ -434,10 +476,11 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
-- **IG baseline for the importance claims.** Mean-baseline total attribution matches or beats every
-  other measure in the inference ablation (one session). Proposal: keep zero-baseline per_spike for
-  the descriptive maps; use mean-baseline total attribution for "which units the model depends on";
-  run `attribution_baseline` on all sessions. To decide.
+- **IG baseline for the importance claims.** Over 89 sessions, mean-baseline total attribution is the
+  best inference-time ranking in all three bands (section 4); ridge weight stays ahead when retrained.
+  Proposal: keep zero-baseline per_spike for the descriptive maps; use mean-baseline total
+  attribution for "which units the model depends on", stating that it measures reliance, not
+  irreplaceable information. To decide.
 - Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
 
 ---
@@ -456,6 +499,7 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
 ---
 
 ## 7. Change log
+- **2026-11-09** Attribution baseline and region removal reviewed over 89 sessions (section 4).
 - **2026-11-09** All 89-session experiment runs finished (baselines, stimulus_clock, ranked_ablation,
   attribution_baseline, region_ablation); sessions re-pooled (89 sessions, 65,995 units). Baselines
   reviewed (section 4). Added the 89-session summaries to `experiments/summarize.py`.
