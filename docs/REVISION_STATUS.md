@@ -186,17 +186,17 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 ### Phase 2: the decisive analyses (set the framing)
 | Item | Answers | Status |
 |---|---|---|
-| **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | 🟡 89 sessions run (`experiments/stimulus_clock.py`); `summarize stimulus_clock` to review |
+| **A. Stimulus clock:** template per condition from training blocks, residual R², per-presentation R², shuffle-within-condition and time-shift nulls, model trained on residual, spikes + template | R1, R3 #1 | ✅ 89 sessions (section 4) |
 | **B. Baselines:** lagged ridge (units instant / lagged, regions, stimulus, behaviour, combinations), region-rate LSTM (± behaviour) | R1, R3 #3 | ✅ 89 sessions (section 4); region-count LSTM only on session 1 |
 | B. CNN-only model | R3 #3 | ⬜ deferred |
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
-| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); attribution baseline reviewed (section 4); `summarize ranked_ablation` to review |
+| **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); ✅ 89 sessions with both IG baselines (section 4) |
 | Framing decision after A and C | R1, R2 | ⬜ |
 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
 |---|---|---|
-| Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 code ready (`experiments/simulation.py`), not run |
+| Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 run on session 1: ridge wins, but the CNN-LSTM underfits (R² 0.16–0.28); diagnosis and redesign needed |
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
@@ -406,6 +406,68 @@ Mean |attribution| with the training-mean IG baseline, in the ranked ablation (d
 - Mean-baseline per-spike attribution is poor (by construction: the baseline already contains the
   average drive). Completeness ≈ 0 at 50 steps; Spearman with the zero-baseline ranking 0.96 / 0.92 / 0.81.
 
+### Stimulus clock over all 89 sessions (`summarize stimulus_clock`; median over sessions)
+| | Broadband | 0.5–4 | 4–8 | 8–12 | 12–25 |
+|---|---|---|---|---|---|
+| Model | 0.631 | 0.380 | 0.320 | 0.133 | 0.157 |
+| Template (stimulus clock) | 0.373 | 0.230 | 0.171 | 0.056 | 0.065 |
+| Model − template (sessions > 0) | +0.248 (89/89) | +0.115 (83/89) | +0.122 (83/89) | +0.083 (79/89) | +0.091 (79/89) |
+| Residual R² (share of the template's leftover the model explains) | 0.408 | 0.157 | 0.130 | 0.084 | 0.082 |
+| Spikes swapped between same-image presentations | 0.153 | 0.101 | 0.036 | −0.044 | −0.019 |
+| Spikes shifted 30–120 s | −0.635 | −0.368 | −0.298 | −0.171 | −0.170 |
+| Retrained on the residual | 0.320 | 0.089 | 0.130 | | |
+| Spikes + template as input, gain over model | +0.006 (60/89) | +0.032 (78/89) | +0.029 (80/89) | | |
+- **The model is not a stimulus clock (R1, R3 #1).** The template accounts for 60–67% of the model's
+  R² (broadband to 4–8 Hz); the model beats it in 89 / 83 / 83 of 89 sessions and explains 41% of
+  the broadband variance the template leaves. With another same-image presentation's spikes it
+  falls to 0.153, below the template itself: its predictions follow the single trial.
+- Giving the model the template adds 0.006 broadband and ≈ 0.03 for 0.5–8 Hz: the model already
+  captures nearly all of the stimulus-locked component.
+- Per-presentation R² is negative for the band envelopes for both model and template (segments
+  ≈ 0.75 s are short for slow envelopes); report it for broadband only (model 0.595, template 0.392).
+- 8–12 and 12–25 Hz were retrained on session 1 only (`--retrain-targets 0,1,2`).
+
+### Ranked ablation over all 89 sessions (`summarize ranked_ablation`; zero-baseline attribution)
+Mean R² drop over 1–20% removed at inference; difference from ridge weight; sessions best of seven:
+| | Broadband | 0.5–4 Hz | 4–8 Hz |
+|---|---|---|---|
+| Ridge weight | **0.331** (best 46) | **0.207** (best 34) | 0.165 (best 15) |
+| Attribution | 0.324 (−0.019, 24/89; best 20) | 0.196 (−0.013, 33/89; best 24) | **0.196** (+0.019, 71/89; best 66) |
+| Spike–LFP correlation | 0.321 (best 21) | 0.207 (−0.002, n.s.; best 30) | 0.155 |
+| Attribution per spike | 0.287 | 0.147 | 0.130 |
+| Population coupling | 0.168 | 0.075 | 0.064 |
+| stLFP | 0.147 | 0.117 | 0.069 |
+| Firing rate | 0.053 | 0.032 | 0.046 |
+| Random | 0.017 at 10% | | |
+- Attribution, ridge weight and spike–LFP correlation form the top group; stLFP, population
+  coupling and firing rate are far behind (firing rate is near chance up to 5% removed).
+- Spearman with attribution: firing rate 0.76 / 0.69 / 0.69, correlation 0.56 / 0.46 / 0.44, ridge
+  0.54 / 0.42 / 0.35, stLFP ≈ 0.
+- With the mean baseline (next section) attribution moves to the top in all three bands.
+
+### Ground-truth simulation (session 1047969464, 3 draws of 40 drivers; `summarize simulation`)
+| | Linear | Nonlinear | Linear + arousal | Nonlinear + arousal |
+|---|---|---|---|---|
+| CNN-LSTM test R² (ceiling ≈ 0.7) | 0.164 | 0.171 | 0.273 | 0.284 |
+| AUC: ridge weight / IG zero / IG mean / correlation | 0.91 / 0.73 / 0.75 / 0.76 | 0.89 / 0.73 / 0.75 / 0.77 | 0.90 / 0.70 / 0.72 / 0.70 | 0.86 / 0.70 / 0.72 / 0.70 |
+| Precision (top 40): ridge / IG mean | 0.68 / 0.36 | 0.68 / 0.31 | 0.65 / 0.28 | 0.64 / 0.28 |
+| Spearman with true total: ridge / IG zero | 0.83 / 0.80 | 0.81 / 0.79 | 0.81 / 0.77 | 0.78 / 0.76 |
+| Spearman with true per-spike effect: ridge / IG per spike | 0.82 / 0.61 | 0.82 / 0.58 | 0.82 / 0.54 | 0.82 / 0.55 |
+| Confound percentile: ridge / IG zero / correlation (0.5 = none) | 0.64 / 0.76 / 0.80 | 0.67 / 0.77 / 0.81 | 0.75 / 0.85 / 0.98 | 0.77 / 0.87 / 0.98 |
+| Peak lag vs true latency, IG zero: Spearman / median error | 0.20 / 98 ms | 0.08 / 106 ms | 0.13 / 110 ms | 0.04 / 109 ms |
+- **As run, the simulation does not favour attribution:** ridge weights find the drivers far better
+  (AUC ≈ 0.9 vs 0.7), recover per-spike effects better, and credit running-correlated non-drivers
+  less. Lag recovery from the attribution kernels is near chance. Among the drivers, the
+  zero-baseline attribution ranks true totals about as well as ridge (0.80 vs 0.83).
+- **Not yet a fair test:** the CNN-LSTM reaches R² 0.16–0.28 where ≈ 0.7 is explainable, so its
+  attributions come from an underfit model; and the generative model (a sum of linear lagged
+  kernels, mildly rectified) is exactly the ridge's model class. Needed before using it: the ridge's
+  R² on the same targets, the model's best epochs, a longer training cap, and a condition where
+  the ridge is misspecified. See open issues.
+- Confound credit is real for both: with an arousal component, units correlated with running are
+  credited (IG 0.85–0.91, ridge 0.75–0.77, correlation 0.98). Attribution measures predictive
+  reliance, not causal drive; the text must say so.
+
 ### Attribution baseline over all 89 sessions (`summarize attribution_baseline`)
 Inference ablation, mean fill: mean R² drop over 1–20% of units removed (median over sessions),
 paired difference from ridge weight, and sessions where the measure is best of the six:
@@ -481,6 +543,9 @@ paired difference from ridge weight, and sessions where the measure is best of t
   Proposal: keep zero-baseline per_spike for the descriptive maps; use mean-baseline total
   attribution for "which units the model depends on", stating that it measures reliance, not
   irreplaceable information. To decide.
+- **Ground-truth simulation underfit** (section 4): the CNN-LSTM reaches R² 0.16–0.28 of ≈ 0.7 and
+  ridge recovers the drivers far better. Diagnose (ridge R², best epochs, more epochs) and add a
+  condition the ridge can't express before drawing conclusions. To decide.
 - Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
 
 ---
@@ -499,6 +564,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-09** Stimulus clock, ranked ablation (89 sessions) and the simulation reviewed (section 4).
 - **2026-11-09** Attribution baseline and region removal reviewed over 89 sessions (section 4).
 - **2026-11-09** All 89-session experiment runs finished (baselines, stimulus_clock, ranked_ablation,
   attribution_baseline, region_ablation); sessions re-pooled (89 sessions, 65,995 units). Baselines
