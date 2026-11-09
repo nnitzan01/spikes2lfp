@@ -464,6 +464,24 @@ Mean R² drop over 1–20% removed at inference; difference from ridge weight; s
   kernels, mildly rectified) is exactly the ridge's model class. Needed before using it: the ridge's
   R² on the same targets, the model's best epochs, a longer training cap, and a condition where
   the ridge is misspecified. See open issues.
+- **Rerun, 'gain' and 'burst' (40-epoch cap, `simulation_nonlinear.npz`):**
+  | | Gain | Burst |
+  |---|---|---|
+  | CNN-LSTM R² per draw (best epoch) | 0.452 (39), 0.218 (21), 0.034 (11) | 0.095 (20), 0.316 (37), 0.185 (10) |
+  | Lagged unit ridge R² per draw | 0.152, 0.192, −0.317 | 0.228, 0.173, −0.069 |
+  | AUC: IG mean / IG zero / ridge weight | 0.72 / 0.70 / 0.71 | 0.82 / 0.82 / 0.88 |
+  | Precision: IG mean / ridge | 0.33 / 0.40 | 0.42 / 0.61 |
+  | Spearman with true total: IG zero / ridge | **0.84** / 0.64 | 0.72 / **0.90** |
+  | Confound percentile (no arousal term): IG zero / ridge / firing rate | 0.77 / 0.46 / 0.87 | 0.75 / 0.60 / 0.87 |
+  | Drivers' attribution peak lag, median (true) | 40 ms (131) | 24 ms (131) |
+  - The CNN-LSTM now beats the ridge (gain 0.235 vs 0.009 on average), far more than in the real
+    data (+0.03), yet attribution only ties ridge weight at finding the gain drivers and loses for
+    burst. Model fits are unstable across draws: two runs still improving at the 40-epoch cap, two
+    stopped early (epochs 10–11) at low R². Negative ridge R² in draw 2 suggests the drivers' rates
+    drift between the training and test blocks.
+  - Attribution peaks are systematically too early (24–40 ms vs 131 ms true), not at lag 0 and not
+    random: the model's learned timing is compressed. The lag claims (R2 #2) cannot rest on this yet.
+  - IG credits high-rate non-drivers even with no arousal component (0.75–0.77); ridge does not.
 - Confound credit is real for both: with an arousal component, units correlated with running are
   credited (IG 0.85–0.91, ridge 0.75–0.77, correlation 0.98). Attribution measures predictive
   reliance, not causal drive; the text must say so.
