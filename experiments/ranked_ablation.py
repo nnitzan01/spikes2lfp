@@ -49,7 +49,7 @@ from sklearn.metrics import r2_score
 import config
 import paths
 from analysis import coupling_measures as cm
-from analysis.lagged_ridge import fit_select, raised_cosine_basis
+from analysis.lagged_ridge import fit_select, predict_lagged, r2_columns, raised_cosine_basis
 from preprocess_data import take_chunks
 from run_session import SessionPipeline, log, save_npz
 from splits import chunk_bins
@@ -65,10 +65,11 @@ def n_removed(fraction, n_units):
     return max(1, int(round(fraction * n_units)))
 
 
-def coupling_scores(pipeline, Y):
+def coupling_scores(pipeline, Y, test_r2=False):
     """
     The measures that don't need the model, for the targets in the columns of Y (bins x targets),
-    from the training block: {measure: units x targets}.
+    from the training block: {measure: units x targets}; with test_r2, also the lagged ridge's
+    test R2 per target: (scores, r2).
     """
     counts, X = pipeline.active_counts.spkMat, pipeline.active_spikes.spkMat
     n_units, n_targets = counts.shape[1], Y.shape[1]
@@ -89,9 +90,12 @@ def coupling_scores(pipeline, Y):
     basis = raised_cosine_basis(n_lags, config.RIDGE_N_BASIS)
     step = config.RIDGE_TRAIN_STEP
     val = chunk_bins(pipeline.split['val'])
-    _, W, _, _ = fit_select(X, Y, basis, train[::step], val[::step], config.RIDGE_ALPHAS)
+    path, W, _, _ = fit_select(X, Y, basis, train[::step], val[::step], config.RIDGE_ALPHAS)
     scores['ridge_weight'] = cm.ridge_weight_norms(W, basis.shape[1])
-    return scores
+    if not test_r2:
+        return scores
+    test = chunk_bins(pipeline.split['test'])
+    return scores, r2_columns(Y[test], predict_lagged(path, W, X, basis, test))
 
 
 def unit_scores(pipeline, targets):

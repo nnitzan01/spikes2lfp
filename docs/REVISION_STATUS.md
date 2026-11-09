@@ -196,7 +196,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
 |---|---|---|
-| Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 run on session 1: ridge wins, but the CNN-LSTM underfits (R² 0.16–0.28); diagnosis and redesign needed |
+| Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 run on session 1: ridge wins, but the CNN-LSTM underfits (R² 0.16–0.28); rerun with diagnostics, 40 epochs, 'gain' and 'burst' conditions |
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
@@ -523,6 +523,11 @@ paired difference from ridge weight, and sessions where the measure is best of t
   training; last 20% as test; all 9 targets attributed.
 - per_spike is the main attribution measure.
 - PYR vs INT decoding claim dropped (2026-11-03).
+- **IG baseline (2026-11-09):** claims about which units the model depends on use mean-baseline
+  total attribution (`attribution_baseline.npz`, best inference-time ranking in all three bands over
+  89 sessions), worded as reliance of the model, not irreplaceable information (ridge weight and
+  spike–LFP correlation lead when the model is retrained). Zero-baseline per_spike stays the
+  measure for the descriptive maps.
 - Layer-controlled cluster decoder tabled (supplementary at most).
 
 ### Open
@@ -538,14 +543,12 @@ paired difference from ridge weight, and sessions where the measure is best of t
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
-- **IG baseline for the importance claims.** Over 89 sessions, mean-baseline total attribution is the
-  best inference-time ranking in all three bands (section 4); ridge weight stays ahead when retrained.
-  Proposal: keep zero-baseline per_spike for the descriptive maps; use mean-baseline total
-  attribution for "which units the model depends on", stating that it measures reliance, not
-  irreplaceable information. To decide.
 - **Ground-truth simulation underfit** (section 4): the CNN-LSTM reaches R² 0.16–0.28 of ≈ 0.7 and
-  ridge recovers the drivers far better. Diagnose (ridge R², best epochs, more epochs) and add a
-  condition the ridge can't express before drawing conclusions. To decide.
+  ridge recovers the drivers far better. Rerun with the diagnostics (ridge R², best epochs, each
+  driver's attribution peak lag), a 40-epoch cap, and two conditions the ridge can't express
+  ('gain': half the drivers only modulate the other half's drive; 'burst': only spikes within
+  20 ms of the unit's previous spike count). Truth is now counterfactual (signal change with a
+  driver's drive set to 0 / its mean), defined for every condition.
 - Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
 
 ---
@@ -564,6 +567,9 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-09** Decided: mean-baseline total attribution for the importance claims. Simulation: diagnostics
+  (ridge R², best epoch, attribution peak lags), `--epochs`, `--output`, 'gain' and 'burst' conditions,
+  counterfactual truth.
 - **2026-11-09** Stimulus clock, ranked ablation (89 sessions) and the simulation reviewed (section 4).
 - **2026-11-09** Attribution baseline and region removal reviewed over 89 sessions (section 4).
 - **2026-11-09** All 89-session experiment runs finished (baselines, stimulus_clock, ranked_ablation,

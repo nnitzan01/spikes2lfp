@@ -84,17 +84,28 @@ def attribution_baseline(session_id):
 
 
 def simulation(session_id):
-    d = np.load(variables_dir(session_id) / 'simulation.npz')
-    measures, lag_measures = list(d['measures']), list(d['lag_measures'])
-    print(f'session {session_id}; mean over {d["r2"].shape[1]} draws of drivers')
-    for ci, c in enumerate(d['conditions']):
-        print(f'=== {c}: model test R2 {np.nanmean(d["r2"][ci]):.3f}')
-        print(f'{"":24s}' + ''.join(f'{m:>20s}' for m in d['metrics']))
-        for i, m in enumerate(measures):
-            print(f'{m:24s}' + ''.join(f'{np.nanmean(d[k][ci, :, i]):20.3f}' for k in d['metrics']))
-        for i, m in enumerate(lag_measures):
-            print(f'{m:24s} peak lag vs true latency: Spearman {np.nanmean(d["lag_spearman"][ci, :, i]):.2f}, '
-                  f'median error {np.nanmean(d["lag_error_ms"][ci, :, i]):.0f} ms')
+    for f in sorted(variables_dir(session_id).glob('simulation*.npz')):
+        d = np.load(f)
+        measures, lag_measures = list(d['measures']), list(d['lag_measures'])
+        print(f'##### {f.name}: session {session_id}; mean over {d["r2"].shape[1]} draws of drivers')
+        for ci, c in enumerate(d['conditions']):
+            line = f'=== {c}: model test R2 {np.nanmean(d["r2"][ci]):.3f}'
+            if 'r2_ridge' in d:
+                line += (f', lagged unit ridge {np.nanmean(d["r2_ridge"][ci]):.3f}; '
+                         f'best epochs {d["best_epoch"][ci].astype(int).tolist()}')
+            print(line)
+            print(f'{"":24s}' + ''.join(f'{m:>20s}' for m in d['metrics']))
+            for i, m in enumerate(measures):
+                print(f'{m:24s}' + ''.join(f'{np.nanmean(d[k][ci, :, i]):20.3f}' for k in d['metrics']))
+            for i, m in enumerate(lag_measures):
+                line = (f'{m:24s} peak lag vs true latency: Spearman {np.nanmean(d["lag_spearman"][ci, :, i]):.2f}, '
+                        f'median error {np.nanmean(d["lag_error_ms"][ci, :, i]):.0f} ms')
+                if 'lag_ms' in d:
+                    drv = d['is_driver'][ci]
+                    est, true = d['lag_ms'][ci, :, i][drv], d['true_lag_ms'][ci][drv]
+                    line += (f'; drivers\' peak lag median {np.median(est):.0f} ms (true {np.median(true):.0f}), '
+                             f'at lag 0 for {np.mean(est == 0):.0%}, beyond 500 ms for {np.mean(est > 500):.0%}')
+                print(line)
 
 
 def sessions():

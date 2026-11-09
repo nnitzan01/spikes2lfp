@@ -112,6 +112,7 @@ EXPERIMENT=ranked_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch  
 EXPERIMENT=region_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch  # each region removed, at inference and retrained, with and without covariates
 EXPERIMENT=attribution_baseline sbatch --array=1 cluster/run_experiment.sbatch # mean-baseline IG in the ranked ablation (after ranked_ablation)
 EXPERIMENT=simulation sbatch --array=1 cluster/run_experiment.sbatch           # ground truth: synthetic LFP from real spikes, recovered by attribution vs simpler measures
+EXPERIMENT=simulation EXTRA_ARGS="--conditions gain,burst --epochs 40 --output simulation_nonlinear" sbatch --array=1 cluster/run_experiment.sbatch   # conditions the ridge can't express
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch

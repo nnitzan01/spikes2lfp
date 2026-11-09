@@ -204,16 +204,19 @@ def test_attribution_baseline(pipeline_module, session_dir, monkeypatch):
 def test_simulation(pipeline_module, session_dir):
     from experiments import simulation as sim
     pipeline = _trained_pipeline(pipeline_module, session_dir)
-    out = sim.run(pipeline, conditions=['linear', 'nonlinear_arousal'], draws=1, n_drivers=3)
-    n_m = len(sim.MEASURES)
+    conditions = ['linear', 'nonlinear_arousal', 'gain', 'burst']
+    out = sim.run(pipeline, conditions=conditions, draws=1, n_drivers=4, num_epochs=2)
+    n_c, n_m = len(conditions), len(sim.MEASURES)
     for m in sim.METRICS:
-        assert out[m].shape == (2, 1, n_m)
+        assert out[m].shape == (n_c, 1, n_m)
     assert np.isfinite(out['auc']).all() and ((out['auc'] >= 0) & (out['auc'] <= 1)).all()
-    assert np.isfinite(out['r2']).all() and out['lag_error_ms'].shape == (2, 1, len(sim.LAG_MEASURES))
-    assert out['is_driver'].sum(axis=-1).tolist() == [[3], [3]]
-    # the same drivers in every condition, and the truth is zero outside them
-    np.testing.assert_array_equal(out['is_driver'][0], out['is_driver'][1])
-    assert (out['true_total'][~out['is_driver']] == 0).all()
+    assert np.isfinite(out['r2']).all() and np.isfinite(out['r2_ridge']).all() and (out['best_epoch'] <= 1).all()
+    assert out['lag_error_ms'].shape == (n_c, 1, len(sim.LAG_MEASURES))
+    assert out['lag_ms'].shape == (n_c, 1, len(sim.LAG_MEASURES), out['is_driver'].shape[-1])
+    assert out['is_driver'].sum(axis=-1).tolist() == [[4]] * n_c
+    # the same drivers in every condition but 'burst', and the truth is zero outside them
+    np.testing.assert_array_equal(out['is_driver'][0], out['is_driver'][2])
+    assert (out['true_total'][~out['is_driver']] == 0).all() and (out['true_total'][out['is_driver']] > 0).all()
 
 
 def test_simulated_kernels_and_truth():
@@ -223,6 +226,28 @@ def test_simulated_kernels_and_truth():
     # a kernel's attribution peak lag: oldest lag first, so the last row is lag 0
     k = np.zeros((10, 2)); k[-1, 0] = 1; k[-4, 1] = 1
     np.testing.assert_allclose(sim.kernel_peak_lag_ms(k), [0, 3 * sim.config.BIN_SIZE * 1e3])
+
+
+def test_simulated_conditions_and_counterfactual_truth():
+    from experiments import simulation as sim
+    np.testing.assert_array_equal(sim.burst_counts([1, 0, 1, 0, 0, 0, 2, 1], 2), [0, 0, 1, 0, 0, 0, 0, 1])
+    rng = np.random.default_rng(0)
+    drives = rng.normal(size=(1000, 4))
+    train, ends = np.arange(800), np.arange(800, 1000)
+    # linear: the contribution with the drive set to 0 is the (normalised) drive itself
+    signal, stats = sim.combine(drives, 'linear', train)
+    sd = stats['signal'][1]
+    true = sim.truth(dict(drivers=np.array([0, 2, 5, 7]), drives=drives, kind='linear', stats=stats,
+                          peak_lag=np.ones(4)), 10, ends, train, np.ones((len(ends), 10)))
+    np.testing.assert_allclose(true['total'][[0, 2, 5, 7]], np.abs(drives[ends]).mean(axis=0) / sd)
+    assert true['total'][[1, 3]].sum() == 0
+    # gain: the modulating half has no linear relation with the signal, yet a counterfactual effect
+    signal, stats = sim.combine(drives, 'gain', train)
+    lin = np.linalg.lstsq(np.c_[drives, np.ones(1000)], signal, rcond=None)[0]
+    assert np.abs(lin[2:4]).max() < 0.1 < np.abs(lin[:2]).min()
+    true = sim.truth(dict(drivers=np.arange(4), drives=drives, kind='gain', stats=stats, peak_lag=np.ones(4)),
+                     4, ends, train, np.ones((len(ends), 4)))
+    assert (true['total'][2:] > 0.2).all()
 
 
 def test_simulation_metrics_of_a_perfect_and_a_confounded_measure():
