@@ -7,6 +7,7 @@ the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | stimulus_clock
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
+    python -m experiments.summarize simulation --pattern 'simulation_long*'     # some of the simulation files
     python -m experiments.summarize attribution_baseline --session 1047969464
 """
 import argparse
@@ -83,13 +84,15 @@ def attribution_baseline(session_id):
     print('Spearman with firing rate    ', channel_median(d['spearman_firing_rate'], ch)[targets])
 
 
-def simulation(session_id):
-    for f in sorted(variables_dir(session_id).glob('simulation*.npz')):
+def simulation(session_id, pattern='simulation*'):
+    for f in sorted(variables_dir(session_id).glob(f'{pattern}.npz')):
         d = np.load(f)
         measures, lag_measures = list(d['measures']), list(d['lag_measures'])
         print(f'##### {f.name}: session {session_id}; mean over {d["r2"].shape[1]} draws of drivers')
         for ci, c in enumerate(d['conditions']):
             line = f'=== {c}: model test R2 {np.nanmean(d["r2"][ci]):.3f}'
+            if 'r2_ceiling' in d:
+                line += f' (noise-free ceiling {np.nanmean(d["r2_ceiling"][ci]):.3f})'
             if 'r2_ridge' in d:
                 line += (f', lagged unit ridge {np.nanmean(d["r2_ridge"][ci]):.3f}; '
                          f'best epochs {d["best_epoch"][ci].astype(int).tolist()}')
@@ -295,10 +298,12 @@ def main():
     parser.add_argument('what', choices=sorted(set(SESSION_SUMMARIES) | set(ALL_SESSIONS)))
     parser.add_argument('--session', type=int, help='one session (default: every session where possible, '
                                                     'otherwise 1047969464)')
+    parser.add_argument('--pattern', default='simulation*', help='simulation: the files to show (glob, without .npz)')
     args = parser.parse_args()
     warnings.simplefilter('ignore', RuntimeWarning)     # targets, regions and measures not run are all-NaN slices
     if args.what in SESSION_SUMMARIES and (args.session or args.what not in ALL_SESSIONS):
-        SESSION_SUMMARIES[args.what](args.session or 1047969464)
+        kwargs = dict(pattern=args.pattern) if args.what == 'simulation' else {}
+        SESSION_SUMMARIES[args.what](args.session or 1047969464, **kwargs)
     else:
         ALL_SESSIONS[args.what]()
 

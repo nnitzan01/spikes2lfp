@@ -482,6 +482,26 @@ Mean R² drop over 1–20% removed at inference; difference from ridge weight; s
   - Attribution peaks are systematically too early (24–40 ms vs 131 ms true), not at lag 0 and not
     random: the model's learned timing is compressed. The lag claims (R2 #2) cannot rest on this yet.
   - IG credits high-rate non-drivers even with no arousal component (0.75–0.77); ridge does not.
+- **Rerun, original conditions at a 40-epoch cap (`simulation_v2.npz`):**
+  | | Linear | Nonlinear | Linear + arousal | Nonlinear + arousal |
+  |---|---|---|---|---|
+  | CNN-LSTM R² (15-epoch run) | 0.281 (0.164) | 0.245 (0.171) | 0.342 (0.273) | 0.314 (0.284) |
+  | Lagged unit ridge R² | 0.119 | 0.052 | 0.203 | 0.187 |
+  | AUC: IG mean / ridge | 0.87 / 0.91 | 0.83 / 0.89 | 0.83 / 0.90 | 0.79 / 0.86 |
+  | Spearman with true total: IG zero / ridge | **0.92** / 0.83 | **0.89** / 0.82 | **0.90** / 0.81 | **0.86** / 0.79 |
+  | Spearman with true per-spike effect: IG per spike / ridge | 0.80 / 0.80 | 0.78 / 0.81 | 0.80 / 0.80 | 0.73 / 0.80 |
+  | Peak-lag Spearman, IG zero (median peak; true 131 ms) | 0.52 (68 ms) | 0.30 (24 ms) | 0.26 (50 ms) | 0.15 (16 ms) |
+  - **Better-trained models give better attribution:** every attribution metric improved with the
+    longer cap (AUC 0.73 → 0.87, lag Spearman 0.20 → 0.52 for 'linear'); among drivers, attribution
+    now ranks true totals better than ridge and per-spike effects as well as ridge. Most best epochs
+    are still at the cap (39), so the models have not converged.
+  - The CNN-LSTM beats the ridge in every condition, by 0.08–0.23, even when the signal is linear:
+    the ridge's 8 raised-cosine functions over 1 s cannot draw sharp kernels at 100–200 ms delays.
+    Ridge weights still find the drivers best (AUC ≈ 0.9): detection does not need a good fit.
+  - Both models are far below the nominal ceiling (≈ 0.7). Draws with negative ridge R² point to
+    driver rates that drift into the test block; the noise-free ceiling on the test block is now saved.
+  - Next: train to convergence (100-epoch cap, patience 10), and an LFP-like variant (200 drivers,
+    kernel time constants 10–100 ms) to bring the R² levels and the CNN–ridge gap towards the real data.
 - Confound credit is real for both: with an arousal component, units correlated with running are
   credited (IG 0.85–0.91, ridge 0.75–0.77, correlation 0.98). Attribution measures predictive
   reliance, not causal drive; the text must say so.
@@ -585,6 +605,8 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-10** Simulation v2 reviewed (section 4). Added the noise-free ceiling, `--patience`, `--tau-ms`,
+  `summarize simulation --pattern`.
 - **2026-11-09** Decided: mean-baseline total attribution for the importance claims. Simulation: diagnostics
   (ridge R², best epoch, attribution peak lags), `--epochs`, `--output`, 'gain' and 'burst' conditions,
   counterfactual truth.

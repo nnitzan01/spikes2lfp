@@ -205,12 +205,13 @@ def test_simulation(pipeline_module, session_dir):
     from experiments import simulation as sim
     pipeline = _trained_pipeline(pipeline_module, session_dir)
     conditions = ['linear', 'nonlinear_arousal', 'gain', 'burst']
-    out = sim.run(pipeline, conditions=conditions, draws=1, n_drivers=4, num_epochs=2)
+    out = sim.run(pipeline, conditions=conditions, draws=1, n_drivers=4, num_epochs=2, patience=1, tau_range=(0.01, 0.1))
     n_c, n_m = len(conditions), len(sim.MEASURES)
     for m in sim.METRICS:
         assert out[m].shape == (n_c, 1, n_m)
     assert np.isfinite(out['auc']).all() and ((out['auc'] >= 0) & (out['auc'] <= 1)).all()
     assert np.isfinite(out['r2']).all() and np.isfinite(out['r2_ridge']).all() and (out['best_epoch'] <= 1).all()
+    assert ((out['r2_ceiling'] > 0) & (out['r2_ceiling'] < 1)).all()
     assert out['lag_error_ms'].shape == (n_c, 1, len(sim.LAG_MEASURES))
     assert out['lag_ms'].shape == (n_c, 1, len(sim.LAG_MEASURES), out['is_driver'].shape[-1])
     assert out['is_driver'].sum(axis=-1).tolist() == [[4]] * n_c

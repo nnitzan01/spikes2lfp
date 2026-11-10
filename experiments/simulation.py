@@ -47,12 +47,13 @@ and compared with the truth, separately for each condition and draw of drivers:
 
 usage (from the repo root):
     python -m experiments.simulation <session_dir> [--draws 3] [--conditions linear,nonlinear,...]
-        [--epochs 15] [--output simulation]
+        [--epochs 15] [--patience 5] [--tau-ms 4,40] [--output simulation]
 
 Needs the 'train' stage (for the session's split and attribution targets) and the covariates.
 Saves variables/<session_id>/<--output>.npz: each metric as conditions x draws x measures (lag
-metrics: conditions x draws x LAG_MEASURES), r2 and r2_ridge (conditions x draws, test R2 of the
-model and of the lagged unit ridge), best_epoch, conditions, measures, and per draw the truth and
+metrics: conditions x draws x LAG_MEASURES), r2, r2_ridge and r2_ceiling (conditions x draws, test
+R2 of the model, of the lagged unit ridge and of the noise-free target, the best any model can do),
+best_epoch, conditions, measures, and per draw the truth and
 every score (scores: conditions x draws x measures x units; true_total, true_per_spike,
 true_lag_ms, is_driver: conditions x draws x units; lag_ms: conditions x draws x LAG_MEASURES x units).
 """
@@ -67,6 +68,7 @@ from sklearn.metrics import roc_auc_score
 import config
 import paths
 from analysis import coupling_measures as cm
+from analysis.lagged_ridge import r2_columns
 from analysis.sequence_attribution import unit_summaries
 from experiments.attribution_baseline import attribute_with_retries
 from experiments.ranked_ablation import coupling_scores
@@ -138,8 +140,11 @@ def combine(drives, kind, train=None, stats=None):
     return norm(x, 'signal'), stats
 
 
-def simulate(counts, arousal, train, kind, use_arousal, rng, n_drivers=N_DRIVERS):
-    """The synthetic target (bins,) and the ground truth: drivers, weights, kernels, drives (bins x drivers), signal statistics."""
+def simulate(counts, arousal, train, kind, use_arousal, rng, n_drivers=N_DRIVERS, tau_range=TAU):
+    """
+    The synthetic target (bins,) and the ground truth: drivers, weights, kernels, drives (bins x
+    drivers), signal statistics, and the target without its noise ('clean').
+    """
     n_bins, n_units = counts.shape
     rate = cm.firing_rate(counts, train, config.BIN_SIZE)
     eligible = np.flatnonzero(rate >= MIN_RATE)
@@ -151,7 +156,7 @@ def simulate(counts, arousal, train, kind, use_arousal, rng, n_drivers=N_DRIVERS
     drivers = np.sort(rng.choice(eligible, min(n_drivers, len(eligible)), replace=False))
     length = int(round(KERNEL_LENGTH / config.BIN_SIZE))
     latency = rng.uniform(*LATENCY, len(drivers)) / config.BIN_SIZE
-    tau = np.exp(rng.uniform(*np.log(TAU), len(drivers))) / config.BIN_SIZE
+    tau = np.exp(rng.uniform(*np.log(tau_range), len(drivers))) / config.BIN_SIZE
     weight = rng.choice([-1, 1], len(drivers)) * rng.lognormal(0, WEIGHT_SD, len(drivers))
     kernels = np.stack([alpha_kernel(d, t, length) for d, t in zip(latency, tau)])
     drives = np.stack([w * lfilter(h, 1, inputs(k)) for k, w, h in zip(drivers, weight, kernels)], axis=1)
@@ -160,9 +165,10 @@ def simulate(counts, arousal, train, kind, use_arousal, rng, n_drivers=N_DRIVERS
         signal = signal + np.sqrt(AROUSAL_SHARE) * zscore(arousal, train)
     noise = lfilter([1], [1, -NOISE_AR], rng.normal(size=n_bins))
     noise = zscore(noise, train) * np.sqrt(NOISE_SHARE / (1 - NOISE_SHARE)) * signal[train].std()
-    target = zscore(signal + noise, train).astype(np.float32)
+    m, sd = (signal + noise)[train].mean(), (signal + noise)[train].std()
+    target = ((signal + noise - m) / sd).astype(np.float32)
     return target, dict(drivers=drivers, weight=weight, kernels=kernels, drives=drives, kind=kind, stats=stats,
-                        peak_lag=latency + tau)
+                        peak_lag=latency + tau, clean=(signal - m) / sd)
 
 
 def truth(sim, n_units, ends, train, window_spikes):
@@ -213,11 +219,12 @@ def score_metrics(scores, true, confound_units):
     return out
 
 
-def run(pipeline, conditions=tuple(CONDITIONS), draws=3, n_drivers=N_DRIVERS, num_epochs=config.NUM_EPOCHS):
+def run(pipeline, conditions=tuple(CONDITIONS), draws=3, n_drivers=N_DRIVERS, num_epochs=config.NUM_EPOCHS,
+        patience=config.PATIENCE, tau_range=TAU):
     counts = pipeline.active_counts.spkMat
     n_bins, n_units = counts.shape
     X = torch.as_tensor(pipeline.active_spikes.spkMat, device=pipeline.device)
-    train = chunk_bins(pipeline.split['train'])
+    train, test = chunk_bins(pipeline.split['train']), chunk_bins(pipeline.split['test'])
     t = pipeline.attr_targets
     ends, window_spikes = t['sampled_train'], t['sampled_train_spikes']
     arousal = pipeline.load_covariates('active')['behaviour']['running_speed'].fillna(0).to_numpy(np.float64)[:n_bins]
@@ -233,7 +240,7 @@ def run(pipeline, conditions=tuple(CONDITIONS), draws=3, n_drivers=N_DRIVERS, nu
     out = {m: np.full(shape + (len(MEASURES),), np.nan) for m in METRICS}
     out.update(lag_spearman=np.full(shape + (len(LAG_MEASURES),), np.nan),
                lag_error_ms=np.full(shape + (len(LAG_MEASURES),), np.nan),
-               r2=np.full(shape, np.nan), r2_ridge=np.full(shape, np.nan), best_epoch=np.full(shape, np.nan),
+               r2=np.full(shape, np.nan), r2_ridge=np.full(shape, np.nan), r2_ceiling=np.full(shape, np.nan), best_epoch=np.full(shape, np.nan),
                lag_ms=np.full(shape + (len(LAG_MEASURES), n_units), np.nan, dtype=np.float32), scores=np.full(shape + (len(MEASURES), n_units), np.nan, dtype=np.float32))
     for key in ('true_total', 'true_per_spike', 'true_lag_ms'):
         out[key] = np.full(shape + (n_units,), np.nan, dtype=np.float32)
@@ -243,9 +250,11 @@ def run(pipeline, conditions=tuple(CONDITIONS), draws=3, n_drivers=N_DRIVERS, nu
         kind, use_arousal = CONDITIONS[name]
         for draw in range(draws):
             rng = np.random.default_rng(config.TORCH_SEED + draw)       # same drivers in every condition but 'burst'
-            y, sim = simulate(counts, arousal, train, kind, use_arousal, rng, n_drivers)
+            y, sim = simulate(counts, arousal, train, kind, use_arousal, rng, n_drivers, tau_range)
             true = truth(sim, n_units, ends, train, window_spikes)
-            model, out['r2'][ci, draw] = pipeline.fit_and_score(pipeline.active_spikes.spkMat, y, num_epochs=num_epochs)
+            out['r2_ceiling'][ci, draw] = r2_columns(y[test, None], sim['clean'][test, None])[0]
+            model, out['r2'][ci, draw] = pipeline.fit_and_score(pipeline.active_spikes.spkMat, y, num_epochs=num_epochs,
+                                                                patience=patience)
             out['best_epoch'][ci, draw] = model.best_epoch
             scores, lags = {}, {}
             for baseline_name, baseline in (('ig_zero', 0.0), ('ig_mean', mean_input)):
@@ -275,7 +284,8 @@ def run(pipeline, conditions=tuple(CONDITIONS), draws=3, n_drivers=N_DRIVERS, nu
             out['scores'][ci, draw] = np.stack([scores[m] for m in MEASURES])
             out['true_total'][ci, draw], out['true_per_spike'][ci, draw] = true['total'], true['per_spike']
             out['true_lag_ms'][ci, draw], out['is_driver'][ci, draw] = true['lag_ms'], d
-            log(f'{name} draw {draw}: model R2 {out["r2"][ci, draw]:.3f} (best epoch {model.best_epoch}), '
+            log(f'{name} draw {draw}: ceiling R2 {out["r2_ceiling"][ci, draw]:.3f}, '
+                f'model R2 {out["r2"][ci, draw]:.3f} (best epoch {model.best_epoch}), '
                 f'ridge R2 {out["r2_ridge"][ci, draw]:.3f}; AUC '
                 + ', '.join(f'{m} {out["auc"][ci, draw, i]:.2f}' for i, m in enumerate(MEASURES)))
     out.update(conditions=np.array(conditions), measures=np.array(MEASURES), lag_measures=np.array(LAG_MEASURES),
@@ -290,13 +300,16 @@ def main():
     parser.add_argument('--conditions', default=','.join(CONDITIONS))
     parser.add_argument('--n-drivers', type=int, default=N_DRIVERS)
     parser.add_argument('--epochs', type=int, default=config.NUM_EPOCHS)
+    parser.add_argument('--patience', type=int, default=config.PATIENCE)
+    parser.add_argument('--tau-ms', default=','.join(f'{t * 1e3:g}' for t in TAU), help='range of the kernel time constants')
     parser.add_argument('--output', default='simulation', help='saved as variables/<session_id>/<output>.npz')
     args = parser.parse_args()
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pipeline = SessionPipeline(data_root, session_id, device)
-    out = run(pipeline, args.conditions.split(','), args.draws, args.n_drivers, args.epochs)
+    tau = tuple(float(t) / 1e3 for t in args.tau_ms.split(','))
+    out = run(pipeline, args.conditions.split(','), args.draws, args.n_drivers, args.epochs, args.patience, tau)
     f = pipeline.dirs.variables / f'{args.output}.npz'
     save_npz(f, compressed=True, **out)
     print('Saved', f)
