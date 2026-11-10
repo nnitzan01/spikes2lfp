@@ -113,6 +113,7 @@ EXPERIMENT=region_ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch  
 EXPERIMENT=attribution_baseline sbatch --array=1 cluster/run_experiment.sbatch # mean-baseline IG in the ranked ablation (after ranked_ablation)
 EXPERIMENT=simulation sbatch --array=1 cluster/run_experiment.sbatch           # ground truth: synthetic LFP from real spikes, recovered by attribution vs simpler measures
 EXPERIMENT=simulation EXTRA_ARGS="--conditions gain,burst --epochs 40 --output simulation_nonlinear" sbatch --array=1 cluster/run_experiment.sbatch   # conditions the ridge can't express
+for c in linear nonlinear_arousal gain burst; do EXPERIMENT=simulation EXTRA_ARGS="--conditions $c --draws 10 --n-drivers 200 --tau-ms 10,100 --epochs 100 --patience 10 --output simulation_final_$c" sbatch --array=1-3 --job-name=sim_$c cluster/run_experiment.sbatch; done   # final LFP-like run; python -m experiments.summarize simulation pools it over sessions
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch

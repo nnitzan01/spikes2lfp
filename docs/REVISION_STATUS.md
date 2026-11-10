@@ -502,6 +502,35 @@ Mean R² drop over 1–20% removed at inference; difference from ridge weight; s
     driver rates that drift into the test block; the noise-free ceiling on the test block is now saved.
   - Next: train to convergence (100-epoch cap, patience 10), and an LFP-like variant (200 drivers,
     kernel time constants 10–100 ms) to bring the R² levels and the CNN–ridge gap towards the real data.
+- **Rerun to convergence (100-epoch cap, patience 10; `simulation_long_*`, `simulation_lfp_*`):**
+  | | Lin | Nonlin | Lin + ar. | Nonlin + ar. | Gain | Burst |
+  |---|---|---|---|---|---|---|
+  | **Fast (40 drivers, τ 4–40 ms)**: CNN / ridge R² (ceiling ≈ 0.64–0.72) | 0.367 / 0.119 | 0.397 / 0.052 | 0.419 / 0.203 | 0.350 / 0.187 | 0.261 / 0.009 | 0.259 / 0.111 |
+  | AUC: IG mean / ridge | 0.89 / 0.91 | **0.90** / 0.89 | 0.88 / 0.90 | 0.81 / 0.86 | **0.74** / 0.71 | 0.87 / 0.88 |
+  | Spearman with true total: IG mean / ridge | **0.93** / 0.83 | **0.97** / 0.82 | **0.93** / 0.81 | 0.81 / 0.79 | **0.76** / 0.64 | 0.78 / **0.90** |
+  | Peak-lag Spearman, IG mean (median peak; true 131 ms) | 0.65 (96) | 0.62 (130) | 0.65 (84) | 0.24 (16) | 0.13 (40) | 0.32 (64) |
+  | **LFP-like (200 drivers, τ 10–100 ms)**: CNN / ridge R² (ceiling ≈ 0.72–0.75) | 0.533 / 0.417 | | | 0.392 / 0.441 | 0.343 / 0.341 | 0.425 / 0.096 |
+  | AUC: IG mean / ridge | **0.83** / 0.78 | | | **0.77** / 0.74 | **0.72** / 0.64 | **0.80** / 0.77 |
+  | Spearman with true total: IG mean / ridge | **0.91** / 0.76 | | | **0.79** / 0.74 | **0.69** / 0.50 | 0.70 / 0.70 |
+  | Peak-lag Spearman, IG mean (median peak; true 136 ms) | 0.53 (136) | | | 0.18 (60) | 0.09 (44) | 0.09 (56) |
+  - **Converged models give attribution at least as good as ridge weights.** Fast kernels: IG
+    mean ties ridge at finding drivers (AUC within ±0.05; ridge ahead in the arousal and burst
+    conditions) and ranks the drivers' true totals better in 5 of 6 conditions (burst: ridge).
+    LFP-like: IG mean beats ridge weights in AUC in all four conditions (+0.03 to +0.08) and in
+    ranking true totals in three (burst tied). IG per spike ranks per-spike effects better than
+    ridge in 7 of 10 runs and worse in the two burst runs and nonlinear + arousal (fast)
+    (fast 0.66–0.91 vs ridge 0.73–0.89; LFP-like 0.54–0.80 vs 0.57–0.69).
+  - **The LFP-like regime brackets the real data:** CNN − ridge R² is +0.12 (linear), 0.00 (gain),
+    −0.05 (nonlinear + arousal) and +0.33 (burst); real broadband +0.03. The fast regime always
+    favours the CNN by 0.2–0.35 (ridge basis can't draw sharp kernels), so it is unrealistic.
+  - **Lags only where the model fits well:** in linear and rectified worlds the drivers' attribution
+    peaks match the true latency (median 130–136 ms vs 131–136, Spearman 0.5–0.65, error ≈ 25 ms);
+    with gain, bursts or arousal + rectification they are compressed early (16–64 ms, Spearman
+    ≤ 0.32). The R2 #2 lag claims need this caveat or only relative (early vs late) wording.
+  - **Correlational measures fail:** STLFP AUC 0.38–0.70, spike–LFP correlation 0.57–0.77 and
+    confounded by arousal (percentile 0.97–0.98); firing rate alone reaches AUC 0.80 in LFP-like
+    burst (the condition rewards high rates), equal to IG mean there.
+  - Training still varies across draws (best epochs 11–99 in one condition); single session, 3 draws.
 - Confound credit is real for both: with an arousal component, units correlated with running are
   credited (IG 0.85–0.91, ridge 0.75–0.77, correlation 0.98). Attribution measures predictive
   reliance, not causal drive; the text must say so.
@@ -581,12 +610,10 @@ paired difference from ridge weight, and sessions where the measure is best of t
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).
-- **Ground-truth simulation underfit** (section 4): the CNN-LSTM reaches R² 0.16–0.28 of ≈ 0.7 and
-  ridge recovers the drivers far better. Rerun with the diagnostics (ridge R², best epochs, each
-  driver's attribution peak lag), a 40-epoch cap, and two conditions the ridge can't express
-  ('gain': half the drivers only modulate the other half's drive; 'burst': only spikes within
-  20 ms of the unit's previous spike count). Truth is now counterfactual (signal change with a
-  driver's drive set to 0 / its mean), defined for every condition.
+- **Ground-truth simulation** (section 4): trained to convergence, IG mean matches or beats ridge
+  weights; the LFP-like regime (200 drivers, τ 10–100 ms) brackets the real CNN–ridge gap.
+  Proposed final run: LFP-like, 4 conditions (linear, nonlinear_arousal, gain, burst), 10 draws,
+  3 sessions (`simulation_final_<condition>`, submitted 2026-11-10); `summarize simulation` pools it.
 - Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
 
 ---
@@ -605,6 +632,9 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-10** Simulation trained to convergence, fast and LFP-like regimes, reviewed (section 4). Final
+  LFP-like run submitted (4 conditions x 10 draws x sessions 1-3); `summarize simulation` without
+  `--session` now pools draws over sessions with paired comparisons between measures.
 - **2026-11-10** Simulation v2 reviewed (section 4). Added the noise-free ceiling, `--patience`, `--tau-ms`,
   `summarize simulation --pattern`.
 - **2026-11-09** Decided: mean-baseline total attribution for the importance claims. Simulation: diagnostics

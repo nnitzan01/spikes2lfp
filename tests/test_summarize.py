@@ -57,3 +57,23 @@ def test_summaries_over_sessions(tmp_path, monkeypatch, capsys):
         out = capsys.readouterr().out
         assert '3 sessions with' in out and 'missing: 4' in out
     assert summarize.paired([0.1, 0.2, np.nan, -0.05]).startswith('+0.100 (2/3 > 0')
+
+
+def test_simulation_pooled_over_sessions(tmp_path, monkeypatch, capsys):
+    from experiments.simulation import LAG_MEASURES, MEASURES, METRICS
+    rng = np.random.default_rng(0)
+    for sid in (1, 2):
+        d = tmp_path / str(sid)
+        d.mkdir()
+        for c in ('linear', 'gain'):
+            out = {k: rng.uniform(size=(1, 3, len(MEASURES))) for k in METRICS}
+            out.update({k: rng.uniform(size=(1, 3)) for k in ('r2', 'r2_ridge', 'r2_ceiling')}, best_epoch=np.full((1, 3), 50.),
+                       lag_spearman=rng.uniform(size=(1, 3, len(LAG_MEASURES))), conditions=np.array([c]),
+                       measures=np.array(MEASURES), lag_measures=np.array(LAG_MEASURES), metrics=np.array(METRICS))
+            np.savez(d / f'simulation_final_{c}.npz', **out)
+    monkeypatch.setattr(summarize, 'sessions', lambda: [1, 2, 3])
+    monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / str(sid))
+    summarize.simulation_sessions()
+    out = capsys.readouterr().out
+    assert '=== linear: 6 draws in 2 sessions (simulation_final_linear.npz)' in out
+    assert 'ig_mean - ridge_weight' in out and '/6 > 0' in out

@@ -111,6 +111,50 @@ def simulation(session_id, pattern='simulation*'):
                 print(line)
 
 
+SIM_COMPARISONS = [('ig_mean', 'ridge_weight'), ('ig_zero', 'ridge_weight'), ('ig_zero_per_spike', 'ridge_weight'),
+                   ('ig_mean', 'spike_lfp_correlation')]
+
+
+def simulation_sessions(pattern='simulation_final*'):
+    """
+    Simulation files matching pattern in every session, pooled by condition: each draw of drivers (in any
+    session) is one sample; means over draws, and paired differences between measures over draws.
+    """
+    draws, files = {}, {}                                   # condition: [per-draw dicts]; condition: {file names}
+    for sid in sessions():
+        for f in sorted(variables_dir(sid).glob(f'{pattern}.npz')):
+            d = np.load(f)
+            measures, lag_measures = list(d['measures']), list(d['lag_measures'])
+            for ci, c in enumerate(d['conditions']):
+                files.setdefault(c, set()).add(f.name)
+                for k in range(d['r2'].shape[1]):
+                    row = dict(session=sid, r2=d['r2'][ci, k], r2_ridge=d['r2_ridge'][ci, k],
+                               r2_ceiling=d['r2_ceiling'][ci, k], best_epoch=d['best_epoch'][ci, k])
+                    row.update({(m, metric): d[metric][ci, k, i] for metric in d['metrics'] for i, m in enumerate(measures)})
+                    row.update({(m, 'lag_spearman'): d['lag_spearman'][ci, k, i] for i, m in enumerate(lag_measures)})
+                    draws.setdefault(c, []).append(row)
+    if not draws:
+        print(f'no {pattern}.npz in any session')
+        return
+    for c, rows in draws.items():
+        def col(key):
+            return np.array([r.get(key, np.nan) for r in rows], float)
+
+        metrics = list(dict.fromkeys(key[1] for key in rows[0] if isinstance(key, tuple) and key[1] != 'lag_spearman'))
+        measures = list(dict.fromkeys(key[0] for key in rows[0] if isinstance(key, tuple)))
+        print(f'=== {c}: {len(rows)} draws in {len({r["session"] for r in rows})} sessions ({", ".join(sorted(files[c]))})')
+        print(f'  test R2, mean over draws: model {np.nanmean(col("r2")):.3f}, lagged unit ridge {np.nanmean(col("r2_ridge")):.3f}, '
+              f'noise-free ceiling {np.nanmean(col("r2_ceiling")):.3f}; model - ridge {paired(col("r2") - col("r2_ridge"))}; '
+              f'best epoch median {np.nanmedian(col("best_epoch")):.0f} (range {np.nanmin(col("best_epoch")):.0f}-{np.nanmax(col("best_epoch")):.0f})')
+        print(f'  {"mean over draws":22s}' + ''.join(f'{m:>20s}' for m in metrics + ['lag_spearman']))
+        for m in measures:
+            print(f'  {m:22s}' + ''.join(f'{np.nanmean(col((m, k))):20.3f}' for k in metrics + ['lag_spearman']))
+        print('  paired over draws (median difference, draws > 0, Wilcoxon p):')
+        for a, b in SIM_COMPARISONS:
+            for k in metrics:
+                print(f'    {a + " - " + b:42s} {k:20s} {paired(col((a, k)) - col((b, k)))}')
+
+
 def sessions():
     return [int(s) for s in open(paths.REPO_DIR / 'cluster' / 'sessions.txt').read().split()]
 
@@ -290,7 +334,8 @@ def stimulus_clock():
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
-                'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions}
+                'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
+                'simulation': simulation_sessions}
 
 
 def main():
@@ -298,14 +343,15 @@ def main():
     parser.add_argument('what', choices=sorted(set(SESSION_SUMMARIES) | set(ALL_SESSIONS)))
     parser.add_argument('--session', type=int, help='one session (default: every session where possible, '
                                                     'otherwise 1047969464)')
-    parser.add_argument('--pattern', default='simulation*', help='simulation: the files to show (glob, without .npz)')
+    parser.add_argument('--pattern', help='simulation: the files to show (glob, without .npz; default simulation* '
+                                          'for one session, simulation_final* pooled over sessions)')
     args = parser.parse_args()
     warnings.simplefilter('ignore', RuntimeWarning)     # targets, regions and measures not run are all-NaN slices
+    kwargs = dict(pattern=args.pattern) if args.what == 'simulation' and args.pattern else {}
     if args.what in SESSION_SUMMARIES and (args.session or args.what not in ALL_SESSIONS):
-        kwargs = dict(pattern=args.pattern) if args.what == 'simulation' else {}
         SESSION_SUMMARIES[args.what](args.session or 1047969464, **kwargs)
     else:
-        ALL_SESSIONS[args.what]()
+        ALL_SESSIONS[args.what](**kwargs)
 
 
 if __name__ == '__main__':
