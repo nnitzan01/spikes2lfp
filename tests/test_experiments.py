@@ -265,3 +265,22 @@ def test_simulation_metrics_of_a_perfect_and_a_confounded_measure():
     np.testing.assert_allclose(out[:4, perfect], 1, atol=1e-9)
     assert out[sim.METRICS.index('confound_percentile'), confounded] > 0.8
     assert out[sim.METRICS.index('auc'), confounded] < 0.5
+
+
+def test_region_clock(pipeline_module, session_dir):
+    from experiments import region_clock, stimulus_clock
+    from experiments.region_ablation import REGIONS, region_masks
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = region_clock.run(pipeline, targets=[0], n_shuffles=2)
+    n_ch = pipeline.n_channels
+    present = [r for r in REGIONS if region_masks(pipeline.session.units['structure_acronym'].to_numpy().astype(str))[r].any()]
+    assert out['r2_swap'].shape == (2, len(REGIONS), n_ch, 9) and np.isnan(out['r2_swap'][..., 1]).all()
+    for i, region in enumerate(REGIONS):
+        assert np.isfinite(out['r2_residual_swap'][:, i, :, 0]).all() == (region in present)
+        assert np.isfinite(out['r2_removed'][i, :, 0]).all() == (region in present)
+    np.testing.assert_allclose(out['r2_model'][:, 0], np.load(pipeline.dirs.variables / 'r2_scores.npy')[:, 0], atol=1e-4)
+    # unchanged inputs give stimulus_clock's residual R2
+    clock = stimulus_clock.run(pipeline, n_shuffles=0, n_shifts=0, retrain_targets=[])
+    np.testing.assert_allclose(out['r2_residual'][:, 0], clock['r2_residual'][:, 0], atol=1e-6)
+    shares = region_clock.region_shares(np.ones((4, 2, 3)), {r: np.arange(4) < 2 if r == 'VISp' else np.zeros(4, bool) for r in REGIONS})
+    assert np.allclose(shares[REGIONS.index('VISp')], 0.5) and np.isnan(shares[REGIONS.index('LG')]).all()

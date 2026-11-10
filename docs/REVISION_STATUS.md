@@ -192,6 +192,8 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
 | **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); ✅ 89 sessions with both IG baselines (section 4) |
 | Framing decision after A and C | R1, R2 | ⬜ |
+| **D. Local vs distributed sources by band (biology for R1):** from `region_ablation.npz`: R² drop by region × band (broadband, 0.5–4, 4–8, 8–12, 12–25 Hz) × depth from the L4 border, as a fraction of full R² and per unit, single visual areas, region alone; mean-baseline attribution share by region (`attribution_baseline.npz`) and spike–LFP correlation share for comparison. Control: rerun `region_ablation` with `--retrain-targets 0,1,2 --retrain-regions VISp,visual_cortex_other,hippocampus` (the band dissociation is inference-only so far) | R1 | 🟡 built 2026-11-10: `summarize region_bands` (reads `region_ablation_bands.npz` too); retrain run pending |
+| **E. Evoked vs induced by region (biology for R1):** new `experiments/region_clock.py` on the stimulus-clock template: per region, R² and residual R² with the region mean-filled, and with only that region's spikes swapped between presentations of the same condition (keeps its evoked content, breaks its single-trial content); inference only | R1, R3 #1 | ⬜ scoped 2026-11-10 |
 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
@@ -632,6 +634,9 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-10** Biology for R1 (Phase 2 D, E): `summarize region_bands` (band × depth × region from
+  `region_ablation`), `region_ablation --output`, new `experiments/region_clock.py` and `summarize
+  region_clock`; `stimulus_clock.clock()` factored out for reuse.
 - **2026-11-10** Simulation trained to convergence, fast and LFP-like regimes, reviewed (section 4). Final
   LFP-like run submitted (4 conditions x 10 draws x sessions 1-3); `summarize simulation` without
   `--session` now pools draws over sessions with paired comparisons between measures.

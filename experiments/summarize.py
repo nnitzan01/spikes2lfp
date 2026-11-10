@@ -4,7 +4,8 @@ Print summaries of the experiment results, over the pooled channels of each sess
 
 Over every session with the experiment's file (median over sessions of the per-session median, with
 the paired Wilcoxon over sessions):
-    python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | stimulus_clock
+    python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
+                                    | region_clock | stimulus_clock | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
     python -m experiments.summarize simulation --pattern 'simulation_long*'     # some of the simulation files
@@ -306,6 +307,144 @@ def region_ablation():
         print(f'covariates added to the full model (broadband): {paired(stack("cov_gain"))}')
 
 
+BAND_REGIONS = ['VISp', 'visual_cortex_other', 'hippocampus', 'thalamus', 'midbrain', 'VISl', 'VISal', 'VISrl',
+                'VISam', 'VISpm', 'CA1', 'DG', 'LG', 'LP', 'APN', 'MRN']
+PROFILE_REGIONS = ['VISp', 'visual_cortex_other', 'hippocampus']
+N_PROFILE = 16                                              # aligned channels, deepest first (pool_sessions.ALIGNED_CHANNELS)
+
+
+def region_bands():
+    """
+    Local vs distributed (section D of REVISION_STATUS): the fraction of the full R2 lost when a region is
+    removed at inference (mean fill), per band (median drop over the pooled channels / median full R2, per
+    session), VISp vs the other visual areas per band, and the depth profile of the drop (pooled channels
+    aligned from the deepest, with the layer 4 borders).
+    """
+    def per_session(d, ch):
+        regions = [str(r) for r in d['regions']]
+        idx = [regions.index(r) for r in BAND_REGIONS]
+        full = d['r2_full'][ch]                                          # channels x targets
+        drop = (d['r2_full'] - d['r2_removed'][0])[idx][:, ch]            # regions x channels x targets
+        profile = np.full((len(PROFILE_REGIONS), N_PROFILE, full.shape[1]), np.nan)
+        n = min(N_PROFILE, ch.stop - ch.start)
+        profile[:, :n] = drop[[BAND_REGIONS.index(r) for r in PROFILE_REGIONS], :n] / np.nanmedian(full, 0)
+        out = dict(n_units=d['region_n_units'][idx], full=np.nanmedian(full, 0),
+                   fraction=np.nanmedian(drop, 1) / np.nanmedian(full, 0),
+                   alone=np.nanmedian(d['r2_only'][0][idx][:, ch], 1) / np.nanmedian(full, 0), profile=profile)
+        out.update(retrained_fractions(d, ch))
+        return out
+
+    def retrained_fractions(d, ch):
+        regions = [str(r) for r in d['regions']]
+        idx = [regions.index(r) for r in BAND_REGIONS]
+        out = {'n_units': d['region_n_units'][idx]}
+        for k in ('retrained', 'cov'):
+            key = 'r2_retrained_removed' if k == 'retrained' else 'r2_cov_removed'
+            if f'r2_{k}_full' in d:
+                rfull = d[f'r2_{k}_full'][0][ch]
+                out[k] = np.nanmedian((rfull - d[key][idx, 0][:, ch]), 1) / np.nanmedian(rfull, 0)
+        return out
+
+    rows = over_sessions('region_ablation', per_session)
+    if not rows:
+        return
+    band_rows = over_sessions('region_ablation_bands', retrained_fractions)     # retrained for more bands (D)
+    stack = lambda k: np.stack([r[k] for r in rows.values() if k in r])
+    n_units, full, fraction, alone = stack('n_units').astype(float), stack('full'), stack('fraction'), stack('alone')
+    targets = [t for t in range(min(5, full.shape[1])) if np.isfinite(full[:, t]).any()]
+    print('full R2 (median over sessions): ' + ', '.join(f'{TARGET_NAMES[t]} {np.nanmedian(full[:, t]):.3f}' for t in targets))
+    for name, v, what in (('fraction', fraction, 'removed at inference (mean fill)'),
+                          ('alone', alone, 'alone (everyone else removed at inference)')):
+        print(f'fraction of the full R2 {"lost" if name == "fraction" else "kept"}, region {what}; median over sessions with units:')
+        print(f'  {"":22s} {"sessions":>8s} {"units":>6s}' + ''.join(f'{TARGET_NAMES[t]:>12s}' for t in targets))
+        for i, r in enumerate(BAND_REGIONS):
+            has = n_units[:, i] > 0
+            if has.any():
+                print(f'  {r:22s} {has.sum():8d} {np.median(n_units[has, i]):6.0f}'
+                      + ''.join(f'{np.nanmedian(v[has, i, t]):12.3f}' for t in targets))
+    for source, k, what in [(src, k, what) for src in ('region_ablation', 'region_ablation_bands') for k, what in
+                            (('retrained', 'retrained without the region'), ('cov', 'retrained without the region, covariates given'))]:
+        found = [r for r in (rows if source == 'region_ablation' else band_rows).values() if k in r]
+        if found:
+            v, n = np.stack([r[k] for r in found]), np.stack([r['n_units'] for r in found]).astype(float)
+            done = [t for t in targets if np.isfinite(v[:, :, t]).any()]
+            print(f'fraction of the full R2 lost, {what} ({source}.npz; per session; median, sessions > 0, Wilcoxon p):')
+            for i, r in enumerate(BAND_REGIONS):
+                ok = n[:, i] > 0
+                if ok.any() and np.isfinite(v[ok, i][:, done]).any():
+                    print(f'  {r:22s} ' + ' | '.join(f'{TARGET_NAMES[t]} {paired(v[ok, i, t])}' for t in done))
+    a, b = BAND_REGIONS.index('VISp'), BAND_REGIONS.index('visual_cortex_other')
+    both = (n_units[:, a] > 0) & (n_units[:, b] > 0)
+    diff = fraction[both, a] - fraction[both, b]
+    print(f'VISp minus other visual cortex, fraction lost at inference ({both.sum()} sessions with both):')
+    for t in targets:
+        print(f'  {TARGET_NAMES[t]:10s} {paired(diff[:, t])}')
+    for t in targets[1:]:
+        print(f'  (broadband - {TARGET_NAMES[t]}) of that difference: {paired(diff[:, 0] - diff[:, t])}')
+    borders = pd.read_csv(ALIGNMENT_TABLE).set_index('session').loc[list(rows)]
+    lower, upper = (np.median(borders[k] - borders['first_channel_index']) for k in ('lower_border_index', 'upper_border_index'))
+    print(f'depth profile: fraction of the full R2 lost per aligned channel (0 = deepest pooled channel; '
+          f'layer 4 at about {lower:.0f}-{upper:.0f}), median over sessions with units:')
+    profile = stack('profile')
+    for i, r in enumerate(PROFILE_REGIONS):
+        has = n_units[:, BAND_REGIONS.index(r)] > 0
+        print(f'  {r}')
+        for t in targets:
+            print(f'    {TARGET_NAMES[t]:10s}', np.round(np.nanmedian(profile[has, i, :, t], 0), 2))
+
+
+def region_clock():
+    """Evoked vs induced by region (section E of REVISION_STATUS): R2 and residual R2 lost per region."""
+    def per_session(d, ch):
+        swap, swap_res = np.nanmean(d['r2_swap'], 0), np.nanmean(d['r2_residual_swap'], 0)
+        out = dict(regions=d['regions'], n_units=d['region_n_units'], model=channel_median(d['r2_model'], ch),
+                   residual=channel_median(d['r2_residual'], ch),
+                   removed=channel_median(d['r2_model'] - d['r2_removed'], ch),
+                   removed_residual=channel_median(d['r2_residual'] - d['r2_residual_removed'], ch),
+                   swap=channel_median(d['r2_model'] - swap, ch),
+                   swap_residual=channel_median(d['r2_residual'] - swap_res, ch),
+                   swap_all_residual=channel_median(d['r2_residual'] - np.nanmean(d['r2_residual_swap_all'], 0), ch))
+        out.update({k: channel_median(d[k], ch) for k in d.files if k.startswith('share_')})
+        return out
+
+    rows = list(over_sessions('region_clock', per_session).values())
+    if not rows:
+        return
+    stack = lambda k: np.stack([r[k] for r in rows if k in r])
+    n_units, model = stack('n_units').astype(float), stack('model')
+    regions = [str(r) for r in rows[0]['regions']]
+    shown = [(r, regions.index(r)) for r in BAND_REGIONS if r in regions]
+    targets = [t for t in range(5) if np.isfinite(model[:, t]).any()]
+    print('median over sessions: R2 ' + ', '.join(f'{TARGET_NAMES[t]} {np.nanmedian(model[:, t]):.3f}' for t in targets)
+          + '; residual R2 ' + ', '.join(f'{np.nanmedian(stack("residual")[:, t]):.3f}' for t in targets)
+          + '; residual R2 lost when every unit is swapped ' + ', '.join(f'{np.nanmedian(stack("swap_all_residual")[:, t]):.3f}' for t in targets))
+    for key, what in (('removed', 'R2 lost, region removed (mean fill)'),
+                      ('removed_residual', 'residual R2 lost, region removed'),
+                      ('swap', "R2 lost, region's spikes swapped between presentations of the same condition"),
+                      ('swap_residual', "residual R2 lost, region's spikes swapped")):
+        v = stack(key)
+        print(f'{what} (per session; median, sessions > 0, Wilcoxon p):')
+        for r, i in shown:
+            has = n_units[:, i] > 0
+            if has.any():
+                print(f'  {r:22s} {has.sum():3d} sessions ' + ' | '.join(f'{TARGET_NAMES[t]} {paired(v[has, i, t])}' for t in targets))
+    print('trial-specific fraction (R2 lost by swapping / R2 lost by removing; median over sessions where removing costs > 0.005):')
+    removed, swap = stack('removed'), stack('swap')
+    for r, i in shown:
+        line = ''
+        for t in targets:
+            has = (n_units[:, i] > 0) & (removed[:, i, t] > 0.005)
+            line += f'{TARGET_NAMES[t]:>12s} {np.median(swap[has, i, t] / removed[has, i, t]) if has.any() else np.nan:5.2f} ({has.sum()})'
+        print(f'  {r:22s}{line}')
+    for key in sorted({k for r in rows for k in r if k.startswith('share_')}):
+        v = stack(key)
+        print(f'{key[6:]}: share of the region (median over sessions with units; broadband, 0.5-4, 4-8 Hz)')
+        for r, i in shown:
+            has = n_units[:, i] > 0
+            if has.any():
+                print(f'  {r:22s}', np.round(np.nanmedian(v[has, i, :3], 0), 3))
+
+
 def stimulus_clock():
     keys = ['r2_model', 'r2_template', 'r2_residual', 'r2_residual_own', 'r2_trial_model', 'r2_trial_template',
             'r2_shuffle', 'r2_residual_shuffle', 'r2_shift', 'r2_residual_shift', 'r2_retrained_residual',
@@ -334,6 +473,7 @@ def stimulus_clock():
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
+                'region_bands': region_bands, 'region_clock': region_clock,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 

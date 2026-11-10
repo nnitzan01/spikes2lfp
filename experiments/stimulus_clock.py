@@ -60,10 +60,14 @@ def predict(model, X, split_chunks):
     return model.evaluate(take_chunks(X, split_chunks)).numpy()
 
 
-def run(pipeline, n_shuffles=5, n_shifts=5, retrain_targets=DEFAULT_RETRAIN, seed=config.TORCH_SEED):
-    rng = np.random.default_rng(seed)
+def clock(pipeline):
+    """
+    The stimulus template and the test-block presentations: a dict with X, Y (all active bins), T (template,
+    bins x channels x targets), cond, lag, names, train_bins, test_bins, segments (test-block presentations,
+    relative to its start) and seg_cond (their conditions).
+    """
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat          # bins x units, bins x channels x targets
-    n_bins, n_ch = X.shape[0], Y.shape[1]
+    n_bins = X.shape[0]
     split = pipeline.split
     train_bins, test_bins = chunk_bins(split['train']), contiguous(chunk_bins(split['test']))
 
@@ -83,6 +87,17 @@ def run(pipeline, n_shuffles=5, n_shifts=5, retrain_targets=DEFAULT_RETRAIN, see
     in_test = (segments[:, 0] >= t0) & (segments[:, 1] <= test_bins[-1] + 1)
     seg_cond = labels[np.searchsorted(onsets, segments[in_test, 0])]
     segments = segments[in_test] - t0
+    return dict(X=X, Y=Y, T=T, cond=cond, lag=lag, names=names, train_bins=train_bins, test_bins=test_bins,
+                segments=segments, seg_cond=seg_cond)
+
+
+def run(pipeline, n_shuffles=5, n_shifts=5, retrain_targets=DEFAULT_RETRAIN, seed=config.TORCH_SEED):
+    rng = np.random.default_rng(seed)
+    c = clock(pipeline)
+    X, Y, T, cond, lag, names = c['X'], c['Y'], c['T'], c['cond'], c['lag'], c['names']
+    train_bins, test_bins, segments, seg_cond = c['train_bins'], c['test_bins'], c['segments'], c['seg_cond']
+    n_bins, n_ch = X.shape[0], Y.shape[1]
+    split = pipeline.split
     Yt, Tt = Y[test_bins], T[test_bins]
     shifts = rng.integers(*(np.array(SHIFT_RANGE) / config.BIN_SIZE).astype(int), size=n_shifts)
 

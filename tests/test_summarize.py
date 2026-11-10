@@ -38,6 +38,15 @@ def clock_file(rng):
     return out
 
 
+def region_clock_file(rng):
+    n = len(REGIONS)
+    out = {k: r2(rng) for k in ('r2_model', 'r2_residual')}
+    out.update(r2_removed=r2(rng, n), r2_residual_removed=r2(rng, n), r2_swap=r2(rng, 2, n), r2_residual_swap=r2(rng, 2, n),
+               r2_swap_all=r2(rng, 2), r2_residual_swap_all=r2(rng, 2), share_stlfp=r2(rng, n),
+               share_attribution_mean_baseline=r2(rng, n), regions=np.array(REGIONS), region_n_units=rng.integers(0, 30, n))
+    return out
+
+
 def test_summaries_over_sessions(tmp_path, monkeypatch, capsys):
     rng = np.random.default_rng(0)
     sids = [1, 2, 3, 4]
@@ -47,12 +56,18 @@ def test_summaries_over_sessions(tmp_path, monkeypatch, capsys):
         np.savez(d / 'ranked_ablation.npz', **ablation_file(rng, RA_MEASURES))
         np.savez(d / 'attribution_baseline.npz', **ablation_file(rng, AB_MEASURES))
         np.savez(d / 'region_ablation.npz', **region_file(rng))
+        np.savez(d / 'region_ablation_bands.npz', **region_file(rng))
         np.savez(d / 'stimulus_clock.npz', **clock_file(rng))
+        np.savez(d / 'region_clock.npz', **region_clock_file(rng))
     monkeypatch.setattr(summarize, 'sessions', lambda: sids)
     monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / str(sid))
     monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(1, 5))
+    borders = tmp_path / 'borders.csv'
+    borders.write_text('session,lower_border_index,upper_border_index,first_channel_index\n'
+                       + ''.join(f'{sid},2,3,1\n' for sid in sids))
+    monkeypatch.setattr(summarize, 'ALIGNMENT_TABLE', borders)
     for f in (summarize.ranked_ablation, summarize.attribution_baseline_sessions, summarize.region_ablation,
-              summarize.stimulus_clock):
+              summarize.region_bands, summarize.region_clock, summarize.stimulus_clock):
         f()
         out = capsys.readouterr().out
         assert '3 sessions with' in out and 'missing: 4' in out

@@ -24,9 +24,10 @@ stimulus timing, arousal and global activity. --retrain-regions sets which regio
 usage (from the repo root):
     python -m experiments.region_ablation <session_dir> [--targets 0,1,2,3,4] [--retrain-targets 0 | none]
         [--retrain-regions groups | all | VISp,thalamus,...] [--retrain-seeds 1] [--no-covariates]
+        [--output region_ablation]
 
 Needs the 'train' stage (the covariates are computed on first use). Saves
-variables/<session_id>/region_ablation.npz (region axes in the order of REGIONS, NaN where not run):
+variables/<session_id>/<--output>.npz (region axes in the order of REGIONS, NaN where not run):
   r2_full (channels x targets), r2_removed / r2_only (fills x regions x channels x targets),
   r2_retrained_full / r2_cov_full (seeds x channels x targets),
   r2_retrained_removed / r2_cov_removed (regions x seeds x channels x targets),
@@ -172,6 +173,7 @@ def main():
     parser.add_argument('--retrain-regions', default='groups', help="'groups' (global regions), 'all' or a list")
     parser.add_argument('--retrain-seeds', type=int, default=1)
     parser.add_argument('--no-covariates', action='store_true', help='skip the retraining with covariates')
+    parser.add_argument('--output', default='region_ablation', help='saved as variables/<session_id>/<output>.npz')
     args = parser.parse_args()
 
     regions = {'groups': None, 'all': REGIONS}.get(args.retrain_regions, args.retrain_regions.split(','))
@@ -184,7 +186,7 @@ def main():
     targets = [int(t) for t in args.targets.split(',')]
     retrain = [] if args.retrain_targets == 'none' else [int(t) for t in args.retrain_targets.split(',')]
     out = run(pipeline, targets, retrain, regions, args.retrain_seeds, not args.no_covariates)
-    f = pipeline.dirs.variables / 'region_ablation.npz'
+    f = pipeline.dirs.variables / f'{args.output}.npz'
     save_npz(f, **out)
     print('Saved', f)
 
