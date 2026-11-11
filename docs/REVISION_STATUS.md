@@ -588,6 +588,27 @@ Fraction of the full R² lost when the region is removed (median over sessions; 
   only for broadband (VISp alone 0.61, other visual 0.25).
 - **Caveat:** inference-time only; the retrained check for 0.5–8 Hz (`region_ablation_bands`) is pending.
 
+### High bands by timescale (`summarize timescale_r2`; first 14 sessions, 2026-11-11)
+| Test R² (median over sessions) | 25–50 Hz | 50–100 Hz | 100–200 Hz | 200–400 Hz |
+|---|---|---|---|---|
+| No smoothing (4 ms) | 0.057 | 0.069 | 0.108 | 0.079 |
+| Smoothed 50 ms | 0.086 | 0.135 | 0.319 | 0.375 |
+| Smoothed 250 ms | 0.145 | 0.216 | 0.512 | 0.513 |
+| Transient AUC (null) | 0.76 (0.51) | 0.75 (0.51) | 0.81 (0.53) | 0.77 (0.52) |
+| Coherence at 1–4 Hz modulation (null) | 0.15 (0.06) | 0.17 (0.07) | 0.42 (0.19) | 0.50 (0.13) |
+- **The model predicts the slow modulation of high-band power, not its fast transients.** 100–400 Hz
+  R² rises from ≈ 0.1 unsmoothed to ≈ 0.5 at 250 ms, comparable to the 0.5–4 Hz envelope. Coherence
+  is 0.36–0.50 below 4 Hz modulation and falls to ≈ 0.01–0.04 above 10 Hz. Bins with transients
+  (> 3 SD) are ranked above the rest (AUC 0.75–0.90; null ≈ 0.5). All 14 sessions beat the
+  time-shifted spikes for every band and window (the shifted R² is negative, so the coherence and
+  AUC nulls are the useful thresholds).
+- 100–400 Hz is better predicted than 25–100 Hz at slow timescales: consistent with high-frequency
+  power tracking local spiking (multi-unit activity), which makes the spike bleed-through control
+  (R3 #11, units near the contact excluded) necessary before interpreting it.
+- Log-power R² is negative from 8 Hz up (amplitude R² ≈ 0–0.12): a model trained on power does not
+  fit the quiet periods that dominate the log scale; not a useful metric without log-power training.
+- Unsmoothed broadband R² 0.627 rises to 0.753 at 100 ms.
+
 ### Attribution baseline over all 89 sessions (`summarize attribution_baseline`)
 Inference ablation, mean fill: mean R² drop over 1–20% of units removed (median over sessions),
 paired difference from ridge weight, and sessions where the measure is best of the six:
