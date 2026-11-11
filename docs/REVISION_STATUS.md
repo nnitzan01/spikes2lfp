@@ -194,6 +194,9 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Framing decision after A and C | R1, R2 | ⬜ |
 | **D. Local vs distributed sources by band (biology for R1):** from `region_ablation.npz`: R² drop by region × band (broadband, 0.5–4, 4–8, 8–12, 12–25 Hz) × depth from the L4 border, as a fraction of full R² and per unit, single visual areas, region alone; mean-baseline attribution share by region (`attribution_baseline.npz`) and spike–LFP correlation share for comparison. Control: rerun `region_ablation` with `--retrain-targets 0,1,2 --retrain-regions VISp,visual_cortex_other,hippocampus` (the band dissociation is inference-only so far) | R1 | 🟡 built 2026-11-10: `summarize region_bands` (reads `region_ablation_bands.npz` too); retrain run pending |
 | **E. Evoked vs induced by region (biology for R1):** new `experiments/region_clock.py` on the stimulus-clock template: per region, R² and residual R² with the region mean-filled, and with only that region's spikes swapped between presentations of the same condition (keeps its evoked content, breaks its single-trial content); inference only | R1, R3 #1 | 🟡 built and tested 2026-11-10 (`experiments/region_clock.py`, `summarize region_clock`; also saves region shares of mean-baseline attribution, stLFP, spike–LFP correlation, ridge weight); run pending |
+| **F. Region contributions to the task-evoked LFP (biology for R1; scoped 2026-11-11):** exact Shapley contributions of 6 region groups (VISp, other visual cortex, hippocampus, thalamus, midbrain, other; 64 coalitions, mean fill) plus single-area removal, over all active and passive bins; event-locked averages for repeated image, change (hit / miss, before the first lick), omission and the flash after it, familiar vs novel session and shared vs novel images, active vs passive replay; RMS share per region in early (30–100 ms), late (100–250 ms) and post (250–750 ms) windows; checked on the test block alone | R1, R3 #1 | ⬜ scoped; one new experiment feeds F, G and H |
+| **G. Layer-specific inputs vs anatomy:** CSD (second spatial derivative across channels) of each source area's event-locked contribution, by depth from the L4 border, against the Allen connectivity atlas projection density of that area into VISp layers 1–6 (LG, LP, VISl, VISal, VISrl, VISam, VISpm; hippocampus and midbrain as no-projection controls); does each source match its own anatomical profile better than the others' (permutation over sources)? | R1 | ⬜ scoped |
+| **H. Local vs distributed balance by brain state:** Shapley shares (Cov(c_r, prediction) / Var(prediction), which sum to 1) in running vs stationary, high vs low pupil within stationary bins, engaged vs disengaged (reward rate), active vs passive (per-epoch scaling); exploratory, two-sided | R1 | ⬜ scoped; depends on F |
 
 ### Phase 3: validation and robustness
 | Item | Answers | Status |
@@ -721,6 +724,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** Scoped Phase 2 F–H (region contributions to task events, layer match with anatomy, brain state).
 - **2026-11-11** `timescale_r2` finished for all 89 sessions; section 4 updated (results match the 14-session preview).
 - **2026-11-11** Added `experiments/bleed_through.py` and `summarize bleed_through` (R3 #11); test session now has
   probe positions.
