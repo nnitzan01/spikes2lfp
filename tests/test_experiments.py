@@ -301,3 +301,25 @@ def test_transfer_scaling(pipeline_module, session_dir):
     assert out['input_rate_ratio'].shape == (3,)
     y = np.arange(100.)
     assert np.isclose(ts.recalibrated_r2(2 * y + 1, y), 1)
+
+
+def test_timescale_r2(pipeline_module, session_dir):
+    from experiments import timescale_r2 as ts
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = ts.run(pipeline, n_shifts=2)
+    n_ch, v = pipeline.n_channels, pipeline.dirs.variables
+    # no smoothing reproduces the train stage's test R2
+    np.testing.assert_allclose(out['r2_timescale'][0], np.load(v / 'r2_scores.npy'), atol=1e-4)
+    assert out['r2_timescale_shift'].shape == (2, len(ts.WINDOWS_MS), n_ch, 9)
+    assert out['coherence'].shape == (len(out['coherence_freqs']), n_ch, 9)
+    assert np.isnan(out['r2_log'][:, 0]).all() and np.isfinite(out['r2_log'][:, 1:]).all()
+    assert out['eta_target'].shape[-1] == len(out['eta_lags_ms'])
+    # the measures on synthetic signals: a smooth prediction of a spiky target scores better once both are smoothed
+    rng = np.random.default_rng(0)
+    slow = np.convolve(rng.normal(size=5000), np.ones(50) / 50, mode='same')
+    y = slow + rng.exponential(size=5000) * (rng.random(5000) < 0.02) * 5
+    yz = (y - y.mean()) / y.std()
+    s, _ = ts.scores(yz, (slow - y.mean()) / y.std(), 0.0, 1.0, band=1)
+    assert s['r2_timescale'][-1] > s['r2_timescale'][0]
+    auc, events = ts.transient_auc(yz, yz)
+    assert auc == 1 and events.any()

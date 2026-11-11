@@ -5,7 +5,8 @@ Print summaries of the experiment results, over the pooled channels of each sess
 Over every session with the experiment's file (median over sessions of the per-session median, with
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
-                                    | region_clock | stimulus_clock | transfer_scaling | simulation
+                                    | region_clock | stimulus_clock | transfer_scaling | timescale_r2
+                                    | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
     python -m experiments.summarize simulation --pattern 'simulation_long*'     # some of the simulation files
@@ -18,6 +19,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import wilcoxon
 
+import config
 import paths
 from experiments.pool_sessions import ALIGNMENT_TABLE
 
@@ -465,6 +467,49 @@ def transfer_scaling():
             print(f'  {k} - r2_active: ' + ' | '.join(f'{TARGET_NAMES[t]} {paired(stack(k)[:, e, t] - stack("r2_active")[:, e, t])}' for t in targets))
 
 
+ALL_BANDS = ['broadband'] + [f'{lo:g}-{hi:g} Hz' for lo, hi in config.BANDS]
+MODULATION_RANGES = [(0, 1), (1, 4), (4, 10), (10, 40)]     # Hz, coherence of target and prediction envelopes
+
+
+def timescale_r2():
+    """R2 by smoothing window, log / amplitude R2, coherence and transient AUC per band, against the time-shift null."""
+    def per_session(d, ch):
+        out = {k: channel_median(d[k], ch) for k in ('r2_timescale', 'r2_log', 'r2_amplitude', 'auc_transient')}
+        out.update({f'{k}_shift': channel_median(np.nanmean(d[f'{k}_shift'], 0), ch)
+                    for k in ('r2_timescale', 'r2_log', 'r2_amplitude', 'auc_transient')})
+        f = d['coherence_freqs']
+        for k in ('coherence', 'coherence_shift'):
+            c = d[k] if k == 'coherence' else np.nanmean(d[k], 0)
+            out[k] = np.stack([channel_median(c[(f >= lo) & (f < hi)].mean(0), ch) for lo, hi in MODULATION_RANGES])
+        out['windows'] = d['windows_ms']
+        return out
+
+    rows = list(over_sessions('timescale_r2', per_session).values())
+    if not rows:
+        return
+    stack = lambda k: np.stack([r[k] for r in rows])
+    windows = rows[0]['windows']
+    head = f'  {"":16s}' + ''.join(f'{b:>13s}' for b in ALL_BANDS)
+    v, null = stack('r2_timescale'), stack('r2_timescale_shift')
+    print('R2 after smoothing target and prediction (median over sessions; in brackets the time-shifted spikes):')
+    print(head)
+    for i, w in enumerate(windows):
+        print(f'  {f"{w} ms":16s}' + ''.join(f'{np.nanmedian(v[:, i, t]):6.3f} ({np.nanmedian(null[:, i, t]):5.2f})' for t in range(len(ALL_BANDS))))
+    print(f'sessions (of {len(rows)}) where the model beats the shifted spikes:')
+    for i, w in enumerate(windows):
+        print(f'  {f"{w} ms":16s}' + ''.join(f'{np.sum(v[:, i, t] > null[:, i, t]):>13d}' for t in range(len(ALL_BANDS))))
+    print('band targets: R2 of log power, of amplitude, transient AUC (median over sessions; shifted spikes in brackets):')
+    print(head)
+    for key in ('r2_log', 'r2_amplitude', 'auc_transient'):
+        v, null = stack(key), stack(key + '_shift')
+        print(f'  {key:16s}' + ''.join(f'{np.nanmedian(v[:, t]):6.3f} ({np.nanmedian(null[:, t]):5.2f})' for t in range(len(ALL_BANDS))))
+    v, null = stack('coherence'), stack('coherence_shift')
+    print('coherence of target and prediction by modulation frequency (median over sessions; shifted spikes in brackets):')
+    print(head)
+    for i, (lo, hi) in enumerate(MODULATION_RANGES):
+        print(f'  {f"{lo}-{hi} Hz":16s}' + ''.join(f'{np.nanmedian(v[:, i, t]):6.3f} ({np.nanmedian(null[:, i, t]):5.2f})' for t in range(len(ALL_BANDS))))
+
+
 def stimulus_clock():
     keys = ['r2_model', 'r2_template', 'r2_residual', 'r2_residual_own', 'r2_trial_model', 'r2_trial_template',
             'r2_shuffle', 'r2_residual_shuffle', 'r2_shift', 'r2_residual_shift', 'r2_retrained_residual',
@@ -494,6 +539,7 @@ SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline':
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
                 'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
+                'timescale_r2': timescale_r2,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 

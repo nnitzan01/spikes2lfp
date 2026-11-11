@@ -202,6 +202,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
+| **High bands, timescale of prediction (2026-11-11):** R² of band power is dominated by brief transients the MSE-trained model can only predict on average, while it tracks the slower power modulation (manuscript Fig. 3 panel). `experiments/timescale_r2.py` (inference only): R² after smoothing target and prediction (4–250 ms), R² of log power and amplitude, coherence by modulation frequency, transient AUC and event-triggered averages, each against a 30–120 s time-shift null. Next: a ceiling from adjacent sub-bands (shared modulation, independent estimation noise); repeat without units near the contact (R3 #11) | R3 #6 | 🟡 built and tested; run pending |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
 | Ablation (fr / attribution / random ranking, retrained) | R3 #8 | 🟡 `experiments/ablation.py` (not run; one seed) |
 | Spectral subsets (cortex, cortex without VISp, HPC, subcortical) | R3 #5 | 🟡 `experiments/spectral_r2.py` (not run) |
@@ -691,6 +692,8 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** Added `experiments/timescale_r2.py` and `summarize timescale_r2` (high bands: what timescale is
+  predicted, against the time-shift null).
 - **2026-11-11** Response-to-reviewers draft for the settled points: `docs/RESPONSE_TO_REVIEWERS.md`,
   mirrored in the shared doc https://claude.ai/artifact/4nsq3YNy5vVbGLZDrYWD2M (keep in step).
 - **2026-11-11** Spontaneous R²: no pipeline bug found; added `experiments/transfer_scaling.py` and

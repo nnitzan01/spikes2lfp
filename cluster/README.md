@@ -117,6 +117,7 @@ for c in linear nonlinear_arousal gain burst; do EXPERIMENT=simulation EXTRA_ARG
 EXPERIMENT=region_ablation EXTRA_ARGS="--retrain-targets 0,1,2 --retrain-regions VISp,visual_cortex_other,hippocampus --output region_ablation_bands" sbatch --array=1-89%8 --job-name=region_bands cluster/run_experiment.sbatch   # retrained removal for the slow bands; summarize region_bands
 EXPERIMENT=region_clock sbatch --array=1-89%8 cluster/run_experiment.sbatch   # evoked vs induced by region; summarize region_clock
 EXPERIMENT=transfer_scaling sbatch --array=1-89%8 --job-name=transfer_scaling cluster/run_experiment.sbatch   # spontaneous / passive R2 under different scalings; summarize transfer_scaling
+EXPERIMENT=timescale_r2 sbatch --array=1-89%8 --job-name=timescale_r2 cluster/run_experiment.sbatch   # R2 by timescale, log / amplitude R2, coherence, transient AUC vs time-shift null; summarize timescale_r2
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch

@@ -92,3 +92,21 @@ def test_simulation_pooled_over_sessions(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert '=== linear: 6 draws in 2 sessions (simulation_final_linear.npz)' in out
     assert 'ig_mean - ridge_weight' in out and '/6 > 0' in out
+
+
+def test_timescale_r2_summary(tmp_path, monkeypatch, capsys):
+    rng = np.random.default_rng(0)
+    for sid in (1, 2):
+        d = tmp_path / str(sid)
+        d.mkdir()
+        out = dict(windows_ms=np.array([4, 20]), coherence_freqs=np.linspace(0, 125, 251))
+        for k, extra in (('r2_timescale', (2,)), ('coherence', (251,)), ('r2_log', ()), ('r2_amplitude', ()), ('auc_transient', ())):
+            out[k] = rng.uniform(size=extra + (N_CH, T))
+            out[f'{k}_shift'] = rng.uniform(size=(3,) + extra + (N_CH, T))
+        np.savez(d / 'timescale_r2.npz', **out)
+    monkeypatch.setattr(summarize, 'sessions', lambda: [1, 2])
+    monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / str(sid))
+    monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(1, 5))
+    summarize.timescale_r2()
+    out = capsys.readouterr().out
+    assert '2 sessions with timescale_r2.npz' in out and '200-400 Hz' in out and '10-40 Hz' in out
