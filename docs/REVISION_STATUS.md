@@ -202,7 +202,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
 | High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | 🟡 `experiments/bleed_through.py` (2026-11-11): units within 50 / 100 / 200 µm of each contact (same probe) or all VISp units mean-filled at inference, and retrained without the 100 µm units (targets 1, 5–8); timescale measures; built and tested, run pending |
-| **High bands, timescale of prediction (2026-11-11):** R² of band power is dominated by brief transients the MSE-trained model can only predict on average, while it tracks the slower power modulation (manuscript Fig. 3 panel). `experiments/timescale_r2.py` (inference only): R² after smoothing target and prediction (4–250 ms), R² of log power and amplitude, coherence by modulation frequency, transient AUC and event-triggered averages, each against a 30–120 s time-shift null. Next: a ceiling from adjacent sub-bands (shared modulation, independent estimation noise); repeat without units near the contact (R3 #11) | R3 #6 | 🟡 built and tested; run pending |
+| **High bands, timescale of prediction (2026-11-11):** R² of band power is dominated by brief transients the MSE-trained model can only predict on average, while it tracks the slower power modulation (manuscript Fig. 3 panel). `experiments/timescale_r2.py` (inference only): R² after smoothing target and prediction (4–250 ms), R² of log power and amplitude, coherence by modulation frequency, transient AUC and event-triggered averages, each against a 30–120 s time-shift null. Next: a ceiling from adjacent sub-bands (shared modulation, independent estimation noise); repeat without units near the contact (R3 #11) | R3 #6 | ✅ all 89 sessions (section 4): every band beats the time-shift null at every window; 100–400 Hz R² ≈ 0.5 at 250 ms. Ceiling and bleed-through repeat pending |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
 | Ablation (fr / attribution / random ranking, retrained) | R3 #8 | 🟡 `experiments/ablation.py` (not run; one seed) |
 | Spectral subsets (cortex, cortex without VISp, HPC, subcortical) | R3 #5 | 🟡 `experiments/spectral_r2.py` (not run) |
@@ -588,26 +588,34 @@ Fraction of the full R² lost when the region is removed (median over sessions; 
   only for broadband (VISp alone 0.61, other visual 0.25).
 - **Caveat:** inference-time only; the retrained check for 0.5–8 Hz (`region_ablation_bands`) is pending.
 
-### High bands by timescale (`summarize timescale_r2`; first 14 sessions, 2026-11-11)
-| Test R² (median over sessions) | 25–50 Hz | 50–100 Hz | 100–200 Hz | 200–400 Hz |
-|---|---|---|---|---|
-| No smoothing (4 ms) | 0.057 | 0.069 | 0.108 | 0.079 |
-| Smoothed 50 ms | 0.086 | 0.135 | 0.319 | 0.375 |
-| Smoothed 250 ms | 0.145 | 0.216 | 0.512 | 0.513 |
-| Transient AUC (null) | 0.76 (0.51) | 0.75 (0.51) | 0.81 (0.53) | 0.77 (0.52) |
-| Coherence at 1–4 Hz modulation (null) | 0.15 (0.06) | 0.17 (0.07) | 0.42 (0.19) | 0.50 (0.13) |
+### High bands by timescale (`summarize timescale_r2`; all 89 sessions, 2026-11-11)
+| Test R² (median over sessions) | 0.5–4 Hz | 25–50 Hz | 50–100 Hz | 100–200 Hz | 200–400 Hz |
+|---|---|---|---|---|---|
+| No smoothing (4 ms) | 0.380 | 0.065 | 0.066 | 0.107 | 0.076 |
+| Smoothed 50 ms | 0.389 | 0.093 | 0.138 | 0.316 | 0.374 |
+| Smoothed 250 ms | 0.416 | 0.146 | 0.219 | 0.497 | 0.516 |
+| Transient AUC (null) | 0.90 (0.59) | 0.75 (0.52) | 0.76 (0.52) | 0.81 (0.52) | 0.77 (0.52) |
+| Coherence at 0–1 Hz modulation (null) | 0.34 (0.00) | 0.06 (0.00) | 0.14 (0.00) | 0.36 (0.01) | 0.42 (0.00) |
+| Coherence at 1–4 Hz modulation (null) | 0.28 (0.09) | 0.14 (0.06) | 0.18 (0.07) | 0.42 (0.17) | 0.46 (0.12) |
+| Coherence at 4–10 Hz modulation (null) | 0.05 (0.01) | 0.05 (0.01) | 0.09 (0.03) | 0.17 (0.06) | 0.26 (0.06) |
 - **The model predicts the slow modulation of high-band power, not its fast transients.** 100–400 Hz
-  R² rises from ≈ 0.1 unsmoothed to ≈ 0.5 at 250 ms, comparable to the 0.5–4 Hz envelope. Coherence
-  is 0.36–0.50 below 4 Hz modulation and falls to ≈ 0.01–0.04 above 10 Hz. Bins with transients
-  (> 3 SD) are ranked above the rest (AUC 0.75–0.90; null ≈ 0.5). All 14 sessions beat the
-  time-shifted spikes for every band and window (the shifted R² is negative, so the coherence and
-  AUC nulls are the useful thresholds).
-- 100–400 Hz is better predicted than 25–100 Hz at slow timescales: consistent with high-frequency
-  power tracking local spiking (multi-unit activity), which makes the spike bleed-through control
-  (R3 #11, units near the contact excluded) necessary before interpreting it.
-- Log-power R² is negative from 8 Hz up (amplitude R² ≈ 0–0.12): a model trained on power does not
-  fit the quiet periods that dominate the log scale; not a useful metric without log-power training.
-- Unsmoothed broadband R² 0.627 rises to 0.753 at 100 ms.
+  R² rises from ≈ 0.1 unsmoothed to ≈ 0.5 at 250 ms, above the 0.5–4 Hz envelope (0.42; which barely
+  changes with smoothing, as its power is already slow). Coherence is 0.36–0.46 below 4 Hz
+  modulation, still 0.17–0.26 at 4–10 Hz, and ≈ 0.01–0.04 above 10 Hz. Bins with transients (> 3 SD)
+  are ranked above the rest (AUC 0.75–0.81; null ≈ 0.52). **All 89 sessions beat the time-shifted
+  spikes for every band and window** (the shifted R² is negative, so the coherence and AUC nulls are
+  the useful thresholds).
+- The 14-session preview held: every number within ≈ 0.02.
+- 100–400 Hz is better predicted than 25–100 Hz at slow timescales (25–50 Hz is the weakest band at
+  every window): consistent with high-frequency power tracking local spiking (multi-unit activity),
+  which makes the spike bleed-through control (R3 #11, `bleed_through`) necessary before
+  interpreting it.
+- Log-power R² is negative from 8 Hz up (amplitude R² ≈ 0.01–0.11): a model trained on power does
+  not fit the quiet periods that dominate the log scale; not a useful metric without log-power training.
+- Broadband R² 0.631 unsmoothed rises to 0.779 at 100 ms and falls to 0.739 at 250 ms (smoothing
+  then removes predictable 4–10 Hz content; coherence 0.65 there).
+- **Proposed reporting for R3 #6:** keep all bands; report the unsmoothed R² with the 250 ms R², the
+  1–4 Hz coherence and the transient AUC, each against the time-shift null.
 
 ### Attribution baseline over all 89 sessions (`summarize attribution_baseline`)
 Inference ablation, mean fill: mean R² drop over 1–20% of units removed (median over sessions),
@@ -713,6 +721,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** `timescale_r2` finished for all 89 sessions; section 4 updated (results match the 14-session preview).
 - **2026-11-11** Added `experiments/bleed_through.py` and `summarize bleed_through` (R3 #11); test session now has
   probe positions.
 - **2026-11-11** Added `experiments/timescale_r2.py` and `summarize timescale_r2` (high bands: what timescale is
