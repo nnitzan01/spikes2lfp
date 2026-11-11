@@ -311,14 +311,15 @@ BAND_REGIONS = ['VISp', 'visual_cortex_other', 'hippocampus', 'thalamus', 'midbr
                 'VISam', 'VISpm', 'CA1', 'DG', 'LG', 'LP', 'APN', 'MRN']
 PROFILE_REGIONS = ['VISp', 'visual_cortex_other', 'hippocampus']
 N_PROFILE = 16                                              # aligned channels, deepest first (pool_sessions.ALIGNED_CHANNELS)
+MIN_PROFILE_R2 = 0.05                                       # channels with a lower full R2 are left out of the depth profile
 
 
 def region_bands():
     """
     Local vs distributed (section D of REVISION_STATUS): the fraction of the full R2 lost when a region is
     removed at inference (mean fill), per band (median drop over the pooled channels / median full R2, per
-    session), VISp vs the other visual areas per band, and the depth profile of the drop (pooled channels
-    aligned from the deepest, with the layer 4 borders).
+    session), VISp vs the other visual areas per band, and the depth profile of the drop as a fraction of
+    each channel's own full R2 (pooled channels aligned from the deepest, with the layer 4 borders).
     """
     def per_session(d, ch):
         regions = [str(r) for r in d['regions']]
@@ -327,7 +328,8 @@ def region_bands():
         drop = (d['r2_full'] - d['r2_removed'][0])[idx][:, ch]            # regions x channels x targets
         profile = np.full((len(PROFILE_REGIONS), N_PROFILE, full.shape[1]), np.nan)
         n = min(N_PROFILE, ch.stop - ch.start)
-        profile[:, :n] = drop[[BAND_REGIONS.index(r) for r in PROFILE_REGIONS], :n] / np.nanmedian(full, 0)
+        own = np.where(full[:n] > MIN_PROFILE_R2, full[:n], np.nan)              # each channel's own full R2
+        profile[:, :n] = drop[[BAND_REGIONS.index(r) for r in PROFILE_REGIONS], :n] / own
         out = dict(n_units=d['region_n_units'][idx], full=np.nanmedian(full, 0),
                    fraction=np.nanmedian(drop, 1) / np.nanmedian(full, 0),
                    alone=np.nanmedian(d['r2_only'][0][idx][:, ch], 1) / np.nanmedian(full, 0), profile=profile)
@@ -383,7 +385,7 @@ def region_bands():
         print(f'  (broadband - {TARGET_NAMES[t]}) of that difference: {paired(diff[:, 0] - diff[:, t])}')
     borders = pd.read_csv(ALIGNMENT_TABLE).set_index('session').loc[list(rows)]
     lower, upper = (np.median(borders[k] - borders['first_channel_index']) for k in ('lower_border_index', 'upper_border_index'))
-    print(f'depth profile: fraction of the full R2 lost per aligned channel (0 = deepest pooled channel; '
+    print(f'depth profile: fraction of each channel\'s full R2 lost (channels with full R2 > {MIN_PROFILE_R2}; 0 = deepest pooled channel; '
           f'layer 4 at about {lower:.0f}-{upper:.0f}), median over sessions with units:')
     profile = stack('profile')
     for i, r in enumerate(PROFILE_REGIONS):

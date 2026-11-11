@@ -533,9 +533,59 @@ Mean R² drop over 1–20% removed at inference; difference from ridge weight; s
     confounded by arousal (percentile 0.97–0.98); firing rate alone reaches AUC 0.80 in LFP-like
     burst (the condition rewards high rates), equal to IG mean there.
   - Training still varies across draws (best epochs 11–99 in one condition); single session, 3 draws.
+- **Final run (LFP-like: 200 drivers, τ 10–100 ms; 10 draws × 3 sessions per condition; 100-epoch cap,
+  patience 10; `summarize simulation`).** Means over 30 draws; paired differences over draws (median, draws > 0):
+  | | Linear | Nonlin + arousal | Gain | Burst |
+  |---|---|---|---|---|
+  | CNN / ridge R² (ceiling ≈ 0.69) | 0.509 / 0.400 | 0.492 / 0.311 | 0.351 / 0.153 | 0.414 / 0.195 |
+  | CNN − ridge, paired | +0.055 (23/30) | +0.086 (27/30) | +0.124 (28/30) | +0.081 (25/30) |
+  | AUC: IG mean − ridge | **+0.023** (23/30) | **+0.031** (23/30) | **+0.067** (28/30) | **+0.057** (28/30) |
+  | Spearman with true total: IG mean − ridge | **+0.129** (28/30) | **+0.131** (26/30) | **+0.218** (28/30) | +0.016 (17/30, n.s.) |
+  | Spearman with true per-spike effect: IG mean − ridge | −0.019 (n.s.) | −0.026 (n.s.) | −0.035 (6/30) | −0.049 (8/30) |
+  | Confound percentile: IG mean / ridge / spike–LFP correlation | 0.71 / 0.58 / 0.80 | 0.85 / 0.70 / 0.91 | 0.77 / 0.61 / 0.83 | 0.71 / 0.61 / 0.85 |
+  | AUC − spike–LFP correlation, IG mean | +0.21 (30/30) | +0.17 (30/30) | +0.13 (30/30) | +0.12 (30/30) |
+  | Peak-lag Spearman, IG mean | 0.34 | 0.23 | 0.11 | 0.14 |
+  - **For the paper (R2 #1, R1 "simpler methods"):** where the ground truth is known and the CNN–ridge
+    gap is near the real one (+0.06 to +0.12 vs +0.03 real), mean-baseline attribution finds the
+    drivers better than ridge weights in all four conditions and ranks their total contribution better
+    in three (burst tied). It beats spike–LFP correlation, stLFP, population coupling and firing rate
+    everywhere (correlation: AUC +0.12 to +0.21, total-contribution Spearman +0.41 to +0.52, 29–30/30 draws).
+  - **Limits to state:** ridge weights recover per-spike effects slightly better; attribution credits
+    non-drivers that are high-rate or correlated with arousal more than ridge does (confound percentile
+    0.71–0.85 vs 0.58–0.70), though less than spike–LFP correlation (0.80–0.91): attribution is the
+    model's reliance, not causal drive. The zero-baseline per-spike measure is poor at detection
+    (AUC 0.57–0.72), which supports the 2026-11-09 decision to use mean-baseline totals for importance.
+  - **Lags:** peak-lag Spearman 0.11–0.34 in this regime. The attribution timing claims (R2 #2) cannot
+    rest on peak lags; keep at most coarse early/late statements, or drop them.
 - Confound credit is real for both: with an arousal component, units correlated with running are
   credited (IG 0.85–0.91, ridge 0.75–0.77, correlation 0.98). Attribution measures predictive
   reliance, not causal drive; the text must say so.
+
+### Local vs distributed by band (`summarize region_bands`, 89 sessions; inference, mean fill)
+Fraction of the full R² lost when the region is removed (median over sessions; full R² 0.631 / 0.380 /
+0.320 / 0.133 / 0.157 for broadband / 0.5–4 / 4–8 / 8–12 / 12–25 Hz):
+| Region (median units) | Broadband | 0.5–4 Hz | 4–8 Hz | 8–12 Hz | 12–25 Hz |
+|---|---|---|---|---|---|
+| VISp (49) | **0.56** | 0.32 | 0.26 | 0.23 | 0.35 |
+| Other visual cortex (230) | 0.16 | **0.47** | **0.61** | **0.64** | **0.68** |
+| Hippocampus (198) | 0.04 | 0.00 | 0.01 | 0.01 | 0.01 |
+| Thalamus (110) / midbrain (112) | 0.01 / 0.01 | 0.02 / 0.05 | 0.04 / 0.05 | 0.06 / 0.09 | 0.05 / 0.08 |
+| VISl / VISpm / VISal (single areas) | 0.04 / 0.01 / 0.02 | 0.09 / 0.05 / 0.05 | 0.11 / 0.08 / 0.07 | 0.11 / 0.08 / 0.06 | 0.14 / 0.08 / 0.11 |
+- **A double dissociation, in nearly every session:** VISp − other visual cortex is +0.38 for broadband
+  (76/89) and −0.17 to −0.40 for every band envelope; the broadband-minus-band interaction is positive in
+  85–89 of 89 sessions (p < 1e-15). The local population carries the broadband (evoked, fast) LFP; the
+  envelopes from 0.5 to 25 Hz depend mostly on the other visual areas (VISl, VISpm, VISal lead), i.e.
+  the wider visual network. Not specific to slow bands: it holds through 12–25 Hz.
+- Subcortical regions are minor but not zero for the envelopes (thalamus, midbrain, APN, LG 0.02–0.09
+  at 8–25 Hz); hippocampus matters only for broadband (0.04).
+- Depth (first run, divided by the session's median full R², so superficial values are deflated by low
+  R² there; now per channel, rerun the summary): VISp's broadband share peaks around and below layer 4;
+  the other visual areas' 8–25 Hz share peaks just below layer 4 (0.86–0.97 on aligned channels 4–6),
+  their 4–8 Hz share deepest. Hippocampus has no deep gradient (0.03–0.07, if anything higher
+  superficially): no sign of simple volume conduction from below.
+- "Region alone" is negative for the envelopes (mean-filling most units is out of distribution); use
+  only for broadband (VISp alone 0.61, other visual 0.25).
+- **Caveat:** inference-time only; the retrained check for 0.5–8 Hz (`region_ablation_bands`) is pending.
 
 ### Attribution baseline over all 89 sessions (`summarize attribution_baseline`)
 Inference ablation, mean fill: mean R² drop over 1–20% of units removed (median over sessions),
@@ -634,6 +684,9 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** Final simulation (LFP-like, 30 draws per condition) and `region_bands` reviewed (section 4).
+  Depth profile in `region_bands` now divides by each channel's own full R². `region_clock` and the
+  `region_ablation_bands` retrain had not been submitted.
 - **2026-11-10** Biology for R1 (Phase 2 D, E): `summarize region_bands` (band × depth × region from
   `region_ablation`), `region_ablation --output`, new `experiments/region_clock.py` and `summarize
   region_clock`; `stimulus_clock.clock()` factored out for reuse.
