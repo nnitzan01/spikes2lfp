@@ -284,3 +284,20 @@ def test_region_clock(pipeline_module, session_dir):
     np.testing.assert_allclose(out['r2_residual'][:, 0], clock['r2_residual'][:, 0], atol=1e-6)
     shares = region_clock.region_shares(np.ones((4, 2, 3)), {r: np.arange(4) < 2 if r == 'VISp' else np.zeros(4, bool) for r in REGIONS})
     assert np.allclose(shares[REGIONS.index('VISp')], 0.5) and np.isnan(shares[REGIONS.index('LG')]).all()
+
+
+def test_transfer_scaling(pipeline_module, session_dir):
+    from experiments import transfer_scaling as ts
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    pipeline.transfer()
+    out = ts.run(pipeline, targets=[0])
+    v = pipeline.dirs.variables
+    # the active scalers reproduce the train stage's test R2 and the transfer stage's R2
+    np.testing.assert_allclose(out['r2_active'][0, :, 0], np.load(v / 'r2_scores.npy')[:, 0], atol=1e-4)
+    np.testing.assert_allclose(out['r2_active'][1, :, 0], np.load(v / 'r2_scores_passive.npy')[:, 0], atol=1e-4)
+    np.testing.assert_allclose(out['r2_active'][2, :, 0], np.load(v / 'r2_scores_spont.npy')[:, 0], atol=1e-4)
+    assert np.isfinite(out['r2_epoch'][:, :, 0]).all() and np.isnan(out['r2_epoch'][:, :, 1]).all()
+    assert (out['r2_corr'][:, :, 0] >= 0).all() and (out['r2_corr'][:, :, 0] <= 1).all()
+    assert out['input_rate_ratio'].shape == (3,)
+    y = np.arange(100.)
+    assert np.isclose(ts.recalibrated_r2(2 * y + 1, y), 1)

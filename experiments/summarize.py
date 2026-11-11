@@ -5,7 +5,7 @@ Print summaries of the experiment results, over the pooled channels of each sess
 Over every session with the experiment's file (median over sessions of the per-session median, with
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
-                                    | region_clock | stimulus_clock | simulation
+                                    | region_clock | stimulus_clock | transfer_scaling | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
     python -m experiments.summarize simulation --pattern 'simulation_long*'     # some of the simulation files
@@ -447,6 +447,24 @@ def region_clock():
                 print(f'  {r:22s}', np.round(np.nanmedian(v[has, i, :3], 0), 3))
 
 
+def transfer_scaling():
+    """Spontaneous / passive R2 under the active scalers vs per-epoch scaling, recalibration and r^2."""
+    from experiments.transfer_scaling import KEYS
+    rows = list(over_sessions('transfer_scaling', lambda d, ch: dict(
+        epochs=d['epochs'], ratio=d['input_rate_ratio'], **{k: channel_median(d[k], ch) for k in KEYS})).values())
+    if not rows:
+        return
+    stack = lambda k: np.stack([r[k] for r in rows])
+    targets = [t for t in range(5) if np.isfinite(stack('r2_active')[:, 0, t]).any()]
+    for e, epoch in enumerate(rows[0]['epochs']):
+        print(f'=== {epoch}: input rate / active training rate, median over sessions {np.median(stack("ratio")[:, e]):.2f}')
+        print(f'  {"":18s}' + ''.join(f'{TARGET_NAMES[t]:>12s}' for t in targets))
+        for k in KEYS:
+            print(f'  {k:18s}' + ''.join(f'{np.nanmedian(stack(k)[:, e, t]):12.3f}' for t in targets))
+        for k in ('r2_epoch', 'r2_recalibrated'):
+            print(f'  {k} - r2_active: ' + ' | '.join(f'{TARGET_NAMES[t]} {paired(stack(k)[:, e, t] - stack("r2_active")[:, e, t])}' for t in targets))
+
+
 def stimulus_clock():
     keys = ['r2_model', 'r2_template', 'r2_residual', 'r2_residual_own', 'r2_trial_model', 'r2_trial_template',
             'r2_shuffle', 'r2_residual_shuffle', 'r2_shift', 'r2_residual_shift', 'r2_retrained_residual',
@@ -475,7 +493,7 @@ def stimulus_clock():
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
-                'region_bands': region_bands, 'region_clock': region_clock,
+                'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 

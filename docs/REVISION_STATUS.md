@@ -650,8 +650,15 @@ paired difference from ridge weight, and sessions where the measure is best of t
 - Layer-controlled cluster decoder tabled (supplementary at most).
 
 ### Open
-- **Spontaneous R² ≈ 0.** Hypothesis: targets scaled with the active-epoch scaler; add
-  per-epoch z-scored R² to the transfer stage. Unconfirmed.
+- **Figure 6 is not in the repo:** it was made in MATLAB outside this codebase. Reviewer 3 asks only
+  for text-level fixes on it (minor 2: the 6E vs 6F reference; minor 3: state why neuron counts differ
+  across panels). If it has to be regenerated, the user can provide the MATLAB code to convert to Python.
+- **Spontaneous R² ≈ 0.** No structural bug: the transfer stage feeds 3 s chunks as in training. The
+  likely cause is the scaling: v2 scales the spontaneous spikes and targets with the active-epoch
+  training scalers and sklearn's R² counts any offset or gain mismatch as error, whereas v1 z-scored
+  the targets within each epoch. `experiments/transfer_scaling.py` (2026-11-11) scores active test,
+  passive and spontaneous four ways (active scalers, per-epoch scaling as v1, linear recalibration
+  on the first half, r²) with target / prediction means and SDs and the input rate ratio; run pending.
 - Early sign flip of thalamus / hippocampus in Fig. 7D; possibly check with the mean baseline.
 - Channel 13 of session 1047969464 was an outlier in the timing run.
 - One model (session 1047969464, chan 4 band 2) above the completeness limit at 400 steps.
@@ -684,6 +691,8 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** Spontaneous R²: no pipeline bug found; added `experiments/transfer_scaling.py` and
+  `summarize transfer_scaling`. Noted that Figure 6 was made in MATLAB outside the repo.
 - **2026-11-11** Final simulation (LFP-like, 30 draws per condition) and `region_bands` reviewed (section 4).
   Depth profile in `region_bands` now divides by each channel's own full R². `region_clock` and the
   `region_ablation_bands` retrain had not been submitted.
