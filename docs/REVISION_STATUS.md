@@ -691,6 +691,8 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** Response-to-reviewers draft for the settled points: `docs/RESPONSE_TO_REVIEWERS.md`,
+  mirrored in the shared doc https://claude.ai/artifact/4nsq3YNy5vVbGLZDrYWD2M (keep in step).
 - **2026-11-11** Spontaneous R²: no pipeline bug found; added `experiments/transfer_scaling.py` and
   `summarize transfer_scaling`. Noted that Figure 6 was made in MATLAB outside the repo.
 - **2026-11-11** Final simulation (LFP-like, 30 draws per condition) and `region_bands` reviewed (section 4).
