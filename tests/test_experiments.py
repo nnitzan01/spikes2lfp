@@ -343,3 +343,41 @@ def test_bleed_through(pipeline_module, session_dir):
     m = bt.exclusion_masks(units, chans)
     assert m['near_50'][:, 0].tolist() == [True, False, False] and m['near_100'][:, 0].tolist() == [True, True, False]
     assert m['visp'][:, 0].tolist() == [True, True, False]
+
+
+def test_explore_task(pipeline_module, session_dir):
+    from experiments import explore_task as et
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out, fig_dir = et.run(pipeline)
+    for name in ('1_timeline', '2_pupil', '3_behaviour', '4_lfp_events', '5_bands', '6_population', '7_model'):
+        assert (fig_dir / f'{name}.png').exists(), name
+    types = list(out['event_types'])
+    assert {'image', 'omission', 'passive_image'} <= set(types)
+    assert out['eta_lfp'].shape[1:] == (len(out['eta_lags_ms']), pipeline.n_channels, 9)
+    assert out['model_eta_prediction'].shape[-1] == len(et.MODEL_TARGETS)
+    assert 0 <= out['hit_rate'] <= 1 and 0 <= out['pupil_stable_active'] <= 1
+
+
+def test_explore_task_pupil_and_events():
+    import pandas as pd
+    from experiments import explore_task as et
+    # pupil: a blink, an outlier and a long gap
+    t = np.arange(0, 120, 1 / 60)
+    x = 100 + np.sin(t / 5)
+    x[600:603] = np.nan                       # 50 ms gap: interpolated
+    x[1200] = 1000                            # outlier: removed, then interpolated over
+    x[3000:3300] = np.nan                     # 5 s gap: left out
+    p = et.clean_pupil(t, x)
+    assert p['outlier'][1200] and np.isfinite(p['clean'][601]) and np.isfinite(p['clean'][1200])
+    assert np.isnan(p['clean'][3150]) and p['stable'][:2000].all()
+    # events: change with and without a lick in the response window, an omission and the image after it
+    stim = pd.DataFrame({'start_time': [0, 0.75, 1.5, 2.25, 3.0, 3.75],
+                         'image_name': ['a', 'a', 'b', 'omitted', 'b', 'c'],
+                         'is_change': [False, False, True, False, False, True]})
+    events, latency = et.task_events(stim, licks=[1.9, 6.0])
+    assert list(events['change_hit']) == [1.5] and list(events['change_miss']) == [3.75]
+    assert list(events['omission']) == [2.25] and list(events['post_omission']) == [3.0]
+    assert list(events['image']) == [0, 0.75]
+    np.testing.assert_allclose(latency, [0.4, 2.25])
+    passive, _ = et.task_events(stim, licks=[], prefix='passive_')
+    assert list(passive['passive_change']) == [1.5, 3.75]

@@ -131,3 +131,21 @@ def test_bleed_through_summary(tmp_path, monkeypatch, capsys):
     summarize.bleed_through()
     out = capsys.readouterr().out
     assert 'retrained without them' in out and 'R2 250 ms, near_100' in out and 'near_200' in out
+
+
+def test_explore_task_summary(tmp_path, monkeypatch, capsys):
+    rng = np.random.default_rng(0)
+    types = np.array(['image', 'change_hit', 'omission', 'passive_image'])
+    for sid in (1, 2, 3):
+        d = tmp_path / 'variables' / str(sid)
+        d.mkdir(parents=True)
+        np.savez(d / 'explore_task.npz', event_types=types, eta_lags_ms=np.arange(10.), layer4_channel=2,
+                 n_events=np.array([100, 10, 5, 50]), n_events_test=np.array([20, 2, 1, -1]),
+                 eta_lfp=rng.normal(size=(4, 10, N_CH, 9)), **{k: rng.uniform() for k in summarize.EXPLORE_SCALARS})
+    monkeypatch.setattr(summarize, 'sessions', lambda: [1, 2, 3])
+    monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / 'variables' / str(sid))
+    monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(1, 5))
+    summarize.explore_task()
+    out = capsys.readouterr().out
+    assert 'n_change_hit' in out and (tmp_path / 'variables' / 'explore_task_sessions.csv').exists()
+    assert (tmp_path / 'variables' / 'explore_task_pooled.png').exists()

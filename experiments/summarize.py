@@ -6,6 +6,7 @@ Over every session with the experiment's file (median over sessions of the per-s
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
                                     | region_clock | stimulus_clock | transfer_scaling | timescale_r2 | bleed_through
+                                    | explore_task
                                     | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
@@ -577,11 +578,73 @@ def stimulus_clock():
         print(f'    {TARGET_NAMES[t]:10s} {np.nanmedian(v["r2_template"][:, t] / v["r2_model"][:, t]):.2f}')
 
 
+EXPLORE_SCALARS = ['hit_rate', 'lick_latency_median', 'pupil_missing', 'pupil_outlier', 'pupil_stable_active',
+                   'running_active', 'stationary_active', 'engaged_active', 'engaged_test', 'active_minutes']
+
+
+def explore_task():
+    """Per-session task, behaviour and pupil numbers, event counts, and the familiar vs novel event-locked LFP at layer 4."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    def per_session(d, ch):
+        row = {k: float(d[k]) for k in EXPLORE_SCALARS}
+        types = [str(t) for t in d['event_types']]
+        row.update({f'n_{t}': int(n) for t, n in zip(types, d['n_events'])})
+        row.update({f'n_test_{t}': int(n) for t, n in zip(types, d['n_events_test']) if n >= 0})
+        l4 = int(d['layer4_channel'])
+        return row, {t: d['eta_lfp'][i, :, l4] for i, t in enumerate(types)}, d['eta_lags_ms']
+
+    rows = over_sessions('explore_task', per_session)
+    if not rows:
+        return
+    table = pd.DataFrame({sid: r[0] for sid, r in rows.items()}).T.rename_axis('session_id').reset_index()
+    meta = pd.read_csv(paths.REPO_DIR / 'tables' / 'sessions.csv')[['session_id', 'mouse_id', 'experience_level', 'cre_line']]
+    table = meta.merge(table, on='session_id', how='right')
+    out_dir = variables_dir(sessions()[0]).parent
+    table.to_csv(out_dir / 'explore_task_sessions.csv', index=False)
+    print(f'table: {out_dir / "explore_task_sessions.csv"}')
+    counts = [c for c in table if c.startswith('n_')]
+    print('median (min-max) over sessions:')
+    for c in EXPLORE_SCALARS + counts:
+        v = table[c].astype(float)
+        print(f'  {c:28s} {v.median():9.3f} ({v.min():.3f}-{v.max():.3f})')
+    if table.experience_level.notna().any():
+        print('by experience level (median):')
+        print(table.groupby('experience_level')[EXPLORE_SCALARS + counts].median().T.round(3).to_string())
+
+    lags = next(iter(rows.values()))[2]
+    types = ['image', 'change_hit', 'change_miss', 'omission', 'post_omission', 'passive_image']
+    names = ['broadband'] + [f'{lo:g}-{hi:g} Hz' for lo, hi in config.BANDS]
+    level = dict(zip(table.session_id, table.experience_level))
+    fig, ax = plt.subplots(len(types), 3, figsize=(14, 2.6 * len(types)), sharex=True, squeeze=False)
+    for i, t in enumerate(types):
+        for j, target in enumerate((0, 1, 7)):
+            for lev, color in (('Familiar', 'tab:blue'), ('Novel', 'tab:red')):
+                eta = [r[1][t][:, target] for sid, r in rows.items() if level.get(sid) == lev and t in r[1]]
+                eta = [e for e in eta if np.isfinite(e).all()]
+                if eta:
+                    eta = np.stack(eta)
+                    ax[i, j].plot(lags, np.median(eta, 0), color=color, label=f'{lev} ({len(eta)})')
+                    ax[i, j].fill_between(lags, *np.percentile(eta, [25, 75], 0), color=color, alpha=0.15, lw=0)
+            ax[i, j].axvline(0, color='k', lw=0.5)
+            ax[i, j].set_title(f'{t}, {names[target]}', fontsize=9)
+        ax[i, 0].legend(fontsize=7)
+    for a in ax[-1]:
+        a.set_xlabel('time from onset (ms)')
+    fig.suptitle('event-locked targets at the layer 4 channel (z), median and IQR over sessions', fontsize=10)
+    fig.tight_layout()
+    fig.savefig(out_dir / 'explore_task_pooled.png', dpi=110)
+    plt.close(fig)
+    print(f'figure: {out_dir / "explore_task_pooled.png"}')
+
+
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
                 'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
-                'timescale_r2': timescale_r2, 'bleed_through': bleed_through,
+                'timescale_r2': timescale_r2, 'bleed_through': bleed_through, 'explore_task': explore_task,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 
