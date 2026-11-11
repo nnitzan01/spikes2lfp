@@ -323,3 +323,23 @@ def test_timescale_r2(pipeline_module, session_dir):
     assert s['r2_timescale'][-1] > s['r2_timescale'][0]
     auc, events = ts.transient_auc(yz, yz)
     assert auc == 1 and events.any()
+
+
+def test_bleed_through(pipeline_module, session_dir):
+    import pandas as pd
+    from experiments import bleed_through as bt
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = bt.run(pipeline, retrain_groups=['near_100'], retrain_targets=[1])
+    n_ch, v = pipeline.n_channels, pipeline.dirs.variables
+    np.testing.assert_allclose(out['inf_r2_timescale'][0, 0], np.load(v / 'r2_scores.npy'), atol=1e-4)    # 'all', no smoothing
+    assert out['inf_r2_timescale'].shape == (1 + len(bt.GROUPS), len(bt.WINDOWS_MS), n_ch, 9)
+    assert np.isfinite(out['ret_r2_timescale'][:, :, :, 1]).all() and np.isnan(out['ret_r2_timescale'][:, :, :, 0]).all()
+    assert out['n_excluded'].shape == (len(bt.GROUPS), n_ch)
+    # distances: same probe only; the radius groups are nested
+    units = pd.DataFrame({'probe_id': [1, 1, 2], 'probe_vertical_position': [0., 120., 0.], 'structure_acronym': ['VISp', 'VISp', 'LGd']})
+    chans = pd.DataFrame({'probe_id': [1], 'probe_vertical_position': [40.]})
+    d = bt.distances(units, chans)[:, 0]
+    assert d[0] == 40 and d[1] == 80 and np.isinf(d[2])
+    m = bt.exclusion_masks(units, chans)
+    assert m['near_50'][:, 0].tolist() == [True, False, False] and m['near_100'][:, 0].tolist() == [True, True, False]
+    assert m['visp'][:, 0].tolist() == [True, True, False]

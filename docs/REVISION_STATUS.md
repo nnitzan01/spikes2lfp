@@ -201,7 +201,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 run on session 1: ridge wins, but the CNN-LSTM underfits (R² 0.16–0.28); rerun with diagnostics, 40 epochs, 'gain' and 'burst' conditions |
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
-| High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ⬜ (`spectral_r2.py` has the unit-group part, not run) |
+| High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | 🟡 `experiments/bleed_through.py` (2026-11-11): units within 50 / 100 / 200 µm of each contact (same probe) or all VISp units mean-filled at inference, and retrained without the 100 µm units (targets 1, 5–8); timescale measures; built and tested, run pending |
 | **High bands, timescale of prediction (2026-11-11):** R² of band power is dominated by brief transients the MSE-trained model can only predict on average, while it tracks the slower power modulation (manuscript Fig. 3 panel). `experiments/timescale_r2.py` (inference only): R² after smoothing target and prediction (4–250 ms), R² of log power and amplitude, coherence by modulation frequency, transient AUC and event-triggered averages, each against a 30–120 s time-shift null. Next: a ceiling from adjacent sub-bands (shared modulation, independent estimation noise); repeat without units near the contact (R3 #11) | R3 #6 | 🟡 built and tested; run pending |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
 | Ablation (fr / attribution / random ranking, retrained) | R3 #8 | 🟡 `experiments/ablation.py` (not run; one seed) |
@@ -713,6 +713,8 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-11** Added `experiments/bleed_through.py` and `summarize bleed_through` (R3 #11); test session now has
+  probe positions.
 - **2026-11-11** Added `experiments/timescale_r2.py` and `summarize timescale_r2` (high bands: what timescale is
   predicted, against the time-shift null).
 - **2026-11-11** Response-to-reviewers draft for the settled points: `docs/RESPONSE_TO_REVIEWERS.md`,

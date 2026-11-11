@@ -110,3 +110,24 @@ def test_timescale_r2_summary(tmp_path, monkeypatch, capsys):
     summarize.timescale_r2()
     out = capsys.readouterr().out
     assert '2 sessions with timescale_r2.npz' in out and '200-400 Hz' in out and '10-40 Hz' in out
+
+
+def test_bleed_through_summary(tmp_path, monkeypatch, capsys):
+    rng = np.random.default_rng(0)
+    for sid in (1, 2, 3):
+        d = tmp_path / str(sid)
+        d.mkdir()
+        out = dict(groups=np.array(['all', 'near_50', 'near_100', 'near_200', 'visp']), retrain_groups=np.array(['all', 'near_100']),
+                   n_excluded=rng.integers(0, 9, (4, N_CH)), nearest_um=rng.uniform(10, 50, N_CH), windows_ms=np.array([4, 250]),
+                   coherence_freqs=np.linspace(0, 125, 251))
+        for p, n in (('inf', 5), ('ret', 2)):
+            out[f'{p}_r2_timescale'] = rng.uniform(size=(n, 2, N_CH, T))
+            out[f'{p}_coherence'] = rng.uniform(size=(n, 251, N_CH, T))
+            out[f'{p}_auc_transient'] = rng.uniform(size=(n, N_CH, T))
+        np.savez(d / 'bleed_through.npz', **out)
+    monkeypatch.setattr(summarize, 'sessions', lambda: [1, 2, 3])
+    monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / str(sid))
+    monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(1, 5))
+    summarize.bleed_through()
+    out = capsys.readouterr().out
+    assert 'retrained without them' in out and 'R2 250 ms, near_100' in out and 'near_200' in out

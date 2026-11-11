@@ -5,7 +5,7 @@ Print summaries of the experiment results, over the pooled channels of each sess
 Over every session with the experiment's file (median over sessions of the per-session median, with
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
-                                    | region_clock | stimulus_clock | transfer_scaling | timescale_r2
+                                    | region_clock | stimulus_clock | transfer_scaling | timescale_r2 | bleed_through
                                     | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
@@ -510,6 +510,48 @@ def timescale_r2():
         print(f'  {f"{lo}-{hi} Hz":16s}' + ''.join(f'{np.nanmedian(v[:, i, t]):6.3f} ({np.nanmedian(null[:, i, t]):5.2f})' for t in range(len(ALL_BANDS))))
 
 
+def bleed_through():
+    """High-band prediction without the units near each LFP contact: inference (mean fill) and retrained."""
+    def per_session(d, ch):
+        f = d['coherence_freqs']
+        lo = (f >= 1) & (f < 4)
+        out = dict(groups=d['groups'], retrain_groups=d['retrain_groups'], n_excluded=np.nanmedian(d['n_excluded'][:, ch], 1),
+                   nearest=np.nanmedian(d['nearest_um'][ch]), windows=d['windows_ms'])
+        for p in ('inf', 'ret'):
+            out[f'{p}_r2'] = channel_median(d[f'{p}_r2_timescale'], ch)                  # groups x windows x targets
+            out[f'{p}_coh'] = channel_median(d[f'{p}_coherence'][:, lo].mean(1), ch)      # groups x targets, 1-4 Hz
+            out[f'{p}_auc'] = channel_median(d[f'{p}_auc_transient'], ch)
+        return out
+
+    rows = list(over_sessions('bleed_through', per_session).values())
+    if not rows:
+        return
+    stack = lambda k: np.stack([r[k] for r in rows])
+    groups, retrain_groups = [str(g) for g in rows[0]['groups']], [str(g) for g in rows[0]['retrain_groups']]
+    windows = list(rows[0]['windows'])
+    print(f'nearest unit to the contact, median {np.median(stack("nearest")):.0f} um; units excluded per channel (median): '
+          + ', '.join(f'{g} {np.median(stack("n_excluded")[:, i]):.0f}' for i, g in enumerate(groups[1:])))
+    bands = range(len(ALL_BANDS))
+    for p, names, what in (('inf', groups, 'inference, excluded units mean-filled'), ('ret', retrain_groups, 'retrained without them')):
+        r2, coh, auc = stack(f'{p}_r2'), stack(f'{p}_coh'), stack(f'{p}_auc')
+        if np.isnan(r2).all():
+            continue
+        print(f'=== {what} (median over sessions)')
+        print(f'  {"":24s}' + ''.join(f'{b:>13s}' for b in ALL_BANDS))
+        for w in (0, len(windows) - 1):
+            for i, g in enumerate(names):
+                print(f'  {f"R2 {windows[w]} ms, {g}":24s}' + ''.join(f'{np.nanmedian(r2[:, i, w, t]):13.3f}' for t in bands))
+        for label, v in (('coherence 1-4 Hz', coh), ('transient AUC', auc)):
+            for i, g in enumerate(names):
+                print(f'  {f"{label}, {g}":24s}' + ''.join(f'{np.nanmedian(v[:, i, t]):13.3f}' for t in bands))
+        print(f'  change from all units, R2 at {windows[-1]} ms (median, sessions > 0, Wilcoxon p):')
+        for i, g in enumerate(names[1:], 1):
+            for t in bands:
+                diff = r2[:, i, -1, t] - r2[:, 0, -1, t]
+                if np.isfinite(diff).any():
+                    print(f'    {g:10s} {ALL_BANDS[t]:12s} {paired(diff)}')
+
+
 def stimulus_clock():
     keys = ['r2_model', 'r2_template', 'r2_residual', 'r2_residual_own', 'r2_trial_model', 'r2_trial_template',
             'r2_shuffle', 'r2_residual_shuffle', 'r2_shift', 'r2_residual_shift', 'r2_retrained_residual',
@@ -539,7 +581,7 @@ SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline':
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
                 'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
-                'timescale_r2': timescale_r2,
+                'timescale_r2': timescale_r2, 'bleed_through': bleed_through,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 

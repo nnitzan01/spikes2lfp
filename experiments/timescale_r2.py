@@ -47,6 +47,11 @@ ETA_MS = 200
 POWER_FLOOR = 1e-3
 
 
+def coherence_freqs():
+    n = int(COHERENCE_SECONDS / config.BIN_SIZE)
+    return coherence(np.zeros(n), np.zeros(n), fs=1 / config.BIN_SIZE, nperseg=n)[0]
+
+
 def smooth(y, window_ms):
     n = max(1, int(round(window_ms / 1e3 / config.BIN_SIZE)))
     return uniform_filter1d(y, n, mode='nearest') if n > 1 else y
@@ -92,9 +97,7 @@ def run(pipeline, n_shifts=3, seed=config.TORCH_SEED):
     scaler = pipeline.target_scaler
     shifts = rng.integers(*(np.array(SHIFT_RANGE) / config.BIN_SIZE).astype(int), size=n_shifts)
     shifted = [X[(test_bins - s) % n_bins] for s in shifts]
-    fs = 1 / config.BIN_SIZE
-    freqs = coherence(np.zeros(int(COHERENCE_SECONDS * fs)), np.zeros(int(COHERENCE_SECONDS * fs)),
-                      fs=fs, nperseg=int(COHERENCE_SECONDS * fs))[0]
+    freqs = coherence_freqs()
     half = int(round(ETA_MS / 1e3 / config.BIN_SIZE))
 
     shape = (n_ch, config.N_TARGETS)

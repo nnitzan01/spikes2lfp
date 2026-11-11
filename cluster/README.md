@@ -118,6 +118,7 @@ EXPERIMENT=region_ablation EXTRA_ARGS="--retrain-targets 0,1,2 --retrain-regions
 EXPERIMENT=region_clock sbatch --array=1-89%8 cluster/run_experiment.sbatch   # evoked vs induced by region; summarize region_clock
 EXPERIMENT=transfer_scaling sbatch --array=1-89%8 --job-name=transfer_scaling cluster/run_experiment.sbatch   # spontaneous / passive R2 under different scalings; summarize transfer_scaling
 EXPERIMENT=timescale_r2 sbatch --array=1-89%8 --job-name=timescale_r2 cluster/run_experiment.sbatch   # R2 by timescale, log / amplitude R2, coherence, transient AUC vs time-shift null; summarize timescale_r2
+EXPERIMENT=bleed_through sbatch --array=1-89%8 --job-name=bleed_through cluster/run_experiment.sbatch   # high bands without units near each contact (inference + retrained near_100); summarize bleed_through
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch

@@ -23,7 +23,9 @@ class FakeSession:
         rng = np.random.default_rng(session_id % 1000)
         areas = np.array(['VISp', 'VISl', 'LGd', 'CA1'])
         self.units = pd.DataFrame({'structure_acronym': areas[np.arange(N_UNITS) % 4],
-                                   'firing_rate': rng.uniform(1, 20, N_UNITS)},
+                                   'firing_rate': rng.uniform(1, 20, N_UNITS),
+                                   'probe_id': np.where(np.arange(N_UNITS) % 4 == 0, 1, 2),     # VISp units on the LFP probe
+                                   'probe_vertical_position': 40.0 * np.arange(N_UNITS)},
                                   index=np.arange(500, 500 + N_UNITS))
         self.spike_times = {u: np.sort(rng.uniform(0, SESSION_LEN, rng.integers(300, 3000))) for u in self.units.index}
         starts = np.arange(2.0, SESSION_LEN - 2, 0.75)
@@ -40,7 +42,8 @@ class FakeSession:
         self.licks = pd.DataFrame({'timestamps': np.sort(rng.uniform(0, SESSION_LEN, 200))})
         self.rewards = pd.DataFrame({'timestamps': np.sort(rng.uniform(0, SESSION_LEN, 10))})
         self.channels = pd.DataFrame({'structure_acronym': ['VISp'] * N_CHANNELS + ['VISl'],
-                                      'dorsal_ventral_ccf_coordinate': [100.0, 200.0, 300.0]})
+                                      'dorsal_ventral_ccf_coordinate': [100.0, 200.0, 300.0],
+                                      'probe_id': [1, 1, 1], 'probe_vertical_position': [0.0, 160.0, 400.0]})
 
 
 def fake_load_lfp(data_root, session_id, channels, start, stop):
