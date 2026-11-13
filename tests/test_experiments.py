@@ -417,6 +417,13 @@ def test_region_events(pipeline_module, session_dir):
     assert n_all > 0 and np.isclose(np.nansum(s[0, 1, :, 0, 0, 0]), n_all)          # running levels cover every bin
     assert np.isfinite(out['ig_contribution'][..., present, 0]).any()
     assert np.isfinite(out['ig_shapley'][..., present, 0]).any()
+    split = re_.run(pipeline, targets=[0], ig_events=0, grouping='thalamus')
+    assert list(split['groups']) == re_.GROUPINGS['thalamus'] and 'ig_contribution' not in split
+    units = dict(zip(split['groups'], split['group_n_units']))
+    assert units['LGN'] + units['LP'] + units['thalamus_other'] == out['group_n_units'][re_.GROUPS.index('thalamus')]
+    assert sum(units.values()) == sum(out['group_n_units'])
+    # the prediction does not depend on the grouping
+    np.testing.assert_allclose(split['eta_prediction'][..., 0], out['eta_prediction'][..., 0], atol=1e-5)
 
 
 def test_strategy_index_and_shared_events():

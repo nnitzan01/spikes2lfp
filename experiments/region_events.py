@@ -30,7 +30,10 @@ by exact Shapley values over the same window (ig_contribution, ig_shapley: types
 targets; ig_completeness).
 
 usage (from the repo root):
-    python -m experiments.region_events <session_dir> [--targets 0,1] [--ig-events 100]
+    python -m experiments.region_events <session_dir> [--targets 0,1] [--ig-events 100] [--grouping thalamus]
+
+--grouping thalamus: groups VISp, visual_cortex_other, LGN, LP, thalamus_other and rest (hippocampus, midbrain,
+other), as positive controls for the laminar profiles (G); saves region_events_thalamus.npz.
 
 Needs the 'train' stage. Saves variables/<session_id>/region_events.npz.
 """
@@ -57,6 +60,8 @@ from run_session import SessionPipeline, log, save_npz
 from splits import chunk_bins
 
 GROUPS = list(GLOBAL_REGIONS) + ['other']
+GROUPINGS = {'regions': GROUPS,                      # --grouping; 'thalamus' splits LGN and LP out (positive controls for G)
+             'thalamus': ['VISp', 'visual_cortex_other', 'LGN', 'LP', 'thalamus_other', 'rest']}
 STATE_EPOCHS = ['active', 'active_test', 'passive']
 STATE_VARS = ['all', 'running', 'pupil', 'engaged']
 N_LEVELS = 10
@@ -182,11 +187,21 @@ def event_bins(events, timestamps, n_bins):
     return out
 
 
-def ig_check(pipeline, X, bins, groups_present, unit_groups, mean, chan, targets, n_events, rng):
+def grouping_masks(masks, grouping):
+    """{group: unit mask} for the groups of GROUPINGS[grouping], from region_masks."""
+    if grouping == 'regions':
+        return {g: masks[g] for g in GROUPS}
+    lgn, lp = masks['LG'], masks['LP']
+    return dict(VISp=masks['VISp'], visual_cortex_other=masks['visual_cortex_other'], LGN=lgn, LP=lp,
+                thalamus_other=masks['thalamus'] & ~lgn & ~lp,
+                rest=masks['hippocampus'] | masks['midbrain'] | masks['other'])
+
+
+def ig_check(pipeline, X, bins, groups_present, unit_groups, mean, chan, targets, n_events, rng, n_groups=len(GROUPS)):
     """IG (mean baseline) and exact Shapley region contributions on the same windows at one channel."""
     history = config.ATTR_HISTORY
     offsets = np.round(IG_OFFSETS_MS / 1e3 / config.BIN_SIZE).astype(int)
-    shape = (len(IG_TYPES), len(offsets), len(GROUPS), config.N_TARGETS)
+    shape = (len(IG_TYPES), len(offsets), n_groups, config.N_TARGETS)
     out = dict(ig_contribution=np.full(shape, np.nan), ig_shapley=np.full(shape, np.nan),
                ig_completeness=np.full(config.N_TARGETS, np.nan), ig_n_events=np.zeros(len(IG_TYPES), int))
     Xt = torch.as_tensor(X, dtype=torch.float32, device=pipeline.device)
@@ -224,13 +239,14 @@ def ig_check(pipeline, X, bins, groups_present, unit_groups, mean, chan, targets
     return out
 
 
-def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
+def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED, grouping='regions'):
     rng = np.random.default_rng(seed)
     s = pipeline.session
     targets = list(targets)
-    masks = region_masks(np.asarray(s.units.structure_acronym))
-    present = [i for i, g in enumerate(GROUPS) if masks[g].any()]
-    unit_groups = [masks[GROUPS[i]] for i in present]
+    masks = grouping_masks(region_masks(np.asarray(s.units.structure_acronym)), grouping)
+    group_names = GROUPINGS[grouping]
+    present = [i for i, g in enumerate(group_names) if masks[g].any()]
+    unit_groups = [masks[group_names[i]] for i in present]
     X_active = pipeline.active_spikes.spkMat
     mean = X_active[chunk_bins(pipeline.split['train'])].mean(axis=0)
     pre, post = int(round(-EVENT_WINDOW[0] / config.BIN_SIZE)), int(round(EVENT_WINDOW[1] / config.BIN_SIZE))
@@ -258,7 +274,7 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
     n_stats = len(STATS) + len(GROUP_STATS) * len(present)
     shape = (len(types), pre + post, n_ch, config.N_TARGETS)
     out = {k: np.full(shape, np.nan, np.float32) for k in ('eta_target', 'eta_prediction', 'eta_base')}
-    out['eta_contribution'] = np.full((len(types), pre + post, len(GROUPS), n_ch, config.N_TARGETS), np.nan, np.float32)
+    out['eta_contribution'] = np.full((len(types), pre + post, len(group_names), n_ch, config.N_TARGETS), np.nan, np.float32)
     active_types = [k for k in types if k in bins['active']]
     for k in ('eta_target_test', 'eta_prediction_test', 'eta_base_test'):
         out[k] = np.full((len(active_types),) + shape[1:], np.nan, np.float32)
@@ -294,10 +310,10 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
                 lev = {v: np.where(in_test, lev[v], -1) for v in STATE_VARS}
                 accumulate(stats[STATE_EPOCHS.index('active_test'), :, :, :, chan, band], lev, y, p, phi)
             share = [np.cov(phi[g], p)[0, 1] / p.var() for g in range(len(present))]
-            log(f'{e} chan {chan} band {band}: Shapley share ' + ', '.join(f'{GROUPS[i]} {v:.2f}' for i, v in zip(present, share)))
+            log(f'{e} chan {chan} band {band}: Shapley share ' + ', '.join(f'{group_names[i]} {v:.2f}' for i, v in zip(present, share)))
 
-    # stats: put the group sums at the full GROUPS positions (NaN for absent groups)
-    full = np.full(stats.shape[:3] + (len(STATS) + len(GROUP_STATS) * len(GROUPS),) + stats.shape[4:], np.nan)
+    # stats: put the group sums at the full group_names positions (NaN for absent groups)
+    full = np.full(stats.shape[:3] + (len(STATS) + len(GROUP_STATS) * len(group_names),) + stats.shape[4:], np.nan)
     full[:, :, :, :len(STATS)] = stats[:, :, :, :len(STATS)]
     for j, i in enumerate(present):
         for k in range(len(GROUP_STATS)):
@@ -305,14 +321,14 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
 
     l4, borders = layer4_channel(pipeline.session_id, n_ch)
     out.update(event_types=np.array(types), active_types=np.array(active_types), eta_lags_ms=lags,
-               n_events=n_events, n_events_test=n_events_test, groups=np.array(GROUPS),
-               group_n_units=np.array([masks[g].sum() for g in GROUPS]), targets=np.array(targets),
+               n_events=n_events, n_events_test=n_events_test, groups=np.array(group_names),
+               group_n_units=np.array([masks[g].sum() for g in group_names]), targets=np.array(targets),
                layer4_channel=l4, state_stats=full, state_epochs=np.array(STATE_EPOCHS), state_vars=np.array(STATE_VARS),
-               stat_names=np.array(STATS + [f'{g}_{k}' for g in GROUPS for k in GROUP_STATS]),
+               stat_names=np.array(STATS + [f'{g}_{k}' for g in group_names for k in GROUP_STATS]),
                state_edges=np.stack([edges['running'], edges['pupil']]), ig_offsets_ms=IG_OFFSETS_MS, ig_types=np.array(IG_TYPES))
     out.update({k: np.float64(v) for k, v in strategy_index(s.active, s.licks.timestamps).items()})
     if ig_events:
-        out.update(ig_check(pipeline, X_active, bins['active'], present, unit_groups, mean, l4, targets, ig_events, rng))
+        out.update(ig_check(pipeline, X_active, bins['active'], present, unit_groups, mean, l4, targets, ig_events, rng, len(group_names)))
     return out
 
 
@@ -321,13 +337,15 @@ def main():
     parser.add_argument('session_dir')
     parser.add_argument('--targets', default='0,1')
     parser.add_argument('--ig-events', type=int, default=100, help='events per type for the IG check (0 = off)')
+    parser.add_argument('--grouping', default='regions', choices=list(GROUPINGS),
+                        help='region groups (thalamus: LGN and LP separately; saves region_events_thalamus.npz)')
     args = parser.parse_args()
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pipeline = SessionPipeline(data_root, session_id, device)
-    out = run(pipeline, [int(t) for t in args.targets.split(',')], args.ig_events)
-    f = pipeline.dirs.variables / 'region_events.npz'
+    out = run(pipeline, [int(t) for t in args.targets.split(',')], args.ig_events, grouping=args.grouping)
+    f = pipeline.dirs.variables / ('region_events.npz' if args.grouping == 'regions' else f'region_events_{args.grouping}.npz')
     save_npz(f, **out)
     print('Saved', f)
 

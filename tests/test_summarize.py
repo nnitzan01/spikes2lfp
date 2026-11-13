@@ -191,6 +191,13 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
     assert '2 sessions with region_events.npz and L4 borders' in text and 'CSD of prediction vs recorded CSD' in text
     assert 'L4 fraction, visual_cortex_other - thalamus' in text and 'anatomy (Allen connectivity atlas' in text
     assert (tmp_path / 'summary' / 'variables' / 'region_depth_pooled.png').exists()
+    split = dict(out, groups=np.array(['VISp', 'visual_cortex_other', 'LGN', 'LP', 'thalamus_other', 'rest']))
+    for sid in (1047969464, 1048189115):
+        np.savez(tmp_path / 'summary' / 'variables' / str(sid) / 'region_events_thalamus.npz', **split)
+    summarize.ALL_SESSIONS['region_depth_thalamus']()
+    text = capsys.readouterr().out
+    assert 'L4 fraction, LGN - VISp' in text and 'L4 fraction, visual_cortex_other - LP' in text
+    assert (tmp_path / 'summary' / 'variables' / 'region_depth_thalamus_pooled.png').exists()
 
 
 def test_event_timing():

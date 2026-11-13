@@ -121,6 +121,8 @@ EXPERIMENT=timescale_r2 sbatch --array=1-89%8 --job-name=timescale_r2 cluster/ru
 EXPERIMENT=bleed_through sbatch --array=1-89%8 --job-name=bleed_through cluster/run_experiment.sbatch   # high bands without units near each contact (inference + retrained near_100); summarize bleed_through
 EXPERIMENT=explore_task sbatch --array=1-89%8 --job-name=explore_task cluster/run_experiment.sbatch   # task / behaviour / pupil / event-locked LFP figures in plots/<session>/explore/; summarize explore_task
 EXPERIMENT=region_events sbatch --array=1-89%8 --job-name=region_events cluster/run_experiment.sbatch   # Shapley region contributions around task events, state sums, IG check (Phase 2 F-H); summarize region_events, region_depth (G: CSD of the contributions by layer)
+EXPERIMENT=region_events EXTRA_ARGS="--grouping thalamus --ig-events 0" sbatch --array=1-89%8 --job-name=region_thal cluster/run_experiment.sbatch   # LGN and LP as their own groups (positive controls for G); summarize region_depth_thalamus
+python -m experiments.allen_layers   # (local, needs internet) Allen connectivity: VISp layer projection density per source area -> tables/allen_visp_layers.csv
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch

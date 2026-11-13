@@ -6,7 +6,7 @@ Over every session with the experiment's file (median over sessions of the per-s
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
                                     | region_clock | stimulus_clock | transfer_scaling | timescale_r2 | bleed_through
-                                    | explore_task | region_events | region_depth
+                                    | explore_task | region_events | region_depth | region_depth_thalamus
                                     | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
@@ -958,9 +958,9 @@ def compartments(channels, upper, lower):
     return np.where(channels > upper, 0, np.where(channels >= lower, 1, 2))
 
 
-def region_depth():
+def region_depth(name='region_events'):
     """
-    Laminar profile of each group's contribution (Phase 2 G; from region_events.npz, all channels): the event-locked
+    Laminar profile of each group's contribution (Phase 2 G; from <name>.npz, all channels): the event-locked
     contributions are put back in target units (target_scaler.npz std) over the cortical channels of the alignment
     table and turned into a CSD (event_csd; Shapley contributions add up, so the groups' CSDs add up to the CSD of the
     prediction). Per window, the mean squared CSD per channel in L2/3, L4 and L5/6 (borders from the alignment table)
@@ -1010,9 +1010,9 @@ def region_depth():
             out['evoked'][t] = evoked
         return out
 
-    rows = {sid: per_session(np.load(variables_dir(sid) / 'region_events.npz'), sid) for sid in sessions()
-            if sid in table.index and (variables_dir(sid) / 'region_events.npz').exists()}
-    print(f'{len(rows)} sessions with region_events.npz and L4 borders')
+    rows = {sid: per_session(np.load(variables_dir(sid) / f'{name}.npz'), sid) for sid in sessions()
+            if sid in table.index and (variables_dir(sid) / f'{name}.npz').exists()}
+    print(f'{len(rows)} sessions with {name}.npz and L4 borders')
     if not rows:
         return
     first = next(iter(rows.values()))
@@ -1020,7 +1020,9 @@ def region_depth():
     tnames = [TARGET_NAMES[t] for t in targets]
     has = np.stack([r['units'] for r in rows.values()]) > 0
     windows = list(EVENT_WINDOWS_MS)
-    show = [g for g in ('VISp', 'visual_cortex_other', 'thalamus', 'midbrain', 'hippocampus') if g in groups]
+    show = [g for g in ('VISp', 'visual_cortex_other', 'LGN', 'LP', 'thalamus', 'thalamus_other', 'midbrain', 'hippocampus')
+            if g in groups]
+    references = [g for g in ('LGN', 'LP', 'thalamus') if g in groups]           # compared with VISp and other visual cortex
     allen_profiles()
     for t in DEPTH_TYPES:
         ok = [k for k, r in enumerate(rows.values()) if t in r['frac']]
@@ -1043,29 +1045,25 @@ def region_depth():
                     f'{wn} ' + '/'.join(f'{np.nanmedian(frac[h[:, g], w, g, j, k]):.2f}' for k in range(len(COMPARTMENTS)))
                     for w, wn in enumerate(windows)) + f' | sink {np.nanmedian(sink[h[:, g], g, j]):+.0f}'
                     f' | evoked/baseline {np.nanmedian(evoked[h[:, g], g, j]):.1f}')
-            v = groups.index('VISp')
-            for gn in ('visual_cortex_other', 'thalamus'):
-                g = groups.index(gn)
-                both = h[:, g] & h[:, v]
-                print(f'    L4 fraction, {gn} - VISp: ' + ' | '.join(
-                    f'{wn} {paired(frac[both, w, g, j, 1] - frac[both, w, v, j, 1])}' for w, wn in enumerate(windows)))
-            o, th = groups.index('visual_cortex_other'), groups.index('thalamus')
-            both = h[:, o] & h[:, th]
-            print(f'    L4 fraction, visual_cortex_other - thalamus: ' + ' | '.join(
-                f'{wn} {paired(frac[both, w, o, j, 1] - frac[both, w, th, j, 1])}' for w, wn in enumerate(windows)))
+            pairs = [(a, 'VISp') for a in ['visual_cortex_other'] + references] + [('visual_cortex_other', b) for b in references]
+            for a, b in pairs:
+                ga, gb = groups.index(a), groups.index(b)
+                both = h[:, ga] & h[:, gb]
+                print(f'    L4 fraction, {a} - {b}: ' + ' | '.join(
+                    f'{wn} {paired(frac[both, w, ga, j, 1] - frac[both, w, gb, j, 1])}' for w, wn in enumerate(windows)))
 
     # pooled figure: median CSD over sessions on channels relative to the L4 centre (image, first target)
     rel = np.arange(-DEPTH_HALF_WIDTH, DEPTH_HALF_WIDTH + 1)
     panels = [('recorded', None), ('prediction', None)] + [(g, groups.index(g)) for g in show]
     fig, ax = plt.subplots(len(targets), len(panels), figsize=(2.4 * len(panels), 3.2 * len(targets)), sharex=True, sharey=True, squeeze=False)
     for j, tn in enumerate(tnames):
-        for p, (name, g) in enumerate(panels):
+        for p, (label, g) in enumerate(panels):
             stack = []
             for k, r in enumerate(rows.values()):
                 if 'image' not in r['csd'] or (g is not None and not has[k, g]):
                     continue
                 C, Y, P = r['csd']['image']
-                x = Y[:, j] if name == 'recorded' else P[:, j] if name == 'prediction' else C[:, g, j]
+                x = Y[:, j] if label == 'recorded' else P[:, j] if label == 'prediction' else C[:, g, j]
                 grid = np.full((len(lags), len(rel)), np.nan)
                 pos = np.round(r['rel']).astype(int) + DEPTH_HALF_WIDTH
                 keep = (pos >= 0) & (pos < len(rel))
@@ -1079,7 +1077,7 @@ def region_depth():
                             extent=(lags[0], lags[-1], rel[0] - 0.5, rel[-1] + 0.5))
             ax[j, p].axhline(0, color='k', lw=0.5, ls=':')
             ax[j, p].axvline(0, color='k', lw=0.5)
-            ax[j, p].set_title(f'{name[:20]}, {tn}\n({len(stack)} sessions, |max| {lim:.2g})', fontsize=8)
+            ax[j, p].set_title(f'{label[:20]}, {tn}\n({len(stack)} sessions, |max| {lim:.2g})', fontsize=8)
         ax[j, 0].set_ylabel(f'channels from L4 ({CHANNEL_SPACING_UM} um)')
     for a in ax[-1]:
         a.set_xlabel('time from image onset (ms)')
@@ -1087,9 +1085,10 @@ def region_depth():
                  'median over sessions', fontsize=10)
     fig.tight_layout()
     out_dir = variables_dir(sessions()[0]).parent
-    fig.savefig(out_dir / 'region_depth_pooled.png', dpi=110)
+    png = out_dir / f'{name.replace("region_events", "region_depth")}_pooled.png'
+    fig.savefig(png, dpi=110)
     plt.close(fig)
-    print(f'figure: {out_dir / "region_depth_pooled.png"}')
+    print(f'figure: {png}')
 
 
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
@@ -1098,6 +1097,7 @@ ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'reg
                 'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
                 'timescale_r2': timescale_r2, 'bleed_through': bleed_through, 'explore_task': explore_task,
                 'region_events': region_events, 'region_depth': region_depth,
+                'region_depth_thalamus': lambda: region_depth('region_events_thalamus'),
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 
