@@ -210,6 +210,14 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
   strategy (stable per mouse; dynamic logistic regression on lick-bout onsets), disengage over the session, and
   engagement has little effect on V1 population activity, while strategy does (Vip-Sst circuit, changes and
   omissions). Mice stop running to lick.
+- *Framing for F (user, 2026-11-13):* early local / later network contributions fit dynamic inter-areal
+  communication during perception (Javadzadeh & Hofer 2022, Neuron 110:2470: LM feedback influences V1 in
+  windows of < 100 ms that shift over the stimulus, faster when the stimulus is behaviourally relevant than
+  for no-go or passive viewing; silencing LM degrades V1 stimulus coding early). Tests in our data:
+  (1) does the other-visual contribution rise later than those areas' own spiking responses (not just their
+  latency); (2) is it larger or earlier when the stimulus matters (active vs passive, change vs repeat,
+  hit vs miss); (3) G: is it layer-specific like feedback (L1, L5/6) vs VISp / LGN in L4. Caveat: a model
+  contribution is predictive, not causal (shared input, e.g. LP, gives the same signature).
 - **New for us:** the LFP (not spikes) view and, mainly, which regions' spiking the LFP novelty / change / hit
   signals come from (F), whether that follows the reduced VISp → higher-area communication for shared images,
   and whether region balance tracks strategy or state (H). Needed in region_events for this: shared images as
