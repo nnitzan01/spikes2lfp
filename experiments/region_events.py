@@ -22,7 +22,8 @@ over the whole active epoch (training blocks included: in-sample) and the passiv
                   Var(prediction), Cov(phi_r, prediction) (Shapley share = Cov / Var, summing to 1 over
                   groups), and R2, per state level
 
-and an IG cross-check on the same events (--ig-events per type, 0 = off): at the layer 4 channel, for each
+the behavioural strategy of the session (explore_task.strategy_index: strategy_index, strategy_visual,
+strategy_timing, n_bouts), and an IG cross-check on the same events (--ig-events per type, 0 = off): at the layer 4 channel, for each
 event type in IG_TYPES and offset IG_OFFSETS_MS, the prediction at that bin from its ATTR_HISTORY-bin window,
 attributed by SequenceIG with the training-mean baseline (summed over each group's units and all lags) and
 by exact Shapley values over the same window (ig_contribution, ig_shapley: types x offsets x groups x
@@ -48,7 +49,7 @@ from analysis.sequence_attribution import window_index
 from analysis.stimulus_clock import onset_bins
 from experiments.attribution_baseline import attribute_with_retries
 from experiments.explore_task import (ACTIVE_TYPES, ENGAGED_REWARDS_PER_MIN, ENGAGED_WINDOW_S, EVENT_WINDOW,
-                                      auto_rewarded_changes, clean_pupil, event_average, event_rate,
+                                      auto_rewarded_changes, clean_pupil, event_average, event_rate, strategy_index,
                                       layer4_channel, on_grid, passive_presentations, task_events)
 from experiments.region_ablation import GLOBAL_REGIONS, region_masks
 from integrated_gradients import SequenceIG
@@ -64,6 +65,7 @@ GROUP_STATS = ['c', 'cc', 'cp']
 SMOOTH_S = 1.0                                         # running and pupil smoothing before binning states
 IG_TYPES = ['image', 'change_hit', 'change_miss', 'omission']
 IG_OFFSETS_MS = np.arange(-96, 504, 24)
+SHAPLEY_BATCH = 100                                   # 3 s sequences per GPU batch
 
 
 # ---- Shapley ---------------------------------------------------------------------------------
@@ -86,23 +88,37 @@ def shapley_matrix(n):
     return W
 
 
-def filled(X, absent, mean):
-    """X with the units in the boolean mask `absent` set to their mean (copy)."""
-    Xs = X.copy() if isinstance(X, np.ndarray) else X.clone()
-    Xs[..., absent] = mean[absent]
-    return Xs
-
-
-def coalition_predictions(model, X, unit_groups, mean):
-    """(2**n, bins) predictions over the continuous X with each coalition of the groups present."""
-    members = coalitions(len(unit_groups))
-    out = []
-    for keep in members:
-        absent = np.zeros(X.shape[1], bool)
-        for g, k in zip(unit_groups, keep):
-            absent |= g & ~k
-        out.append(model.evaluate(filled(X, absent, mean)).numpy())
-    return np.stack(out)
+def coalition_series(models, X, unit_groups, mean, device, batch=SHAPLEY_BATCH):
+    """
+    {key: (phi (groups x bins), prediction, f_none)} for every model in `models` ({key: wrapper with .model}) over
+    the continuous X (bins x units), cut into SEQLENGTH sequences as in model.evaluate. Each batch of sequences is
+    moved to the GPU once and every coalition (absent groups at their training mean) is built there.
+    """
+    n = len(unit_groups)
+    W = torch.as_tensor(shapley_matrix(n), dtype=torch.float32, device=device)
+    absent = [torch.as_tensor(np.any([g & ~k for g, k in zip(unit_groups, keep)], axis=0), device=device)
+              for keep in coalitions(n)]
+    mean_t = torch.as_tensor(mean, dtype=torch.float32, device=device)
+    L = config.SEQLENGTH
+    n_seq = len(X) // L
+    out = {k: (np.zeros((n, n_seq * L), np.float32), np.zeros(n_seq * L, np.float32), np.zeros(n_seq * L, np.float32))
+           for k in models}
+    nets = {k: m.model.to(device).eval() for k, m in models.items()}
+    with torch.no_grad():
+        for start in range(0, n_seq, batch):
+            stop = min(start + batch, n_seq)
+            xb = torch.as_tensor(np.asarray(X[start * L:stop * L], np.float32), device=device).reshape(stop - start, L, -1)
+            f = {k: torch.empty((len(absent), (stop - start) * L), device=device) for k in models}
+            for c, a in enumerate(absent):
+                xs = torch.where(a, mean_t, xb)
+                for k, net in nets.items():
+                    y = net(xs)
+                    f[k][c] = (y[0] if isinstance(y, tuple) else y).reshape(-1)
+            for k in models:
+                phi, sl = (W @ f[k]).cpu().numpy(), slice(start * L, stop * L)
+                out[k][0][:, sl], out[k][1][sl], out[k][2][sl] = phi, f[k][-1].cpu().numpy(), f[k][0].cpu().numpy()
+            del xb, xs, f
+    return out
 
 
 # ---- states ----------------------------------------------------------------------------------
@@ -215,7 +231,6 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
     masks = region_masks(np.asarray(s.units.structure_acronym))
     present = [i for i, g in enumerate(GROUPS) if masks[g].any()]
     unit_groups = [masks[GROUPS[i]] for i in present]
-    W = shapley_matrix(len(present))
     X_active = pipeline.active_spikes.spkMat
     mean = X_active[chunk_bins(pipeline.split['train'])].mean(axis=0)
     pre, post = int(round(-EVENT_WINDOW[0] / config.BIN_SIZE)), int(round(EVENT_WINDOW[1] / config.BIN_SIZE))
@@ -251,13 +266,14 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
     stats = np.zeros((len(STATE_EPOCHS), len(STATE_VARS), N_LEVELS, n_stats, n_ch, config.N_TARGETS))
     n_events, n_events_test = np.zeros(len(types), int), np.zeros(len(active_types), int)
 
-    for chan, band in sorted(k for k in pipeline.models if k[1] in targets):
-        model = pipeline.models[chan, band]
-        for e, (X, Y, ts) in data.items():
-            f = coalition_predictions(model, X, unit_groups, mean)            # coalitions x bins
-            n = f.shape[1]
-            phi = W @ f                                                       # groups x bins
-            y, p, base = Y[:n, chan, band], f[-1], f[0]
+    keys = sorted(k for k in pipeline.models if k[1] in targets)
+    for e, (X, Y, ts) in data.items():
+        series = coalition_series({k: pipeline.models[k] for k in keys}, X, unit_groups, mean, pipeline.device)
+        log(f'{e}: Shapley contributions of {len(keys)} models over {len(X)} bins')
+        for chan, band in keys:
+            phi, p, base = series.pop((chan, band))
+            n = len(p)
+            y = Y[:n, chan, band]
             assert np.allclose(phi.sum(0), p - base, atol=1e-3), 'Shapley efficiency'
             signals = np.concatenate([y[:, None], p[:, None], base[:, None], phi.T], 1)       # bins x (3 + groups)
             for name, b in bins[e].items():
@@ -277,8 +293,8 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
                 in_test = (np.arange(n) >= test[0]) & (np.arange(n) <= test[-1])
                 lev = {v: np.where(in_test, lev[v], -1) for v in STATE_VARS}
                 accumulate(stats[STATE_EPOCHS.index('active_test'), :, :, :, chan, band], lev, y, p, phi)
-        share = [np.cov(phi[g], p)[0, 1] / p.var() for g in range(len(present))]
-        log(f'chan {chan} band {band}: Shapley share (passive) ' + ', '.join(f'{GROUPS[i]} {v:.2f}' for i, v in zip(present, share)))
+            share = [np.cov(phi[g], p)[0, 1] / p.var() for g in range(len(present))]
+            log(f'{e} chan {chan} band {band}: Shapley share ' + ', '.join(f'{GROUPS[i]} {v:.2f}' for i, v in zip(present, share)))
 
     # stats: put the group sums at the full GROUPS positions (NaN for absent groups)
     full = np.full(stats.shape[:3] + (len(STATS) + len(GROUP_STATS) * len(GROUPS),) + stats.shape[4:], np.nan)
@@ -294,6 +310,7 @@ def run(pipeline, targets=(0, 1), ig_events=100, seed=config.TORCH_SEED):
                layer4_channel=l4, state_stats=full, state_epochs=np.array(STATE_EPOCHS), state_vars=np.array(STATE_VARS),
                stat_names=np.array(STATS + [f'{g}_{k}' for g in GROUPS for k in GROUP_STATS]),
                state_edges=np.stack([edges['running'], edges['pupil']]), ig_offsets_ms=IG_OFFSETS_MS, ig_types=np.array(IG_TYPES))
+    out.update({k: np.float64(v) for k, v in strategy_index(s.active, s.licks.timestamps).items()})
     if ig_events:
         out.update(ig_check(pipeline, X_active, bins['active'], present, unit_groups, mean, l4, targets, ig_events, rng))
     return out

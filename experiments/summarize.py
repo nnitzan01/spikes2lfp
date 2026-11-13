@@ -653,7 +653,7 @@ def explore_task():
 
 EVENT_WINDOWS_MS = {'early': (30, 100), 'late': (100, 250), 'post': (250, 750)}
 EVENT_CONTRASTS = [('change_hit', 'image'), ('change_hit', 'change_miss'), ('image', 'passive_image'),
-                   ('post_omission', 'image'), ('image_novel', 'image_familiar')]
+                   ('post_omission', 'image'), ('image_novel', 'image_familiar'), ('image_novel', 'image_shared')]
 STATE_CONTRASTS = [('active', 'all', (0,), 'passive', 'all', (0,)),                 # (epoch, var, levels) vs (epoch, var, levels)
                    ('active', 'running', (7, 8, 9), 'active', 'running', (0, 1, 2)),
                    ('active', 'pupil', (7, 8, 9), 'active', 'pupil', (0, 1, 2)),
@@ -719,6 +719,10 @@ def region_events():
             row['ig'] = dict(types=[str(t) for t in d['ig_types']], corr=corr,
                              share_ig=rms(ig) / np.nansum(rms(ig), 1, keepdims=True),
                              share_shapley=rms(sh) / np.nansum(rms(sh), 1, keepdims=True))
+        # RMS (not share) of each group's baseline-corrected contribution per window, for comparisons across sessions
+        row['rms'] = {t: np.stack([np.sqrt(np.mean((C[i] - np.nanmean(C[i][lags < 0], 0))[(lags >= lo) & (lags < hi)] ** 2, 0))
+                                   for lo, hi in EVENT_WINDOWS_MS.values()]) for i, t in enumerate(types)}
+        row['strategy'] = float(d['strategy_index']) if 'strategy_index' in d else np.nan
         return dict(row, lags=lags, groups=groups, targets=targets, units=d['group_n_units'])
 
     rows = over_sessions('region_events', per_session)
@@ -752,6 +756,38 @@ def region_events():
     table(lambda r: r.get('shares_test_image'), '--- image, test block only (out of sample)')
     for a, b in EVENT_CONTRASTS:
         table(lambda r: r['contrast'].get((a, b)), f'--- {a} minus {b}: shares of the difference')
+
+    meta = pd.read_csv(paths.REPO_DIR / 'tables' / 'sessions.csv').set_index('session_id')
+    pairs = {}
+    for sid in rows:
+        if sid in meta.index:
+            pairs.setdefault(meta.loc[sid, 'mouse_id'], {})[meta.loc[sid, 'experience_level']] = sid
+    pairs = [(v['Familiar'], v['Novel']) for v in pairs.values() if {'Familiar', 'Novel'} <= set(v)]
+    for t in ('image_shared', 'change_shared', 'passive_image_shared'):
+        both = [(f, n) for f, n in pairs if t in rows[f]['rms'] and t in rows[n]['rms']]
+        if not both:
+            continue
+        print(f'--- {t}: same images, same mouse, novel day minus familiar day; RMS of the contribution per window ({len(both)} mice)')
+        for j, tn in enumerate(tnames):
+            for g, gn in enumerate(groups):
+                d = np.array([rows[n]['rms'][t][:, g, j] - rows[f]['rms'][t][:, g, j] for f, n in both])        # mice x windows
+                if np.isfinite(d).any():
+                    print(f'    {tn:10s} {gn:20s} ' + ' | '.join(f'{w} {paired(d[:, w_])}' for w_, w in enumerate(windows)))
+    strat = np.array([r['strategy'] for r in rows.values()])
+    if np.isfinite(strat).sum() > 5:
+        from scipy.stats import spearmanr
+        print(f'strategy index (visual - timing; median {np.nanmedian(strat):+.3f}, {np.sum(strat > 0)}/{np.isfinite(strat).sum()} visual): '
+              'Spearman with each group\'s share of the change_hit and image responses (late window)')
+        for t in ('change_hit', 'image'):
+            for j, tn in enumerate(tnames):
+                sh = np.array([r['shares'][t][1, :, j] if t in r['shares'] else np.full(len(groups), np.nan) for r in rows.values()])
+                out = []
+                for g, gn in enumerate(groups):
+                    ok = np.isfinite(strat) & np.isfinite(sh[:, g]) & has[:, g]
+                    if ok.sum() > 5:
+                        rho, p = spearmanr(strat[ok], sh[ok, g])
+                        out.append(f'{gn[:10]} {rho:+.2f} (p {p:.0e})')
+                print(f'  {t:10s} {tn:10s} ' + ' | '.join(out))
 
     print('Shapley variance shares Cov(c, prediction) / Var(prediction) by state, layer 4 (median over sessions; paired difference):')
     for c in STATE_CONTRASTS:

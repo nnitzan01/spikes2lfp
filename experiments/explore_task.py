@@ -22,6 +22,8 @@ Events (onsets of the active-epoch presentations; the passive replay's are prefi
                   trials dropped when the AllenSDK trials table is available)
   omission        an omitted flash; post_omission the image after it
   image_familiar, image_novel   repeated images by is_image_novel (novel sessions only)
+  image_shared, change_shared   repeated images of / changes to SHARED_IMAGES, in both sessions (the same images
+                  familiar on day 1 and among novel ones on day 2)
 Behaviour:
   pupil     clean_pupil: blinks and non-positive values removed; outliers removed with PUPIL_PAD_S on
             each side: samples off a PUPIL_MEDIAN_S running median by more than PUPIL_OUTLIER_SD robust SD
@@ -57,6 +59,8 @@ from run_session import SessionPipeline, log, save_npz  # noqa: E402
 from splits import chunk_bins  # noqa: E402
 
 RESPONSE_WINDOW = (0.15, 0.75)      # s after a change
+BOUT_GAP_S = 0.7                    # licks closer than this form one bout (Piet et al. 2024)
+TIMING_MIDPOINT, TIMING_SLOPE = 4.0, 1.0   # timing strategy: P(bout) = sigmoid(SLOPE * (flashes since last bout - MIDPOINT))
 EVENT_WINDOW = (-0.25, 0.75)        # s around onsets
 MAX_EVENTS = 1000                   # events averaged per type (random subset beyond that)
 PUPIL_MEDIAN_S, PUPIL_SCALE_S, PUPIL_OUTLIER_SD, PUPIL_MIN_SD = 1.0, 30.0, 5.0, 0.01
@@ -65,8 +69,10 @@ PUPIL_MAX_GAP_S = 1.0
 PUPIL_STABLE_WINDOW_S, PUPIL_STABLE_FRACTION = 30.0, 0.8
 RUNNING_CM_S, STATIONARY_CM_S = 5.0, 1.0
 ENGAGED_WINDOW_S, ENGAGED_REWARDS_PER_MIN = 120.0, 2.0
-ACTIVE_TYPES = ['image', 'change_hit', 'change_miss', 'omission', 'post_omission', 'image_familiar', 'image_novel']
-PASSIVE_TYPES = ['passive_image', 'passive_change', 'passive_omission']
+ACTIVE_TYPES = ['image', 'change_hit', 'change_miss', 'omission', 'post_omission', 'image_familiar', 'image_novel',
+                'image_shared', 'change_shared']
+PASSIVE_TYPES = ['passive_image', 'passive_change', 'passive_omission', 'passive_image_shared', 'passive_change_shared']
+SHARED_IMAGES = ('im083', 'im111')     # in both image sets G and H (familiar in the novel session)
 MODEL_TARGETS = [0, 1]
 
 
@@ -143,11 +149,13 @@ def task_events(presentations, licks, auto_rewarded=(), prefix=''):
     change = p.is_change.fillna(False).to_numpy(bool) & ~omitted
     after_omission = np.r_[False, omitted[:-1]] & ~omitted
     image = ~omitted & ~change & ~after_omission
+    shared = p.image_name.astype(str).str.startswith(SHARED_IMAGES).to_numpy()
     licks = np.sort(np.asarray(licks, float))
     i = np.searchsorted(licks, onset)
     latency = np.where(i < len(licks), np.append(licks, np.inf)[i] - onset, np.inf)
     if prefix:
-        events = {'image': onset[image], 'change': onset[change], 'omission': onset[omitted]}
+        events = {'image': onset[image], 'change': onset[change], 'omission': onset[omitted],
+                  'image_shared': onset[image & shared], 'change_shared': onset[change & shared]}
         return {prefix + k: v for k, v in events.items()}, latency[change]
     responded = np.searchsorted(licks, onset + RESPONSE_WINDOW[0]) < np.searchsorted(licks, onset + RESPONSE_WINDOW[1])
     auto = np.zeros(len(p), bool)
@@ -155,11 +163,63 @@ def task_events(presentations, licks, auto_rewarded=(), prefix=''):
         auto |= np.abs(onset - a) < 0.1
     events = dict(image=onset[image], change_hit=onset[change & responded & ~auto],
                   change_miss=onset[change & ~responded & ~auto], omission=onset[omitted],
-                  post_omission=onset[after_omission & ~change])
+                  post_omission=onset[after_omission & ~change], image_shared=onset[image & shared],
+                  change_shared=onset[change & shared & ~auto])
     if 'is_image_novel' in p and p['is_image_novel'].fillna(False).astype(bool).any():
         novel = p['is_image_novel'].fillna(False).to_numpy(bool)
         events['image_familiar'], events['image_novel'] = onset[image & ~novel], onset[image & novel]
     return events, latency[change & ~auto]
+
+
+def lick_bouts(licks, gap_s=BOUT_GAP_S):
+    """(starts, ends) of licking bouts: licks closer than gap_s belong to one bout."""
+    licks = np.sort(np.asarray(licks, float))
+    if not len(licks):
+        return np.array([]), np.array([])
+    new = np.r_[True, np.diff(licks) > gap_s]
+    return licks[new], licks[np.r_[new[1:], True]]
+
+
+def strategy_index(presentations, licks):
+    """
+    Visual vs timing strategy (after Piet et al. 2024, with a static instead of a dynamic logistic regression):
+    for every flash interval not already inside a licking bout, whether a bout starts in it, regressed on a bias
+    and mean-centred strategy vectors: visual (a change), timing (sigmoid of flashes since the last bout ended,
+    TIMING_MIDPOINT / TIMING_SLOPE), omission and post-omission. Each strategy's importance is the drop in
+    log-likelihood per interval when it is left out; strategy_index = visual - timing (> 0: visual).
+    """
+    from sklearn.linear_model import LogisticRegression
+    p = presentations.sort_values('start_time').reset_index(drop=True)
+    onset = p.start_time.to_numpy(float)
+    omitted = (p.image_name.astype(str) == 'omitted').to_numpy()
+    if 'omitted' in p:
+        omitted |= p['omitted'].fillna(False).to_numpy(bool)
+    change = p.is_change.fillna(False).to_numpy(bool) & ~omitted
+    starts, ends = lick_bouts(licks)
+    nan = dict(strategy_index=np.nan, strategy_visual=np.nan, strategy_timing=np.nan, n_bouts=len(starts))
+    if len(starts) < 10 or len(onset) < 50:
+        return nan
+    stop = np.r_[onset[1:], onset[-1] + np.median(np.diff(onset))]
+    bout_start = np.searchsorted(starts, onset) < np.searchsorted(starts, stop)
+    k = np.searchsorted(starts, onset, side='right') - 1                    # last bout started at or before the onset
+    in_bout = (k >= 0) & (onset < np.where(k >= 0, ends[np.maximum(k, 0)], -np.inf))
+    last_end = np.where(k >= 0, ends[np.maximum(k, 0)], -np.inf)
+    since = np.searchsorted(onset, onset) - np.searchsorted(onset, last_end)          # flashes since the last bout ended
+    timing = 1 / (1 + np.exp(-TIMING_SLOPE * (since - TIMING_MIDPOINT)))
+    X = np.stack([change, timing, omitted, np.r_[False, omitted[:-1]] & ~omitted], 1).astype(float)[~in_bout]
+    y = bout_start[~in_bout]
+    if y.all() or not y.any():
+        return nan
+    X = X - X.mean(0)
+
+    def loglik(cols):
+        m = LogisticRegression(C=1e6, max_iter=1000).fit(X[:, cols], y)
+        q = np.clip(m.predict_proba(X[:, cols])[:, 1], 1e-9, 1 - 1e-9)
+        return np.mean(y * np.log(q) + (1 - y) * np.log(1 - q))
+
+    full = loglik([0, 1, 2, 3])
+    visual, timing_ = full - loglik([1, 2, 3]), full - loglik([0, 2, 3])
+    return dict(strategy_index=visual - timing_, strategy_visual=visual, strategy_timing=timing_, n_bouts=len(starts))
 
 
 def event_average(x, onsets, pre, post, rng, max_events=MAX_EVENTS):

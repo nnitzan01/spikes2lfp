@@ -155,14 +155,14 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
     from tests.test_experiments import _trained_pipeline
     from experiments import region_events as re_
     out = re_.run(_trained_pipeline(pipeline_module, session_dir), targets=[0, 1], ig_events=3)
-    for sid in (1, 2):
+    for sid in (1047969464, 1048189115):         # one mouse, familiar and novel day
         d = tmp_path / 'summary' / 'variables' / str(sid)
         d.mkdir(parents=True)
         np.savez(d / 'region_events.npz', **out)
-    monkeypatch.setattr(summarize, 'sessions', lambda: [1, 2])
+    monkeypatch.setattr(summarize, 'sessions', lambda: [1047969464, 1048189115])
     monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / 'summary' / 'variables' / str(sid))
     monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(0, 2))
     summarize.region_events()
     text = capsys.readouterr().out
-    assert '--- image' in text and 'IG (mean baseline) vs Shapley' in text and 'by state' in text
+    assert '--- image' in text and 'same mouse, novel day minus familiar day' in text and 'IG (mean baseline) vs Shapley' in text and 'by state' in text
     assert (tmp_path / 'summary' / 'variables' / 'region_events_pooled.png').exists()

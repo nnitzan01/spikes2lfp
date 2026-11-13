@@ -396,6 +396,13 @@ def test_region_events_shapley():
 def test_region_events(pipeline_module, session_dir):
     from experiments import region_events as re_
     pipeline = _trained_pipeline(pipeline_module, session_dir)
+    X = pipeline.active_spikes.spkMat
+    masks = re_.region_masks(np.asarray(pipeline.session.units.structure_acronym))
+    groups = [masks[g] for g in re_.GROUPS if masks[g].any()]
+    series = re_.coalition_series({(0, 0): pipeline.models[0, 0]}, X, groups, X.mean(0), pipeline.device, batch=2)
+    phi, p, base = series[0, 0]
+    np.testing.assert_allclose(p, pipeline.models[0, 0].evaluate(X).numpy(), atol=1e-5)      # all groups = the model
+    np.testing.assert_allclose(phi.sum(0), p - base, atol=1e-4)
     out = re_.run(pipeline, targets=[0, 1], ig_events=3)
     n_types, n_lags = len(out['event_types']), len(out['eta_lags_ms'])
     assert out['eta_contribution'].shape == (n_types, n_lags, len(re_.GROUPS), pipeline.n_channels, 9)
@@ -410,3 +417,33 @@ def test_region_events(pipeline_module, session_dir):
     assert n_all > 0 and np.isclose(np.nansum(s[0, 1, :, 0, 0, 0]), n_all)          # running levels cover every bin
     assert np.isfinite(out['ig_contribution'][..., present, 0]).any()
     assert np.isfinite(out['ig_shapley'][..., present, 0]).any()
+
+
+def test_strategy_index_and_shared_events():
+    import pandas as pd
+    from experiments import explore_task as et
+    rng = np.random.default_rng(1)
+    n = 2000
+    onset = np.arange(n) * 0.75
+    names, change, current = [], np.zeros(n, bool), 'im000'
+    k = 0
+    while k < n:                                  # changes every 5-11 flashes; im083 is one of the images
+        k += rng.integers(5, 12)
+        if k < n:
+            change[k] = True
+    for i in range(n):
+        if change[i]:
+            current = rng.choice(['im000', 'im083', 'im111', 'im222'])
+        names.append(current)
+    stim = pd.DataFrame({'start_time': onset, 'image_name': names, 'is_change': change})
+    visual = [t + 0.4 + 0.1 * j for t in onset[change] if rng.uniform() < 0.9 for j in range(5)]
+    timing, t = [], 1.0
+    while t < onset[-1]:                          # a bout every 4-6 flashes, blind to changes
+        timing += [t + 0.1 * j for j in range(5)]
+        t += 0.75 * rng.integers(4, 7) + 0.5
+    v, tm = et.strategy_index(stim, visual), et.strategy_index(stim, timing)
+    assert v['strategy_index'] > 0 > tm['strategy_index'], (v, tm)
+    events, _ = et.task_events(stim, visual)
+    shared = np.isin(np.array(names), ['im083', 'im111'])
+    assert len(events['image_shared']) and set(events['image_shared']) <= set(onset[shared & ~change])
+    assert set(events['change_shared']) == set(onset[shared & change])
