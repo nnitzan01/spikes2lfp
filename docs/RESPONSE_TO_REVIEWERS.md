@@ -199,7 +199,7 @@ Fifteen items still need an analysis or a decision before their responses can be
 | R3 3.6 | Bands above 25 Hz: per-model null and threshold, or cut | Decision needed |
 | R3 3.7 | Fixed-size unit subsamples | Not started |
 | R3 3.8 | Firing-rate control and ablation: select on one block, test on another; matched controls | Code partly ready |
-| R3 3.11 | Spike bleed-through: unit-to-contact distances; exclude nearby units | Not started |
+| R3 3.11 | Spike bleed-through: unit-to-contact distances; exclude nearby units | Analysis done (89 sessions); text to draft |
 | R3 3.12 | Fig. 8: predictors coupled to attribution vs independent ones | Not started |
 | R2 2.2 | Timing claims: attribution peak lags recover true latencies poorly in simulation (Spearman 0.11–0.34) | Decision: coarse early/late wording or drop |
 | R2 2.4 | R² correction: drop or keep as sensitivity analysis | Decision needed |

@@ -205,7 +205,7 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | Ground-truth simulation: real spike trains, 40 driver units through causal alpha kernels (latency 0–200 ms), linear or rectified, ± a running-speed component no spike causes, AR(1) noise; CNN-LSTM trained and attributed (zero / mean baseline, recent lags); drivers recovered by IG vs ridge weight, stLFP, correlation, coupling, rate (AUC, precision, Spearman with true total and per-spike effect, credit to running-correlated non-drivers, kernel peak lag vs true latency) | R3 #7, R2 #2 | 🟡 run on session 1: ridge wins, but the CNN-LSTM underfits (R² 0.16–0.28); rerun with diagnostics, 40 epochs, 'gain' and 'burst' conditions |
 | Region removal: fixed list (VISp, other visual cortex, hippocampus, thalamus, midbrain, other + 16 single areas); inference-time removal and "region only" (mean / zero fill, targets ≤ 25 Hz); retrained without each global region (broadband), with and without covariates (stimulus onsets, running, pupil, licks, rewards, population activity). Do APN/MRN, DG/POST, subcortical results survive? | R3 #5 | ✅ 89 sessions (section 4) |
 | Rank stability across seeds; permutation / occlusion importance; fixed-size unit subsamples; zero vs mean baseline | R3 #5, #7 | ⬜ |
-| High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | 🟡 `experiments/bleed_through.py` (2026-11-11): units within 50 / 100 / 200 µm of each contact (same probe) or all VISp units mean-filled at inference, and retrained without the 100 µm units (targets 1, 5–8); timescale measures; built and tested, run pending |
+| High-frequency: per session × channel × band null; units near the target contact and VISp excluded; unit-to-contact distances | R3 #6, #11 | ✅ 89 sessions (section 4, 2026-11-13): units within 100 µm of each contact and all VISp units mean-filled and retrained away; high-band slow modulation survives |
 | **High bands, timescale of prediction (2026-11-11):** R² of band power is dominated by brief transients the MSE-trained model can only predict on average, while it tracks the slower power modulation (manuscript Fig. 3 panel). `experiments/timescale_r2.py` (inference only): R² after smoothing target and prediction (4–250 ms), R² of log power and amplitude, coherence by modulation frequency, transient AUC and event-triggered averages, each against a 30–120 s time-shift null. Next: a ceiling from adjacent sub-bands (shared modulation, independent estimation noise); repeat without units near the contact (R3 #11) | R3 #6 | ✅ all 89 sessions (section 4): every band beats the time-shift null at every window; 100–400 Hz R² ≈ 0.5 at 250 ms. Ceiling and bleed-through repeat pending |
 | Firing-rate control: select on training block, test on test block | R3 #8 | 🟡 `experiments/firing_rate_contribution.py` (not run); still compares to the area mean, not matched units |
 | Ablation (fr / attribution / random ranking, retrained) | R3 #8 | 🟡 `experiments/ablation.py` (not run; one seed) |
@@ -636,6 +636,28 @@ Fraction of the full R² lost when the region is removed (median over sessions; 
 - **Proposed reporting for R3 #6:** keep all bands; report the unsmoothed R² with the 250 ms R², the
   1–4 Hz coherence and the transient AUC, each against the time-shift null.
 
+### Spike bleed-through (`summarize bleed_through`, 89 sessions, 2026-11-13; R3 #11)
+Units excluded per LFP channel by distance from the contact (same probe): nearest unit median 13 µm;
+median 4 / 12 / 31 units within 50 / 100 / 200 µm, 49 VISp units. Test R² after 250 ms smoothing (median over sessions):
+| | 0.5–4 Hz | 25–50 Hz | 50–100 Hz | 100–200 Hz | 200–400 Hz |
+|---|---|---|---|---|---|
+| All units (retrained reference) | 0.415 | 0.144 | 0.222 | 0.489 | 0.518 |
+| Retrained without units within 100 µm | 0.404 | 0.139 | 0.217 | 0.491 | 0.444 |
+| Retrained without any VISp unit | 0.372 | 0.123 | 0.206 | 0.431 | 0.393 |
+| Paired change, no VISp (sessions > 0) | −0.055 (3/89) | −0.020 (8/89) | −0.020 (9/89) | −0.054 (2/89) | −0.106 (3/89) |
+| Mean-filled at inference, no VISp | 0.240 | 0.076 | 0.137 | 0.242 | 0.141 |
+- **The high-band prediction is not spike waveform bleed-through.** Without a single VISp unit, 100–200 Hz
+  keeps 88% of its slow-timescale R² and 200–400 Hz 76%; coherence at 1–4 Hz modulation 0.42 → 0.37 and
+  0.46 → 0.36; transient AUC 0.81 → 0.79 and 0.77 → 0.73. Removing the units within 100 µm costs nothing
+  at 100–200 Hz and 0.054 at 200–400 Hz (paired; 0.074 → 0.064 unsmoothed).
+- 200–400 Hz is the band that depends most on local units (as expected if it contains multi-unit power),
+  but most of its predictable modulation is shared with distant populations.
+- Mean fill at inference overstates the dependence (200–400 Hz 0.14 vs 0.39 retrained): the full model
+  uses the nearest units when it has them, other units substitute when it is retrained without them.
+  Report the retrained numbers.
+- The models see sorted units only; unsorted spikes near the contact also reach the LFP and cannot be
+  removed, so the control is conservative in the right direction.
+
 ### Evoked vs trial-specific by region (`summarize region_clock`, 89 sessions, 2026-11-13; inference)
 R² lost when the region is mean-filled vs when only its spikes are swapped between presentations of the same
 condition (keeps its evoked content, breaks its trial-specific content). Full R² 0.631 / 0.380 / 0.320 /
@@ -799,6 +821,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-13** `bleed_through` over 89 sessions (run 11-12, jobs 29449362/3): section 4; R3 #11 analysis done.
 - **2026-11-13** explore_task reviewed on two sessions (Phase 2 table); pupil example windows now lie inside the active epoch.
 - **2026-11-13** `region_bands` (with the retrained run), `region_clock` and `transfer_scaling` finished for all
   89 sessions; section 4 updated. `summarize region_bands` now also tests VISp − other visual cortex on the
