@@ -832,7 +832,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
   (test one session first with `--array=1`).
 - Figures: `pool_sessions.ipynb` via nbconvert on `cpu_short` (see `cluster/README.md`);
   `ATTR_MEASURE`, `DECODER_PERMUTATIONS` environment variables.
-- Excluded bad GPU nodes: a100-4012, a100-4033, gn-0020, gl40s-8009.
+- Excluded bad GPU nodes: a100-4012, a100-4033, gn-0020, gl40s-8009, gl40s-8007.
 
 ---
 
