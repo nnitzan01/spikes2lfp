@@ -172,6 +172,26 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
     assert 'latency control' in text and 'delay behind own spikes' in text
     assert (tmp_path / 'summary' / 'variables' / 'region_events_pooled.png').exists()
 
+    n_ch = 12                                    # the fake probe has 2 channels: widen with a depth profile
+    profile = (np.arange(n_ch) - 5.0) ** 2 / 10 + 1
+    for k in ('eta_target', 'eta_prediction', 'eta_base', 'eta_contribution'):
+        axis = 3 if k == 'eta_contribution' else 2
+        x = np.take(out[k], [0] * n_ch, axis=axis)
+        out[k] = x * profile.reshape([-1 if i == axis else 1 for i in range(x.ndim)])
+    for sid in (1047969464, 1048189115):
+        np.savez(tmp_path / 'summary' / 'variables' / str(sid) / 'region_events.npz', **out)
+        np.savez(tmp_path / 'summary' / 'variables' / str(sid) / 'target_scaler.npz',
+                 mean=np.zeros((n_ch, config.N_TARGETS)), std=np.ones((n_ch, config.N_TARGETS)))
+    table = tmp_path / 'alignment.csv'
+    table.write_text('session,upper_border_index,lower_border_index,first_channel_index,last_channel_index\n' +
+                     ''.join(f'{sid},{n_ch // 2 + 1},{n_ch // 2 - 1},0,{n_ch - 1}\n' for sid in (1047969464, 1048189115)))
+    monkeypatch.setattr(summarize, 'ALIGNMENT_TABLE', table)
+    summarize.region_depth()
+    text = capsys.readouterr().out
+    assert '2 sessions with region_events.npz and L4 borders' in text and 'CSD of prediction vs recorded CSD' in text
+    assert 'L4 fraction, visual_cortex_other - thalamus' in text
+    assert (tmp_path / 'summary' / 'variables' / 'region_depth_pooled.png').exists()
+
 
 def test_event_timing():
     lags = (np.arange(-62, 188) + 0.5) * 4.0
@@ -179,3 +199,9 @@ def test_event_timing():
     t50, peak = summarize.event_timing(x, lags)
     assert np.allclose(t50, [50, 200], atol=4) and np.allclose(peak, [50, 200], atol=4)
     assert np.isnan(summarize.event_timing(np.zeros((len(lags), 1)), lags)).all()
+
+
+def test_event_csd_and_compartments():
+    z = np.arange(12.0)
+    assert np.allclose(summarize.event_csd(np.stack([z, z ** 2])), [[0] * 8, [-2] * 8])     # linear: no CSD; quadratic: constant
+    assert list(summarize.compartments([2, 5, 6, 7, 9], upper=7, lower=5)) == [2, 1, 1, 1, 0]

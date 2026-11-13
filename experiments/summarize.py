@@ -6,7 +6,7 @@ Over every session with the experiment's file (median over sessions of the per-s
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
                                     | region_clock | stimulus_clock | transfer_scaling | timescale_r2 | bleed_through
-                                    | explore_task | region_events
+                                    | explore_task | region_events | region_depth
                                     | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
@@ -913,12 +913,165 @@ def region_events():
     print(f'figure: {out_dir / "region_events_pooled.png"}')
 
 
+DEPTH_TYPES = ['image', 'change_hit', 'passive_image']
+COMPARTMENTS = ['L2/3', 'L4', 'L5/6']
+CSD_SMOOTH = np.array([0.23, 0.54, 0.23])          # spatial (Hamming) smoothing before the second difference
+DEPTH_HALF_WIDTH = 8                                # channels either side of the L4 centre in the pooled figure
+CHANNEL_SPACING_UM = 40                             # LFP channels (channels.csv probe_vertical_position)
+
+
+def event_csd(x):
+    """x (... x channels), channels in depth order: -second spatial difference after 3-point smoothing (current
+    source density up to the channel spacing; < 0 = sink) on the interior channels -> (... x channels - 4)."""
+    x = np.apply_along_axis(lambda v: np.convolve(v, CSD_SMOOTH, mode='valid'), -1, x)
+    return -(x[..., 2:] - 2 * x[..., 1:-1] + x[..., :-2])
+
+
+def compartments(channels, upper, lower):
+    """Compartment index per channel (index grows towards the surface): 0 above the upper L4 border, 1 in L4, 2 below."""
+    channels = np.asarray(channels)
+    return np.where(channels > upper, 0, np.where(channels >= lower, 1, 2))
+
+
+def region_depth():
+    """
+    Laminar profile of each group's contribution (Phase 2 G; from region_events.npz, all channels): the event-locked
+    contributions are put back in target units (target_scaler.npz std) over the cortical channels of the alignment
+    table and turned into a CSD (event_csd; Shapley contributions add up, so the groups' CSDs add up to the CSD of the
+    prediction). Per window, the mean squared CSD per channel in L2/3, L4 and L5/6 (borders from the alignment table)
+    as fractions over the three, the depth of the largest early sink relative to the L4 centre, and how well the
+    predicted CSD matches the recorded one, and each group's CSD power after onset over that before (near 1: the
+    group's profile is noise and its fractions near 1/3). Feedforward input (thalamus: LGN, but also LP) should favour L4, feedback
+    (visual_cortex_other) L2/3 and L5/6.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    table = pd.read_csv(ALIGNMENT_TABLE).set_index('session')
+
+    def per_session(d, sid):
+        row = table.loc[sid]
+        first, last = int(row['first_channel_index']), int(row['last_channel_index'])
+        upper, lower = sorted([int(row['upper_border_index']), int(row['lower_border_index'])])[::-1]
+        std = np.load(variables_dir(sid) / 'target_scaler.npz')['std']                   # channels x targets
+        lags, targets = d['eta_lags_ms'], [int(t) for t in d['targets']]
+        types = [str(t) for t in d['event_types']]
+        chans = np.arange(first, last + 1)[2:-2]                                          # interior after smoothing + difference
+        comp = compartments(chans, upper, lower)
+        l4 = (upper + lower) / 2
+        out = dict(lags=lags, groups=[str(g) for g in d['groups']], units=d['group_n_units'], targets=targets,
+                   frac={}, sink={}, match={}, csd={}, evoked={}, rel=chans - l4)
+        for t in DEPTH_TYPES:
+            if t not in types or not len(chans):
+                continue
+            i = types.index(t)
+            scale = std[first:last + 1][:, targets]                                       # channels x targets
+            C = np.moveaxis(d['eta_contribution'][i, :, :, first:last + 1][..., targets] * scale, 2, -1)   # lags x groups x targets x channels
+            Y = np.moveaxis(d['eta_target'][i, :, first:last + 1][..., targets] * scale, 1, -1)            # lags x targets x channels
+            P = np.moveaxis(d['eta_prediction'][i, :, first:last + 1][..., targets] * scale, 1, -1)
+            C, Y, P = (event_csd(x - np.nanmean(x[lags < 0], axis=0)) for x in (C, Y, P))
+            frac = np.full((len(EVENT_WINDOWS_MS), C.shape[1], len(targets), len(COMPARTMENTS)), np.nan)
+            for w, (lo, hi) in enumerate(EVENT_WINDOWS_MS.values()):
+                ms = np.mean(C[(lags >= lo) & (lags < hi)] ** 2, axis=0)                  # groups x targets x channels
+                dens = np.stack([ms[..., comp == k].mean(-1) if (comp == k).any() else np.full(ms.shape[:-1], np.nan)
+                                 for k in range(len(COMPARTMENTS))], -1)
+                frac[w] = dens / np.nansum(dens, -1, keepdims=True)
+            early = (lags >= EVENT_WINDOWS_MS['early'][0]) & (lags < EVENT_WINDOWS_MS['early'][1])
+            sink = (chans[np.argmin(C[early].min(axis=0), axis=-1)] - l4) * CHANNEL_SPACING_UM     # groups x targets (> 0: above L4)
+            after = (lags >= 0) & (lags < 750)
+            match = np.array([np.corrcoef(Y[after, j].ravel(), P[after, j].ravel())[0, 1] for j in range(len(targets))])
+            evoked = np.mean(C[after] ** 2, axis=(0, -1)) / np.mean(C[lags < 0] ** 2, axis=(0, -1))   # groups x targets
+            out['frac'][t], out['sink'][t], out['match'][t], out['csd'][t] = frac, sink, match, (C, Y, P)
+            out['evoked'][t] = evoked
+        return out
+
+    rows = {sid: per_session(np.load(variables_dir(sid) / 'region_events.npz'), sid) for sid in sessions()
+            if sid in table.index and (variables_dir(sid) / 'region_events.npz').exists()}
+    print(f'{len(rows)} sessions with region_events.npz and L4 borders')
+    if not rows:
+        return
+    first = next(iter(rows.values()))
+    groups, targets, lags = first['groups'], first['targets'], first['lags']
+    tnames = [TARGET_NAMES[t] for t in targets]
+    has = np.stack([r['units'] for r in rows.values()]) > 0
+    windows = list(EVENT_WINDOWS_MS)
+    show = [g for g in ('VISp', 'visual_cortex_other', 'thalamus', 'midbrain', 'hippocampus') if g in groups]
+    for t in DEPTH_TYPES:
+        ok = [k for k, r in enumerate(rows.values()) if t in r['frac']]
+        if not ok:
+            continue
+        R = [list(rows.values())[k] for k in ok]
+        h = has[ok]
+        match = np.stack([r['match'][t] for r in R])
+        print(f'--- {t} ({len(R)} sessions); CSD of prediction vs recorded CSD, 0-750 ms: r ' +
+              ', '.join(f'{tn} {np.nanmedian(match[:, j]):.2f}' for j, tn in enumerate(tnames)))
+        frac = np.stack([r['frac'][t] for r in R])                                       # sessions x windows x groups x targets x compartments
+        sink = np.stack([r['sink'][t] for r in R])                                       # sessions x groups x targets
+        evoked = np.stack([r['evoked'][t] for r in R])                                   # sessions x groups x targets
+        for j, tn in enumerate(tnames):
+            print(f'  {tn}: fraction of mean squared CSD per channel in ' + ' / '.join(COMPARTMENTS) +
+                  '; largest early sink relative to the L4 centre (um, > 0 above); CSD power 0-750 ms / before onset')
+            for gn in show:
+                g = groups.index(gn)
+                print(f'    {gn:20s} ' + ' | '.join(
+                    f'{wn} ' + '/'.join(f'{np.nanmedian(frac[h[:, g], w, g, j, k]):.2f}' for k in range(len(COMPARTMENTS)))
+                    for w, wn in enumerate(windows)) + f' | sink {np.nanmedian(sink[h[:, g], g, j]):+.0f}'
+                    f' | evoked/baseline {np.nanmedian(evoked[h[:, g], g, j]):.1f}')
+            v = groups.index('VISp')
+            for gn in ('visual_cortex_other', 'thalamus'):
+                g = groups.index(gn)
+                both = h[:, g] & h[:, v]
+                print(f'    L4 fraction, {gn} - VISp: ' + ' | '.join(
+                    f'{wn} {paired(frac[both, w, g, j, 1] - frac[both, w, v, j, 1])}' for w, wn in enumerate(windows)))
+            o, th = groups.index('visual_cortex_other'), groups.index('thalamus')
+            both = h[:, o] & h[:, th]
+            print(f'    L4 fraction, visual_cortex_other - thalamus: ' + ' | '.join(
+                f'{wn} {paired(frac[both, w, o, j, 1] - frac[both, w, th, j, 1])}' for w, wn in enumerate(windows)))
+
+    # pooled figure: median CSD over sessions on channels relative to the L4 centre (image, first target)
+    rel = np.arange(-DEPTH_HALF_WIDTH, DEPTH_HALF_WIDTH + 1)
+    panels = [('recorded', None), ('prediction', None)] + [(g, groups.index(g)) for g in show]
+    fig, ax = plt.subplots(len(targets), len(panels), figsize=(2.4 * len(panels), 3.2 * len(targets)), sharex=True, sharey=True, squeeze=False)
+    for j, tn in enumerate(tnames):
+        for p, (name, g) in enumerate(panels):
+            stack = []
+            for k, r in enumerate(rows.values()):
+                if 'image' not in r['csd'] or (g is not None and not has[k, g]):
+                    continue
+                C, Y, P = r['csd']['image']
+                x = Y[:, j] if name == 'recorded' else P[:, j] if name == 'prediction' else C[:, g, j]
+                grid = np.full((len(lags), len(rel)), np.nan)
+                pos = np.round(r['rel']).astype(int) + DEPTH_HALF_WIDTH
+                keep = (pos >= 0) & (pos < len(rel))
+                grid[:, pos[keep]] = x[:, keep]
+                stack.append(grid)
+            if not stack:
+                continue
+            m = np.nanmedian(np.stack(stack), 0)
+            lim = np.nanmax(np.abs(m)) if np.isfinite(m).any() else 1
+            ax[j, p].imshow(m.T, aspect='auto', origin='lower', cmap='RdBu', vmin=-lim, vmax=lim,
+                            extent=(lags[0], lags[-1], rel[0] - 0.5, rel[-1] + 0.5))
+            ax[j, p].axhline(0, color='k', lw=0.5, ls=':')
+            ax[j, p].axvline(0, color='k', lw=0.5)
+            ax[j, p].set_title(f'{name[:20]}, {tn}\n({len(stack)} sessions, |max| {lim:.2g})', fontsize=8)
+        ax[j, 0].set_ylabel(f'channels from L4 ({CHANNEL_SPACING_UM} um)')
+    for a in ax[-1]:
+        a.set_xlabel('time from image onset (ms)')
+    fig.suptitle('CSD of the event-locked LFP, its prediction and each group\'s contribution (red = sink; up = superficial), '
+                 'median over sessions', fontsize=10)
+    fig.tight_layout()
+    out_dir = variables_dir(sessions()[0]).parent
+    fig.savefig(out_dir / 'region_depth_pooled.png', dpi=110)
+    plt.close(fig)
+    print(f'figure: {out_dir / "region_depth_pooled.png"}')
+
+
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
                 'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
                 'timescale_r2': timescale_r2, 'bleed_through': bleed_through, 'explore_task': explore_task,
-                'region_events': region_events,
+                'region_events': region_events, 'region_depth': region_depth,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 
