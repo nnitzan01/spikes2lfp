@@ -920,6 +920,31 @@ DEPTH_HALF_WIDTH = 8                                # channels either side of th
 CHANNEL_SPACING_UM = 40                             # LFP channels (channels.csv probe_vertical_position)
 
 
+ALLEN_TABLE = paths.REPO_DIR / 'tables' / 'allen_visp_layers.csv'      # experiments/allen_layers.py
+ALLEN_MIN_DENSITY = 1e-3                    # mean projection density over the VISp compartments: an actual projection
+ALLEN_REFERENCES = ['LGd', 'LP']            # feedforward (L4) and higher-order thalamus (L1, L5/6)
+
+
+def allen_profiles():
+    """Anatomical reference: per group (and for ALLEN_REFERENCES), the median fraction of projection density in the
+    VISp compartments over the experiments that project (ALLEN_MIN_DENSITY), and how many do."""
+    if not ALLEN_TABLE.exists():
+        return
+    t = pd.read_csv(ALLEN_TABLE)
+    density = t[COMPARTMENTS].mean(axis=1)
+    frac = t[COMPARTMENTS].div(t[COMPARTMENTS].sum(axis=1), axis=0)
+    projects = density >= ALLEN_MIN_DENSITY
+    print(f'anatomy (Allen connectivity atlas, {ALLEN_TABLE.name}): fraction of projection density in VISp ' + ' / '.join(COMPARTMENTS) +
+          f', median over the experiments with mean density >= {ALLEN_MIN_DENSITY:g} (pan-excitatory lines only in brackets)')
+    rows = [(g, t.group == g) for g in t.group.unique()] + [(src, t.source == src) for src in ALLEN_REFERENCES]
+    for name, sel in rows:
+        ok, pan = sel & projects, sel & projects & t.pan_excitatory
+        text = '/'.join(f'{frac.loc[ok, c].median():.2f}' for c in COMPARTMENTS) if ok.any() else 'n/a'
+        text_pan = '/'.join(f'{frac.loc[pan, c].median():.2f}' for c in COMPARTMENTS) if pan.any() else 'n/a'
+        print(f'    {name:20s} {text} ({text_pan}); {ok.sum()}/{sel.sum()} experiments project, median density '
+              f'{density[ok].median() if ok.any() else 0:.3f}')
+
+
 def event_csd(x):
     """x (... x channels), channels in depth order: -second spatial difference after 3-point smoothing (current
     source density up to the channel spacing; < 0 = sink) on the interior channels -> (... x channels - 4)."""
@@ -941,7 +966,7 @@ def region_depth():
     prediction). Per window, the mean squared CSD per channel in L2/3, L4 and L5/6 (borders from the alignment table)
     as fractions over the three, the depth of the largest early sink relative to the L4 centre, and how well the
     predicted CSD matches the recorded one, and each group's CSD power after onset over that before (near 1: the
-    group's profile is noise and its fractions near 1/3). Feedforward input (thalamus: LGN, but also LP) should favour L4, feedback
+    group's profile is noise and its fractions near 1/3). With the anatomical reference (allen_profiles). Feedforward input (thalamus: LGN, but also LP) should favour L4, feedback
     (visual_cortex_other) L2/3 and L5/6.
     """
     import matplotlib
@@ -996,6 +1021,7 @@ def region_depth():
     has = np.stack([r['units'] for r in rows.values()]) > 0
     windows = list(EVENT_WINDOWS_MS)
     show = [g for g in ('VISp', 'visual_cortex_other', 'thalamus', 'midbrain', 'hippocampus') if g in groups]
+    allen_profiles()
     for t in DEPTH_TYPES:
         ok = [k for k, r in enumerate(rows.values()) if t in r['frac']]
         if not ok:

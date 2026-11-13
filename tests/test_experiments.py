@@ -447,3 +447,25 @@ def test_strategy_index_and_shared_events():
     shared = np.isin(np.array(names), ['im083', 'im111'])
     assert len(events['image_shared']) and set(events['image_shared']) <= set(onset[shared & ~change])
     assert set(events['change_shared']) == set(onset[shared & change])
+
+
+def test_allen_layers_offline(monkeypatch):
+    from experiments import allen_layers as al
+    ids = list(al.LAYERS.values())
+
+    def fake(criteria, retries=3):
+        if criteria.startswith('service::'):
+            return [dict(id=1, **{'transgenic-line': '', 'injection-coordinates': [0, 0, 9000], 'injection-volume': 0.1,
+                                  'injection-structures': [{'abbreviation': 'VISl'}]}),
+                    dict(id=2, **{'transgenic-line': 'Ai75(RCL-nT)', 'injection-coordinates': [0, 0, 0],
+                                  'injection-structures': [{'abbreviation': 'VISl'}]}),
+                    dict(id=3, **{'transgenic-line': '', 'injection-coordinates': [0, 0, 0],
+                                  'injection-structures': [{'abbreviation': 'VISp'}]})]
+        assert '[hemisphere_id$eq2]' in criteria                 # z 9000: right hemisphere
+        return [dict(structure_id=s, sum_projection_pixels=k + 1, sum_pixels=10) for k, s in enumerate(ids)]
+
+    monkeypatch.setattr(al, 'query', fake)
+    monkeypatch.setattr(al, 'SOURCES', {'visual_cortex_other': ['VISl']})
+    t = al.run()
+    assert list(t.experiment) == [1] and bool(t.pan_excitatory[0])
+    assert np.isclose(t.loc[0, 'VISp4'], 0.3) and np.isclose(t.loc[0, 'L2/3'], 0.15) and np.isclose(t.loc[0, 'L5/6'], 0.5)

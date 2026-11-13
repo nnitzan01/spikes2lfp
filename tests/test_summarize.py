@@ -189,7 +189,7 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
     summarize.region_depth()
     text = capsys.readouterr().out
     assert '2 sessions with region_events.npz and L4 borders' in text and 'CSD of prediction vs recorded CSD' in text
-    assert 'L4 fraction, visual_cortex_other - thalamus' in text
+    assert 'L4 fraction, visual_cortex_other - thalamus' in text and 'anatomy (Allen connectivity atlas' in text
     assert (tmp_path / 'summary' / 'variables' / 'region_depth_pooled.png').exists()
 
 
