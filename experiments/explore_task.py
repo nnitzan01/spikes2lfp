@@ -339,13 +339,13 @@ def figure_pupil(f, eye_t, raw, pupil, active_times):
     ax[0, 2].set_xlabel('gap length (s)')
     # a typical and the worst 5 min of the active epoch, by fraction of bad samples
     in_active = (eye_t >= active_times[0]) & (eye_t < active_times[1])
-    bad = pd.Series((pupil['missing'] | pupil['outlier']).astype(float))
+    bad = pd.Series(np.where(in_active, (pupil['missing'] | pupil['outlier']).astype(float), np.nan))
     win = max(1, int(round(min(300, np.diff(active_times)[0] / 2) / dt)))
-    frac = bad.rolling(win, min_periods=win).mean().to_numpy().copy()
-    frac[~in_active] = np.nan
+    frac = bad.rolling(win, min_periods=win).mean().to_numpy().copy()      # NaN unless the whole window is active
     if np.isfinite(frac).any():
         valid = np.flatnonzero(np.isfinite(frac))
-        typical = valid[np.argmin(np.abs(frac[valid] - np.nanmedian(frac)))]
+        middle = np.abs(valid - valid.mean())                              # ties go to the middle of the epoch
+        typical = valid[np.lexsort((middle, np.abs(frac[valid] - np.nanmedian(frac))))[0]]
         worst = valid[np.nanargmax(frac[valid])]
         for a, (end, label) in zip((ax[1, 0], ax[1, 1]), ((typical, 'typical'), (worst, 'worst'))):
             sl = slice(max(0, end - win), end)
