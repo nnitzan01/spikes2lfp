@@ -6,7 +6,7 @@ Over every session with the experiment's file (median over sessions of the per-s
 the paired Wilcoxon over sessions):
     python -m experiments.summarize baselines | ranked_ablation | attribution_baseline | region_ablation | region_bands
                                     | region_clock | stimulus_clock | transfer_scaling | timescale_r2 | bleed_through
-                                    | explore_task
+                                    | explore_task | region_events
                                     | simulation
 One session (default 1047969464):
     python -m experiments.summarize training_length | simulation [--session 1047969464]
@@ -651,11 +651,161 @@ def explore_task():
     print(f'figure: {out_dir / "explore_task_pooled.png"}')
 
 
+EVENT_WINDOWS_MS = {'early': (30, 100), 'late': (100, 250), 'post': (250, 750)}
+EVENT_CONTRASTS = [('change_hit', 'image'), ('change_hit', 'change_miss'), ('image', 'passive_image'),
+                   ('post_omission', 'image'), ('image_novel', 'image_familiar')]
+STATE_CONTRASTS = [('active', 'all', (0,), 'passive', 'all', (0,)),                 # (epoch, var, levels) vs (epoch, var, levels)
+                   ('active', 'running', (7, 8, 9), 'active', 'running', (0, 1, 2)),
+                   ('active', 'pupil', (7, 8, 9), 'active', 'pupil', (0, 1, 2)),
+                   ('active', 'engaged', (1,), 'active', 'engaged', (0,)),
+                   ('passive', 'running', (7, 8, 9), 'passive', 'running', (0, 1, 2)),
+                   ('passive', 'pupil', (7, 8, 9), 'passive', 'pupil', (0, 1, 2))]
+
+
+def window_rms_shares(eta, lags):
+    """eta (lags x groups x ...), corrected by its pre-onset mean: RMS per EVENT_WINDOWS_MS window over the
+    groups' summed |...| -> (windows x groups x ...) shares (NaN groups stay NaN)."""
+    eta = eta - np.nanmean(eta[lags < 0], axis=0)
+    rms = np.stack([np.sqrt(np.mean(eta[(lags >= lo) & (lags < hi)] ** 2, axis=0)) for lo, hi in EVENT_WINDOWS_MS.values()])
+    return rms / np.nansum(rms, axis=1, keepdims=True)
+
+
+def state_shares(stats, names, groups, e, var, levels):
+    """Shapley shares Cov(c_g, prediction) / Var(prediction) from the summed statistics: groups x ..."""
+    s = np.nansum(stats[e, var, list(levels)], axis=0)                          # stats x ...
+    col = {k: i for i, k in enumerate(names)}
+    n = s[col['n']]
+    with np.errstate(invalid='ignore', divide='ignore'):
+        var_p = s[col['pp']] / n - (s[col['p']] / n) ** 2
+        return np.stack([(s[col[f'{g}_cp']] / n - s[col[f'{g}_c']] / n * s[col['p']] / n) / var_p for g in groups])
+
+
+def region_events():
+    """
+    Region contributions to the task-evoked LFP (Phase 2 F; experiments/region_events.py), at the layer 4 channel:
+    share of each group in the RMS of the event-locked contribution (baseline-corrected) per window and event type,
+    and of the difference between event types; Shapley variance shares by state (H); IG vs Shapley agreement.
+    """
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    def per_session(d, ch):
+        l4, lags, targets = int(d['layer4_channel']), d['eta_lags_ms'], [int(t) for t in d['targets']]
+        types, groups = [str(t) for t in d['event_types']], [str(g) for g in d['groups']]
+        C = d['eta_contribution'][:, :, :, l4][..., targets]                       # types x lags x groups x targets
+        row = dict(n_events=dict(zip(types, d['n_events'])), eta={t: C[i] for i, t in enumerate(types)},
+                   shares={t: window_rms_shares(C[i], lags) for i, t in enumerate(types)})
+        row['contrast'] = {(a, b): window_rms_shares(C[types.index(a)] - C[types.index(b)], lags)
+                           for a, b in EVENT_CONTRASTS if a in types and b in types}
+        active = [str(t) for t in d['active_types']]
+        if 'image' in active:
+            row['shares_test_image'] = window_rms_shares(d['eta_contribution_test'][active.index('image'), :, :, l4][..., targets], lags)
+        stats, names = d['state_stats'][..., l4, :][..., targets], [str(n) for n in d['stat_names']]
+        E, V = [str(e) for e in d['state_epochs']], [str(v) for v in d['state_vars']]
+        row['state'] = {c: (state_shares(stats, names, groups, E.index(c[0]), V.index(c[1]), c[2]),
+                            state_shares(stats, names, groups, E.index(c[3]), V.index(c[4]), c[5])) for c in STATE_CONTRASTS}
+        if 'ig_contribution' in d:
+            off = d['ig_offsets_ms']
+            ig, sh = d['ig_contribution'][..., targets], d['ig_shapley'][..., targets]      # types x offsets x groups x targets
+            ig, sh = ig - np.nanmean(ig[:, off < 0], 1, keepdims=True), sh - np.nanmean(sh[:, off < 0], 1, keepdims=True)
+            after = off >= 0
+            corr = np.full(ig.shape[:1] + ig.shape[2:], np.nan)
+            for idx in np.ndindex(*corr.shape):
+                a, b = ig[idx[0], after, idx[1], idx[2]], sh[idx[0], after, idx[1], idx[2]]
+                if np.isfinite(a).all() and np.isfinite(b).all() and a.std() > 0 and b.std() > 0:
+                    corr[idx] = np.corrcoef(a, b)[0, 1]
+            rms = lambda x: np.sqrt(np.mean(x[:, after] ** 2, 1))
+            row['ig'] = dict(types=[str(t) for t in d['ig_types']], corr=corr,
+                             share_ig=rms(ig) / np.nansum(rms(ig), 1, keepdims=True),
+                             share_shapley=rms(sh) / np.nansum(rms(sh), 1, keepdims=True))
+        return dict(row, lags=lags, groups=groups, targets=targets, units=d['group_n_units'])
+
+    rows = over_sessions('region_events', per_session)
+    if not rows:
+        return
+    first = next(iter(rows.values()))
+    groups, targets, lags = first['groups'], first['targets'], first['lags']
+    tnames = [TARGET_NAMES[t] for t in targets]
+    has = np.stack([r['units'] for r in rows.values()]) > 0                        # sessions x groups
+    windows = list(EVENT_WINDOWS_MS)
+
+    def table(get, title):
+        vals = [get(r) for r in rows.values()]
+        keep = [v is not None for v in vals]
+        if not any(keep):
+            return
+        v = np.stack([x for x in vals if x is not None])                           # sessions x windows x groups x targets
+        h = has[keep]
+        print(title + f' ({len(v)} sessions)')
+        for j, tn in enumerate(tnames):
+            print(f'  {tn:10s} {"":8s}' + ''.join(f'{g[:12]:>13s}' for g in groups))
+            for w, wn in enumerate(windows):
+                med = [np.nanmedian(v[h[:, g], w, g, j]) if h[:, g].any() else np.nan for g in range(len(groups))]
+                print(f'  {"":10s} {wn:8s}' + ''.join(f'{m:13.2f}' for m in med))
+
+    print(f'layer 4 channel; windows {EVENT_WINDOWS_MS} ms; share of each group in the RMS of its baseline-corrected '
+          'event-locked contribution (median over sessions with units)')
+    for t in ['image', 'change_hit', 'change_miss', 'omission', 'post_omission', 'passive_image', 'passive_change']:
+        n = [r['n_events'].get(t, 0) for r in rows.values()]
+        table(lambda r: r['shares'].get(t), f'--- {t} (events per session, median {np.median(n):.0f})')
+    table(lambda r: r.get('shares_test_image'), '--- image, test block only (out of sample)')
+    for a, b in EVENT_CONTRASTS:
+        table(lambda r: r['contrast'].get((a, b)), f'--- {a} minus {b}: shares of the difference')
+
+    print('Shapley variance shares Cov(c, prediction) / Var(prediction) by state, layer 4 (median over sessions; paired difference):')
+    for c in STATE_CONTRASTS:
+        print(f'  {c[0]} {c[1]} {c[2]}  vs  {c[3]} {c[4]} {c[5]}')
+        for j, tn in enumerate(tnames):
+            for g, gn in enumerate(groups):
+                a = np.array([r['state'][c][0][g, j] for r in rows.values()])
+                b = np.array([r['state'][c][1][g, j] for r in rows.values()])
+                ok = has[:, g] & np.isfinite(a) & np.isfinite(b)
+                if ok.any():
+                    print(f'    {tn:10s} {gn:20s} {np.median(a[ok]):6.2f} vs {np.median(b[ok]):6.2f}  diff {paired(a[ok] - b[ok])}')
+
+    ig_rows = [r['ig'] for r in rows.values() if 'ig' in r]
+    if ig_rows:
+        print(f'IG (mean baseline) vs Shapley on the same windows, layer 4 ({len(ig_rows)} sessions): correlation of the '
+              'baseline-corrected time courses after onset, and RMS shares (median over sessions)')
+        for i, t in enumerate(ig_rows[0]['types']):
+            for j, tn in enumerate(tnames):
+                corr = np.stack([r['corr'][i, :, j] for r in ig_rows])
+                s_ig = np.stack([r['share_ig'][i, :, j] for r in ig_rows])
+                s_sh = np.stack([r['share_shapley'][i, :, j] for r in ig_rows])
+                print(f'  {t:12s} {tn:10s} ' + ' | '.join(
+                    f'{groups[g][:10]} r {np.nanmedian(corr[:, g]):.2f}, share {np.nanmedian(s_ig[:, g]):.2f}/{np.nanmedian(s_sh[:, g]):.2f}'
+                    for g in range(len(groups)) if np.isfinite(corr[:, g]).any()))
+
+    show = ['image', 'change_hit', 'change_miss', 'omission', 'passive_image']
+    fig, ax = plt.subplots(len(targets), len(show), figsize=(3.2 * len(show), 2.8 * len(targets)), sharex=True, squeeze=False)
+    colors = plt.cm.tab10(np.arange(len(groups)))
+    for j, tn in enumerate(tnames):
+        for i, t in enumerate(show):
+            for g, gn in enumerate(groups):
+                eta = [r['eta'][t][:, g, j] for k, r in enumerate(rows.values()) if t in r['eta'] and has[k, g]]
+                eta = [e - np.nanmean(e[lags < 0]) for e in eta if np.isfinite(e).all()]
+                if eta:
+                    ax[j, i].plot(lags, np.median(eta, 0), color=colors[g], label=gn)
+            ax[j, i].axvline(0, color='k', lw=0.5)
+            ax[j, i].set_title(f'{t}, {tn}', fontsize=9)
+    ax[0, 0].legend(fontsize=7)
+    for a in ax[-1]:
+        a.set_xlabel('time from onset (ms)')
+    fig.suptitle('region contributions at the layer 4 channel (baseline-corrected, z), median over sessions', fontsize=10)
+    fig.tight_layout()
+    out_dir = variables_dir(sessions()[0]).parent
+    fig.savefig(out_dir / 'region_events_pooled.png', dpi=110)
+    plt.close(fig)
+    print(f'figure: {out_dir / "region_events_pooled.png"}')
+
+
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
                 'region_bands': region_bands, 'region_clock': region_clock, 'transfer_scaling': transfer_scaling,
                 'timescale_r2': timescale_r2, 'bleed_through': bleed_through, 'explore_task': explore_task,
+                'region_events': region_events,
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
                 'simulation': simulation_sessions}
 

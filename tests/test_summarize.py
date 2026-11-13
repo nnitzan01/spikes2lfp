@@ -149,3 +149,20 @@ def test_explore_task_summary(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert 'n_change_hit' in out and (tmp_path / 'variables' / 'explore_task_sessions.csv').exists()
     assert (tmp_path / 'variables' / 'explore_task_pooled.png').exists()
+
+
+def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypatch, capsys):
+    from tests.test_experiments import _trained_pipeline
+    from experiments import region_events as re_
+    out = re_.run(_trained_pipeline(pipeline_module, session_dir), targets=[0, 1], ig_events=3)
+    for sid in (1, 2):
+        d = tmp_path / 'summary' / 'variables' / str(sid)
+        d.mkdir(parents=True)
+        np.savez(d / 'region_events.npz', **out)
+    monkeypatch.setattr(summarize, 'sessions', lambda: [1, 2])
+    monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / 'summary' / 'variables' / str(sid))
+    monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(0, 2))
+    summarize.region_events()
+    text = capsys.readouterr().out
+    assert '--- image' in text and 'IG (mean baseline) vs Shapley' in text and 'by state' in text
+    assert (tmp_path / 'summary' / 'variables' / 'region_events_pooled.png').exists()

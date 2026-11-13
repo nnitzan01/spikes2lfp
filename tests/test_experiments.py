@@ -381,3 +381,32 @@ def test_explore_task_pupil_and_events():
     np.testing.assert_allclose(latency, [0.4, 2.25])
     passive, _ = et.task_events(stim, licks=[], prefix='passive_')
     assert list(passive['passive_change']) == [1.5, 3.75]
+
+
+def test_region_events_shapley():
+    from experiments import region_events as re_
+    W = re_.shapley_matrix(3)
+    # additive game: each player's Shapley value is its own increment; efficiency for any game
+    f = np.array([sum(v for v, k in zip([1.0, 2.0, 5.0], keep) if k) for keep in re_.coalitions(3)])
+    np.testing.assert_allclose(W @ f, [1, 2, 5])
+    g = np.random.default_rng(0).normal(size=8)
+    np.testing.assert_allclose((W @ g).sum(), g[-1] - g[0])
+
+
+def test_region_events(pipeline_module, session_dir):
+    from experiments import region_events as re_
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = re_.run(pipeline, targets=[0, 1], ig_events=3)
+    n_types, n_lags = len(out['event_types']), len(out['eta_lags_ms'])
+    assert out['eta_contribution'].shape == (n_types, n_lags, len(re_.GROUPS), pipeline.n_channels, 9)
+    present = out['group_n_units'] > 0
+    # contributions add up to prediction minus the all-mean prediction (event averages of the same bins)
+    i = list(out['event_types']).index('image')
+    total = np.nansum(out['eta_contribution'][i][:, present], axis=1)[..., :2]
+    np.testing.assert_allclose(total, (out['eta_prediction'] - out['eta_base'])[i][..., :2], atol=1e-3)
+    s = out['state_stats']
+    assert s.shape[:3] == (len(re_.STATE_EPOCHS), len(re_.STATE_VARS), re_.N_LEVELS)
+    n_all = s[0, 0, 0, 0, 0, 0]
+    assert n_all > 0 and np.isclose(np.nansum(s[0, 1, :, 0, 0, 0]), n_all)          # running levels cover every bin
+    assert np.isfinite(out['ig_contribution'][..., present, 0]).any()
+    assert np.isfinite(out['ig_shapley'][..., present, 0]).any()

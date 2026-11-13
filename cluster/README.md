@@ -120,6 +120,7 @@ EXPERIMENT=transfer_scaling sbatch --array=1-89%8 --job-name=transfer_scaling cl
 EXPERIMENT=timescale_r2 sbatch --array=1-89%8 --job-name=timescale_r2 cluster/run_experiment.sbatch   # R2 by timescale, log / amplitude R2, coherence, transient AUC vs time-shift null; summarize timescale_r2
 EXPERIMENT=bleed_through sbatch --array=1-89%8 --job-name=bleed_through cluster/run_experiment.sbatch   # high bands without units near each contact (inference + retrained near_100); summarize bleed_through
 EXPERIMENT=explore_task sbatch --array=1-89%8 --job-name=explore_task cluster/run_experiment.sbatch   # task / behaviour / pupil / event-locked LFP figures in plots/<session>/explore/; summarize explore_task
+EXPERIMENT=region_events sbatch --array=1-89%8 --job-name=region_events cluster/run_experiment.sbatch   # Shapley region contributions around task events, state sums, IG check (Phase 2 F-H); summarize region_events
 EXPERIMENT=training_length sbatch --array=1 cluster/run_experiment.sbatch     # undertraining check: 40-epoch retrain vs saved models
 EXPERIMENT=spectral_r2 sbatch --array=1-89%8 cluster/run_experiment.sbatch
 EXPERIMENT=ablation sbatch --array=1-89%8 cluster/run_experiment.sbatch
