@@ -192,8 +192,8 @@ Legend: ✅ done (run and reviewed) · 🟡 code ready / partly done · ⬜ not 
 | B. Repeated seeds, parameter counts, hyperparameter reporting | R3 #3 | ⬜ |
 | **C. Does attribution beat simpler measures?** Rank units (per channel × target, training block) by mean \|attribution\|, \|attribution per spike\|, stLFP, spike–LFP correlation, population coupling, firing rate, lagged-ridge weight; remove the top 1–50% on the test block at inference time (mean or zero fill) vs random orderings; retrained ablation for broadband at 5% and 20%; Spearman of each measure with attribution | R2 #1, R1, R3 #8 | 🟡 89 sessions run, with the mean-baseline attribution (`experiments/ranked_ablation.py`, `experiments/attribution_baseline.py`); ✅ 89 sessions with both IG baselines (section 4) |
 | Framing decision after A and C | R1, R2 | ⬜ |
-| **D. Local vs distributed sources by band (biology for R1):** from `region_ablation.npz`: R² drop by region × band (broadband, 0.5–4, 4–8, 8–12, 12–25 Hz) × depth from the L4 border, as a fraction of full R² and per unit, single visual areas, region alone; mean-baseline attribution share by region (`attribution_baseline.npz`) and spike–LFP correlation share for comparison. Control: rerun `region_ablation` with `--retrain-targets 0,1,2 --retrain-regions VISp,visual_cortex_other,hippocampus` (the band dissociation is inference-only so far) | R1 | 🟡 built 2026-11-10: `summarize region_bands` (reads `region_ablation_bands.npz` too); retrain run pending |
-| **E. Evoked vs induced by region (biology for R1):** new `experiments/region_clock.py` on the stimulus-clock template: per region, R² and residual R² with the region mean-filled, and with only that region's spikes swapped between presentations of the same condition (keeps its evoked content, breaks its single-trial content); inference only | R1, R3 #1 | 🟡 built and tested 2026-11-10 (`experiments/region_clock.py`, `summarize region_clock`; also saves region shares of mean-baseline attribution, stLFP, spike–LFP correlation, ridge weight); run pending |
+| **D. Local vs distributed sources by band (biology for R1):** from `region_ablation.npz`: R² drop by region × band (broadband, 0.5–4, 4–8, 8–12, 12–25 Hz) × depth from the L4 border, as a fraction of full R² and per unit, single visual areas, region alone; mean-baseline attribution share by region (`attribution_baseline.npz`) and spike–LFP correlation share for comparison. Control: rerun `region_ablation` with `--retrain-targets 0,1,2 --retrain-regions VISp,visual_cortex_other,hippocampus` (the band dissociation is inference-only so far) | R1 | ✅ 89 sessions, inference and retrained (section 4): the dissociation holds after retraining |
+| **E. Evoked vs induced by region (biology for R1):** new `experiments/region_clock.py` on the stimulus-clock template: per region, R² and residual R² with the region mean-filled, and with only that region's spikes swapped between presentations of the same condition (keeps its evoked content, breaks its single-trial content); inference only | R1, R3 #1 | 🟡 built and tested 2026-11-10 (`experiments/region_clock.py`, `summarize region_clock`; also saves region shares of mean-baseline attribution, stLFP, spike–LFP correlation, ridge weight); ✅ 89 sessions (section 4) |
 | **F. Region contributions to the task-evoked LFP (biology for R1; scoped 2026-11-11):** exact Shapley contributions of 6 region groups (VISp, other visual cortex, hippocampus, thalamus, midbrain, other; 64 coalitions, mean fill) plus single-area removal, over all active and passive bins; event-locked averages for repeated image, change (hit / miss, before the first lick), omission and the flash after it, familiar vs novel session and shared vs novel images, active vs passive replay; RMS share per region in early (30–100 ms), late (100–250 ms) and post (250–750 ms) windows; checked on the test block alone | R1, R3 #1 | ⬜ scoped; one new experiment feeds F, G and H |
 | **G. Layer-specific inputs vs anatomy:** CSD (second spatial derivative across channels) of each source area's event-locked contribution, by depth from the L4 border, against the Allen connectivity atlas projection density of that area into VISp layers 1–6 (LG, LP, VISl, VISal, VISrl, VISam, VISpm; hippocampus and midbrain as no-projection controls); does each source match its own anatomical profile better than the others' (permutation over sources)? | R1 | ⬜ scoped |
 | **Before F–H: data exploration (2026-11-11).** `experiments/explore_task.py` (figures in plots/<session>/explore/, `summarize explore_task` for the table across sessions and the familiar vs novel event-locked LFP): blocks and split, running, pupil quality and cleaning, licks, rewards and engagement, hit rate, event counts (all and test block), event-locked LFP by depth, band power, region firing rates and model predictions. 41 of 48 mice have one familiar (G) and one novel (H) session | R1 | 🟡 built and tested; first session pending |
@@ -583,14 +583,27 @@ Fraction of the full R² lost when the region is removed (median over sessions; 
   the wider visual network. Not specific to slow bands: it holds through 12–25 Hz.
 - Subcortical regions are minor but not zero for the envelopes (thalamus, midbrain, APN, LG 0.02–0.09
   at 8–25 Hz); hippocampus matters only for broadband (0.04).
-- Depth (first run, divided by the session's median full R², so superficial values are deflated by low
-  R² there; now per channel, rerun the summary): VISp's broadband share peaks around and below layer 4;
-  the other visual areas' 8–25 Hz share peaks just below layer 4 (0.86–0.97 on aligned channels 4–6),
-  their 4–8 Hz share deepest. Hippocampus has no deep gradient (0.03–0.07, if anything higher
-  superficially): no sign of simple volume conduction from below.
+- Depth (each channel divided by its own full R²; 0 = deepest pooled channel, L4 at about 7–10): VISp's
+  broadband share peaks at and just below L4 (0.57–0.61 on channels 4–10, 0.27–0.33 at the edges). The
+  other visual areas' 8–25 Hz share peaks in the middle (0.70–0.79 on channels 5–8); their 0.5–4 Hz share
+  is lowest at L4 (0.41) and highest at both edges (0.59–0.64). Hippocampus loses 0.03–0.05 of broadband on
+  the deep channels and 0.12–0.18 on the most superficial ones: rises away from the hippocampus, so not
+  simple volume conduction from below.
 - "Region alone" is negative for the envelopes (mean-filling most units is out of distribution); use
   only for broadband (VISp alone 0.61, other visual 0.25).
-- **Caveat:** inference-time only; the retrained check for 0.5–8 Hz (`region_ablation_bands`) is pending.
+- **Retrained without the region (`region_ablation_bands`, 2026-11-13), fraction of full R² lost:**
+
+  | Region | Broadband | 0.5–4 Hz | 4–8 Hz |
+  |---|---|---|---|
+  | VISp | **0.130** (89/89) | 0.114 (87/89) | 0.092 (86/89) |
+  | Other visual cortex | 0.044 (89/89) | **0.166** (89/89) | **0.191** (88/89) |
+  | Hippocampus | 0.037 (87/89) | −0.010 (36/89) | −0.013 (33/89) |
+
+  Same ordering as at inference, smaller by 3–4× (retrained models recover from correlated units
+  elsewhere; the inference losses overstate unique dependence). With covariates the numbers barely move
+  (VISp 0.119 / 0.127 / 0.087; other visual 0.040 / 0.160 / 0.184). The paired VISp − other visual
+  difference for the retrained models is now printed by the summary (added 2026-11-13; rerun to get it).
+  Hippocampus helps broadband only; removing it slightly helps the slow bands (fewer inputs to overfit).
 
 ### High bands by timescale (`summarize timescale_r2`; all 89 sessions, 2026-11-11)
 | Test R² (median over sessions) | 0.5–4 Hz | 25–50 Hz | 50–100 Hz | 100–200 Hz | 200–400 Hz |
@@ -620,6 +633,64 @@ Fraction of the full R² lost when the region is removed (median over sessions; 
   then removes predictable 4–10 Hz content; coherence 0.65 there).
 - **Proposed reporting for R3 #6:** keep all bands; report the unsmoothed R² with the 250 ms R², the
   1–4 Hz coherence and the transient AUC, each against the time-shift null.
+
+### Evoked vs trial-specific by region (`summarize region_clock`, 89 sessions, 2026-11-13; inference)
+R² lost when the region is mean-filled vs when only its spikes are swapped between presentations of the same
+condition (keeps its evoked content, breaks its trial-specific content). Full R² 0.631 / 0.380 / 0.320 /
+0.133 / 0.157; residual (template removed) R² 0.408 / 0.157 / 0.130 / 0.084 / 0.082.
+| R² lost (median) | Broadband removed / swapped | 0.5–4 Hz | 4–8 Hz | 8–12 Hz | 12–25 Hz |
+|---|---|---|---|---|---|
+| VISp | 0.353 / 0.212 | 0.123 / 0.068 | 0.081 / 0.044 | 0.028 / 0.019 | 0.050 / 0.029 |
+| Other visual cortex | 0.108 / 0.054 | 0.161 / 0.069 | 0.179 / 0.083 | 0.079 / 0.048 | 0.092 / 0.061 |
+| Hippocampus | 0.024 / **0.043** | 0.000 / 0.004 | 0.003 / 0.005 | 0.001 / 0.003 | 0.001 / 0.003 |
+| Thalamus / midbrain | 0.004 / 0.004, 0.007 / 0.006 | 0.007 / 0.006, 0.018 / 0.019 | | | |
+
+Trial-specific fraction (swapped / removed, sessions where removing costs > 0.005):
+| | Broadband | 0.5–4 Hz | 4–8 Hz | 8–12 Hz | 12–25 Hz |
+|---|---|---|---|---|---|
+| VISp | 0.69 | 0.55 | 0.60 | 0.76 | 0.60 |
+| Other visual cortex | 0.53 | 0.42 | 0.49 | 0.68 | 0.58 |
+| Hippocampus | 1.90 (85) | 0.59 (35) | 0.49 (40) | 0.52 (32) | 0.75 (23) |
+| Midbrain | 0.71 | 0.80 | 0.41 | 0.56 | 0.84 |
+- **Most of what each cortical region contributes is trial-specific, not the average evoked response:**
+  swapping a region's spikes between presentations of the same image costs 40–75% of what removing it
+  does. VISp's broadband contribution is the most trial-specific of the cortical ones (0.69 vs 0.53).
+- **Hippocampus contributes to cortical broadband only through trial-specific activity:** swapping costs
+  more than removing (0.043 vs 0.024, fraction 1.9; CA1 1.7, DG 1.9). Its spikes carry no stimulus-locked
+  information the model uses; correctly timed, they help; mistimed, they mislead. Candidate mechanism for the
+  text: hippocampal events (e.g. sharp-wave ripples, theta) reaching or co-occurring with cortical LFP.
+- Per-region removal costs are significant in nearly every session for visual areas; thalamic and midbrain
+  costs are small (≤ 0.02) but consistent (57–77 of 84–85 sessions).
+- The "residual R² lost" rows exceed the residual R² for VISp broadband (0.56 vs 0.41): without VISp the
+  model predicts trial-to-trial deviations worse than the template does.
+- Region shares by other measures (median, broadband / 0.5–4 / 4–8 Hz): mean-baseline attribution VISp
+  0.25 / 0.15 / 0.14, other visual 0.32 / 0.38 / 0.37, hippocampus 0.19 / 0.17 / 0.17; stLFP and
+  spike–LFP correlation give other visual cortex 0.41–0.53 and VISp 0.14–0.18. Attribution and ridge
+  credit hippocampus ≈ 0.19 although removing it costs ≈ 0 for the bands: shares measure use, not need.
+
+### Transfer to passive and spontaneous epochs (`summarize transfer_scaling`, 89 sessions, 2026-11-13)
+| Median R² | Broadband | 0.5–4 Hz | 4–8 Hz | 8–12 Hz | 12–25 Hz |
+|---|---|---|---|---|---|
+| Active test, active scalers | 0.631 | 0.380 | 0.320 | 0.133 | 0.157 |
+| Passive, active scalers | 0.595 | 0.221 | 0.217 | 0.051 | 0.072 |
+| Passive, recalibrated (first half) | 0.605 | 0.264 | 0.237 | 0.062 | 0.085 |
+| Spontaneous, active scalers | 0.084 | −2.983 | −0.547 | −0.185 | −0.074 |
+| Spontaneous, per-epoch z-score (v1) | 0.089 | −0.123 | −0.109 | −0.047 | −0.051 |
+| Spontaneous, recalibrated | 0.216 | 0.003 | −0.006 | −0.002 | −0.001 |
+| Spontaneous, r² | 0.215 | 0.027 | 0.005 | 0.004 | 0.000 |
+- **Passive transfers well:** broadband 0.60 (active 0.63); the band envelopes lose 0.1–0.16 and
+  recalibration recovers only 0.02–0.04 of it. Input rates are 1.27× the active training rate.
+- **Spontaneous: the near-zero R² was partly scaling, partly real.** Broadband rises from 0.08 to 0.22 with
+  a linear recalibration (gain and offset). The band envelopes stay at 0 however they are scaled
+  (r² ≤ 0.03). In spontaneous (grey screen) the band power is lower and much less variable than in the
+  active epoch (0.5–4 Hz target mean −0.70, SD 0.23 in active-scaler units); the model, trained on
+  stimulus-driven power changes, does not track these smaller spontaneous fluctuations. Input rates are
+  1.11× active, so not an input shift.
+- Within the active test block, per-epoch z-scoring lowers R² (0.606) and recalibration changes nothing:
+  the active scalers are right there.
+- **For the paper:** report passive with active scalers and spontaneous with recalibration / r², and say the
+  envelopes do not transfer to spontaneous activity. Open question: are spontaneous envelopes predictable
+  at all from spikes (a model trained within the spontaneous epoch)? Not run.
 
 ### Attribution baseline over all 89 sessions (`summarize attribution_baseline`)
 Inference ablation, mean fill: mean R² drop over 1–20% of units removed (median over sessions),
@@ -692,7 +763,8 @@ paired difference from ridge weight, and sessions where the measure is best of t
   training scalers and sklearn's R² counts any offset or gain mismatch as error, whereas v1 z-scored
   the targets within each epoch. `experiments/transfer_scaling.py` (2026-11-11) scores active test,
   passive and spontaneous four ways (active scalers, per-epoch scaling as v1, linear recalibration
-  on the first half, r²) with target / prediction means and SDs and the input rate ratio; run pending.
+  on the first half, r²) with target / prediction means and SDs and the input rate ratio. **Answered
+  2026-11-13 (section 4):** broadband 0.08 → 0.22 with recalibration; the band envelopes stay at 0.
 - Early sign flip of thalamus / hippocampus in Fig. 7D; possibly check with the mean baseline.
 - Channel 13 of session 1047969464 was an outlier in the timing run.
 - One model (session 1047969464, chan 4 band 2) above the completeness limit at 400 steps.
@@ -725,6 +797,10 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-13** `region_bands` (with the retrained run), `region_clock` and `transfer_scaling` finished for all
+  89 sessions; section 4 updated. `summarize region_bands` now also tests VISp − other visual cortex on the
+  retrained models. `bleed_through` session 1: 200–400 Hz R² at 250 ms 0.49 → 0.42 retrained without units
+  within 100 µm, 100–200 Hz unchanged; full run with the VISp retrain next.
 - **2026-11-11** Added `experiments/explore_task.py` and `summarize explore_task` (exploratory figures before Phase 2 F–H).
 - **2026-11-11** Scoped Phase 2 F–H (region contributions to task events, layer match with anatomy, brain state).
 - **2026-11-11** `timescale_r2` finished for all 89 sessions; section 4 updated (results match the 14-session preview).

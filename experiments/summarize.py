@@ -386,7 +386,18 @@ def region_bands():
         print(f'  {TARGET_NAMES[t]:10s} {paired(diff[:, t])}')
     for t in targets[1:]:
         print(f'  (broadband - {TARGET_NAMES[t]}) of that difference: {paired(diff[:, 0] - diff[:, t])}')
-    borders = pd.read_csv(ALIGNMENT_TABLE).set_index('session').loc[list(rows)]
+    found = [r for r in band_rows.values() if 'retrained' in r]
+    if found:
+        v, n = np.stack([r['retrained'] for r in found]), np.stack([r['n_units'] for r in found]).astype(float)
+        ok = (n[:, a] > 0) & (n[:, b] > 0)
+        rdiff = v[ok, a] - v[ok, b]
+        done = [t for t in targets if np.isfinite(rdiff[:, t]).any()]
+        print(f'VISp minus other visual cortex, fraction lost retrained (region_ablation_bands.npz; {ok.sum()} sessions with both):')
+        for t in done:
+            print(f'  {TARGET_NAMES[t]:10s} {paired(rdiff[:, t])}')
+        for t in done[1:]:
+            print(f'  (broadband - {TARGET_NAMES[t]}) of that difference: {paired(rdiff[:, 0] - rdiff[:, t])}')
+    borders =pd.read_csv(ALIGNMENT_TABLE).set_index('session').loc[list(rows)]
     lower, upper = (np.median(borders[k] - borders['first_channel_index']) for k in ('lower_border_index', 'upper_border_index'))
     print(f'depth profile: fraction of each channel\'s full R2 lost (channels with full R2 > {MIN_PROFILE_R2}; 0 = deepest pooled channel; '
           f'layer 4 at about {lower:.0f}-{upper:.0f}), median over sessions with units:')
