@@ -601,8 +601,10 @@ Fraction of the full R² lost when the region is removed (median over sessions; 
 
   Same ordering as at inference, smaller by 3–4× (retrained models recover from correlated units
   elsewhere; the inference losses overstate unique dependence). With covariates the numbers barely move
-  (VISp 0.119 / 0.127 / 0.087; other visual 0.040 / 0.160 / 0.184). The paired VISp − other visual
-  difference for the retrained models is now printed by the summary (added 2026-11-13; rerun to get it).
+  (VISp 0.119 / 0.127 / 0.087; other visual 0.040 / 0.160 / 0.184). Paired VISp − other visual
+  difference, retrained: broadband +0.084 (78/89, p 5e-12), 0.5–4 Hz −0.051 (33/89 > 0, p 3e-03), 4–8 Hz
+  −0.080 (19/89 > 0, p 2e-09); the interaction (broadband − band) is +0.112 (82/89, p 7e-14) and +0.173
+  (88/89, p 4e-16). **The double dissociation holds after retraining.**
   Hippocampus helps broadband only; removing it slightly helps the slow bands (fewer inputs to overfit).
 
 ### High bands by timescale (`summarize timescale_r2`; all 89 sessions, 2026-11-11)
