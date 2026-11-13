@@ -18,6 +18,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from scipy.ndimage import uniform_filter1d
 from scipy.stats import wilcoxon
 
 import config
@@ -680,6 +681,78 @@ def state_shares(stats, names, groups, e, var, levels):
         return np.stack([(s[col[f'{g}_cp']] / n - s[col[f'{g}_c']] / n * s[col['p']] / n) / var_p for g in groups])
 
 
+LATENCY_WINDOW_MS = (0, 750)          # one flash cycle (250 ms image + 500 ms grey)
+LATENCY_TYPES = ['image', 'change_hit', 'passive_image']
+
+
+def event_timing(x, lags):
+    """x (lags x ...), corrected by its pre-onset mean, in LATENCY_WINDOW_MS: the time by which half of the
+    squared signal has arrived (t50) and the time of the largest |x| (20 ms smoothing) -> (2 x ...) in ms."""
+    x = x - np.nanmean(x[lags < 0], axis=0)
+    w = (lags >= LATENCY_WINDOW_MS[0]) & (lags < LATENCY_WINDOW_MS[1])
+    x, t = x[w], lags[w]
+    energy = np.cumsum(x ** 2, axis=0)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        t50 = t[np.argmax(energy >= energy[-1] / 2, axis=0)].astype(float)
+    peak = t[np.argmax(uniform_filter1d(np.abs(x), 5, axis=0), axis=0)].astype(float)
+    bad = ~np.isfinite(energy[-1]) | (energy[-1] == 0)
+    t50[bad], peak[bad] = np.nan, np.nan
+    return np.stack([t50, peak])
+
+
+def latency_control(rows, groups, tnames, has):
+    """
+    Is a group's contribution late only because its own spikes are late? Per session and event type, the timing
+    (event_timing) of each group's contribution at the layer 4 channel and of its own event-locked firing rate
+    (explore_task.npz eta_pop), and the delay of the contribution behind the spikes; then the paired difference
+    in that delay between visual_cortex_other and VISp (> 0: the other areas' contribution lags their spikes
+    by more than VISp's does, beyond their response latency).
+    """
+    timing = {}
+    for sid, r in rows.items():
+        f = variables_dir(sid) / 'explore_task.npz'
+        if not f.exists():
+            continue
+        e = np.load(f)
+        etypes, egroups = [str(t) for t in e['event_types']], [str(g) for g in e['region_groups']]
+        if not np.allclose(e['eta_lags_ms'], r['lags']):
+            continue
+        for t in LATENCY_TYPES:
+            if t not in etypes or t not in r['eta']:
+                continue
+            rate = np.full((len(r['lags']), len(groups)), np.nan)
+            for g, gn in enumerate(groups):
+                if gn in egroups:
+                    rate[:, g] = e['eta_pop'][etypes.index(t), :, egroups.index(gn)]
+            timing.setdefault(t, {})[sid] = (event_timing(rate, r['lags']), event_timing(r['eta'][t], r['lags']))
+    if not timing:
+        return
+    index = {sid: k for k, sid in enumerate(rows)}
+    v, o = groups.index('VISp'), groups.index('visual_cortex_other')
+    print(f'latency control: timing in {LATENCY_WINDOW_MS} ms of each group\'s own firing (explore_task) and of its '
+          'contribution at layer 4 (t50 = half the squared signal arrived; peak = largest |x|), median over sessions with units')
+    for t, per in timing.items():
+        sids = list(per)
+        h = has[[index[s] for s in sids]]
+        spikes = np.stack([per[s][0] for s in sids])                    # sessions x (t50, peak) x groups
+        contrib = np.stack([per[s][1] for s in sids])                   # sessions x (t50, peak) x groups x targets
+        print(f'--- {t} ({len(sids)} sessions)')
+        for m, mn in enumerate(('t50', 'peak')):
+            print(f'  {mn:5s} {"":17s}' + ''.join(f'{g[:12]:>13s}' for g in groups))
+            print(f'  {"":5s} {"own spikes":17s}' + ''.join(
+                f'{np.nanmedian(spikes[h[:, g], m, g]):13.0f}' if h[:, g].any() else f'{"":13s}' for g in range(len(groups))))
+            for j, tn in enumerate(tnames):
+                print(f'  {"":5s} {"contr. " + tn:17s}' + ''.join(
+                    f'{np.nanmedian(contrib[h[:, g], m, g, j]):13.0f}' if h[:, g].any() else f'{"":13s}' for g in range(len(groups))))
+            both = h[:, v] & h[:, o]
+            print(f'  {"":5s} other visual - VISp, own spikes:       {paired(spikes[both, m, o] - spikes[both, m, v])}')
+            for j, tn in enumerate(tnames):
+                delay = contrib[:, m, :, j] - spikes[:, m]                  # sessions x groups
+                print(f'  {"":5s} other visual - VISp, contr. {tn:10s} {paired(contrib[both, m, o, j] - contrib[both, m, v, j])}')
+                print(f'  {"":5s}   delay behind own spikes, VISp {paired(delay[h[:, v], v])}; other visual {paired(delay[h[:, o], o])}; '
+                      f'other - VISp {paired(delay[both, o] - delay[both, v])}')
+
+
 def region_events():
     """
     Region contributions to the task-evoked LFP (Phase 2 F; experiments/region_events.py), at the layer 4 channel:
@@ -788,6 +861,7 @@ def region_events():
                         rho, p = spearmanr(strat[ok], sh[ok, g])
                         out.append(f'{gn[:10]} {rho:+.2f} (p {p:.0e})')
                 print(f'  {t:10s} {tn:10s} ' + ' | '.join(out))
+    latency_control(rows, groups, tnames, has)
 
     print('Shapley variance shares Cov(c, prediction) / Var(prediction) by state, layer 4 (median over sessions; paired difference):')
     for c in STATE_CONTRASTS:

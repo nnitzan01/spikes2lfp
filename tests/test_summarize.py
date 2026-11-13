@@ -159,10 +159,23 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
         d = tmp_path / 'summary' / 'variables' / str(sid)
         d.mkdir(parents=True)
         np.savez(d / 'region_events.npz', **out)
+        lags = out['eta_lags_ms']
+        rate = np.exp(-((lags - 60) / 30) ** 2)[None, :, None] * np.ones((3, 1, 5))       # firing peaking at 60 ms
+        np.savez(d / 'explore_task.npz', event_types=np.array(['image', 'change_hit', 'passive_image']), eta_lags_ms=lags,
+                 region_groups=out['groups'][:5], eta_pop=rate)
     monkeypatch.setattr(summarize, 'sessions', lambda: [1047969464, 1048189115])
     monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / 'summary' / 'variables' / str(sid))
     monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(0, 2))
     summarize.region_events()
     text = capsys.readouterr().out
     assert '--- image' in text and 'same mouse, novel day minus familiar day' in text and 'IG (mean baseline) vs Shapley' in text and 'by state' in text
+    assert 'latency control' in text and 'delay behind own spikes' in text
     assert (tmp_path / 'summary' / 'variables' / 'region_events_pooled.png').exists()
+
+
+def test_event_timing():
+    lags = (np.arange(-62, 188) + 0.5) * 4.0
+    x = np.stack([np.exp(-((lags - c) / 20) ** 2) for c in (50, 200)], 1)
+    t50, peak = summarize.event_timing(x, lags)
+    assert np.allclose(t50, [50, 200], atol=4) and np.allclose(peak, [50, 200], atol=4)
+    assert np.isnan(summarize.event_timing(np.zeros((len(lags), 1)), lags)).all()
