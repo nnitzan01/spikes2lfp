@@ -118,22 +118,22 @@ class LSTMnet(nn.Module):
 class CausalCNN(nn.Module):
     """
     (batch, time, units) -> (batch, time, 1) without recurrence (the CNN-only baseline): LSTMnet's causal
-    Conv1d front end (units -> out_channels), then n_layers causal Conv1d layers of `hidden` channels with
-    dilations 1, 2, 4, ... and ReLU, and a linear readout at every time step. Receptive field
-    1 + (kernel_size - 1) * (2 ** (n_layers + 1) - 1) bins (n_layers 8, kernel 3: 1023 bins, 4 s).
+    Conv1d front end (units -> out_channels), a 1 x 1 projection to `hidden` channels, then n_layers residual
+    causal Conv1d blocks (x + ReLU(conv(x)), dilations 1, 2, 4, ...) and a linear readout at every time step.
+    Receptive field 1 + (kernel_size - 1) * (2 ** (n_layers + 1) - 1) bins (n_layers 8, kernel 3: 1023 bins, 4 s).
     """
     def __init__(self, input_size, seqlength, out_channels=16, hidden=32, n_layers=8, kernel_size=3):
         super().__init__()
         self.input_size, self.seqlength = input_size, seqlength
         self.conv1d = CausalConv1d(input_size, out_channels, kernel_size)
-        self.dilated = nn.ModuleList([CausalConv1d(out_channels if i == 0 else hidden, hidden, kernel_size, dilation=2 ** i)
-                                      for i in range(n_layers)])
+        self.project = nn.Linear(out_channels, hidden)
+        self.dilated = nn.ModuleList([CausalConv1d(hidden, hidden, kernel_size, dilation=2 ** i) for i in range(n_layers)])
         self.out = nn.Linear(hidden, 1)
 
     def forward(self, x):
-        x = self.conv1d(x)
+        x = self.project(self.conv1d(x))
         for layer in self.dilated:
-            x = torch.relu(layer(x))
+            x = x + torch.relu(layer(x))
         return self.out(x)
 
 
