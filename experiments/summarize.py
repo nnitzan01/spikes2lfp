@@ -189,8 +189,13 @@ def paired(diff):
 
 def baselines():
     keys = ['model_r2', 'r2_units', 'r2_units_instant', 'r2_regions', 'r2_stimulus_behaviour',
-            'r2_regions_stimulus_behaviour', 'r2_units_stimulus_behaviour', 'r2_lstm_regions']
-    rows = over_sessions('baselines', lambda d, ch: {k: channel_median(d[k], ch)[:3] for k in keys if k in d})
+            'r2_regions_stimulus_behaviour', 'r2_units_stimulus_behaviour', 'r2_lstm_regions', 'r2_arch_cnn', 'r2_arch_lstm']
+    rows = over_sessions('baselines', lambda d, ch: {**{k: channel_median(d[k], ch)[:3] for k in keys if k in d},
+                                                    **{k: float(d[k]) for k in d.files if k.startswith('n_params')}})
+    params = {k: np.median([r[k] for r in rows.values() if k in r]) for k in ('n_params_cnn_lstm', 'n_params_arch_cnn', 'n_params_arch_lstm')
+              if any(k in r for r in rows.values())}
+    if params:
+        print('trainable parameters per model (median over sessions): ' + ', '.join(f'{k[9:]} {v:.0f}' for k, v in params.items()))
     print('median over sessions of the per-session median over pooled channels (broadband, 0.5-4, 4-8 Hz):')
     for k in keys:
         v = np.array([r[k] for r in rows.values() if k in r])
@@ -1093,6 +1098,150 @@ def region_depth(name='region_events'):
     print(f'figure: {png}')
 
 
+def firing_rate_control():
+    """
+    Top-attribution units (training block) against the closest-rate unit of their area and downsampled to their area's
+    mean rate (experiments/firing_rate_contribution.py), on the test block: per session, the median log10 ratio of top to
+    control attribution over the pairs whose rates are within RATE_MATCH, and the fraction of top units above their control.
+    """
+    from analysis import stats as st_
+    rows = over_sessions('firing_rate_control', lambda d, ch: {k: d[k] for k in d.files})
+    if not rows:
+        return
+    sids = list(rows)
+    mice = st_.mouse_ids(sids)
+    first = next(iter(rows.values()))
+    for b, band in enumerate(first['bands']):
+        ratio, above, n_pairs, down, area = [], [], [], [], []
+        for r in rows.values():
+            match = np.abs(np.log(r['rate_control'][b] / r['rate_top'][b])) < np.log(RATE_MATCH)
+            lr = np.log10(r['attr_top'][b] / r['attr_control'][b])
+            ratio.append(np.median(lr[match]) if match.any() else np.nan)
+            above.append(np.mean(lr[match] > 0) if match.any() else np.nan)
+            n_pairs.append(match.sum())
+            down.append(np.median(np.log10(np.nanmean(r['attr_downsampled'][b], 1) / r['attr_area'][b])))
+        print(f'--- {TARGET_NAMES[int(band)]}: {int(np.sum(n_pairs))} rate-matched pairs (rates within {RATE_MATCH:.2f}x) in {len(sids)} sessions')
+        print(f'  log10(top / matched control) attribution, per-session median: {st_.describe(np.array(ratio), mice)}')
+        print(f'  fraction of top units above their control (median over sessions): {np.nanmedian(above):.2f}')
+        print(f'  log10(downsampled top / area mean): {st_.describe(np.array(down), mice)}')
+
+
+RATE_MATCH = 1.25
+
+
+def robustness():
+    """
+    Seeds, fixed-size region subsamples and retrained ablation with seeds (experiments/robustness.py): test R2 spread over
+    seeds; rank agreement of unit attribution between seed s and seed 0 (Spearman, top-10% overlap); per-unit attribution
+    by region with equal unit counts per region; retrained ablation averaged over seeds, against ridge weight.
+    """
+    from scipy.stats import spearmanr
+    from analysis import stats as st_
+
+    def per_session(d, ch):
+        out = {}
+        chans = d['channels'] if 'channels' in d else []
+        if 'r2_seeds' in d:
+            r2 = d['r2_seeds'][:, chans][..., :3]                                      # seeds x channels x targets
+            out['r2_sd'] = np.nanmedian(np.nanstd(r2, 0), 0)
+            out['r2_range'] = np.nanmedian(np.nanmax(r2, 0) - np.nanmin(r2, 0), 0)
+            rho, jac = np.full((d['attr_seeds'].shape[0] - 1, 3), np.nan), np.full((d['attr_seeds'].shape[0] - 1, 3), np.nan)
+            for s in range(1, d['attr_seeds'].shape[0]):
+                for t in range(3):
+                    vals, js = [], []
+                    for c in chans:
+                        a, b = d['attr_seeds'][0, c, t], d['attr_seeds'][s, c, t]
+                        ok = np.isfinite(a) & np.isfinite(b)
+                        if ok.sum() > 10:
+                            vals.append(spearmanr(a[ok], b[ok])[0])
+                            k = max(1, int(0.1 * ok.sum()))
+                            ta, tb = set(np.argsort(-a[ok])[:k]), set(np.argsort(-b[ok])[:k])
+                            js.append(len(ta & tb) / len(ta | tb))
+                    rho[s - 1, t], jac[s - 1, t] = np.nanmedian(vals) if vals else np.nan, np.nanmedian(js) if js else np.nan
+            out['rho'], out['jaccard'] = np.nanmean(rho, 0), np.nanmean(jac, 0)
+        if 'attr_sub' in d and len(d['sub_units']):
+            groups = [str(g) for g in d['groups']]
+            sub = np.nanmean(d['attr_sub'][:, chans][:, :, :3], 1)                     # draws x targets x units
+            full = np.nanmean(d['attr_seeds'][0, chans][:, :3], 0) if 'attr_seeds' in d else None
+            per_group = np.full((len(groups), 3), np.nan)
+            per_group_full = np.full((len(groups), 3), np.nan)
+            for g in range(len(groups)):
+                m = d['unit_groups'] == g
+                if (d['sub_units'][:, m]).any():
+                    per_group[g] = np.nanmean(np.nanmean(np.where(d['sub_units'][:, None, :] & m, sub, np.nan), 2), 0)
+                    if full is not None:
+                        per_group_full[g] = np.nanmean(full[:, m], 1)
+            out['sub_group'], out['full_group'] = per_group, per_group_full
+            out['r2_sub'] = np.nanmedian(np.nanmean(d['r2_sub'][:, chans][..., :3], 0), 0)
+        if 'r2_ablation' in d:
+            ac = d['ablation_channels']
+            full = d['r2_ablation_full'][:, ac]                                         # seeds x channels x targets
+            drop = full[None, None] - d['r2_ablation'][:, :, :, ac]                     # measures x fractions x seeds x channels x targets
+            out['ablation'] = np.nanmedian(np.nanmean(drop, 2), 2)[..., :2]           # measures x fractions x targets (mean over seeds)
+            out['ablation_seed_sd'] = np.nanmedian(np.nanstd(drop, 2), 2)[..., :2]
+            out['measures'] = [str(m) for m in d['ablation_measures']]
+            out['fractions'] = d['fractions']
+        return out
+
+    rows = over_sessions('robustness', per_session)
+    if not rows:
+        return
+    sids = list(rows)
+    mice = st_.mouse_ids(sids)
+    stack = lambda k: np.stack([r[k] for r in rows.values() if k in r])
+    if any('r2_sd' in r for r in rows.values()):
+        print('test R2 over seeds 0-2 (median over channels, then sessions): SD ' +
+              ', '.join(f'{TARGET_NAMES[t]} {np.nanmedian(stack("r2_sd")[:, t]):.3f}' for t in range(3)) + '; range ' +
+              ', '.join(f'{np.nanmedian(stack("r2_range")[:, t]):.3f}' for t in range(3)))
+        print('unit attribution (mean baseline), seed s vs seed 0: Spearman ' +
+              ', '.join(f'{TARGET_NAMES[t]} {np.nanmedian(stack("rho")[:, t]):.2f}' for t in range(3)) + '; top-10% Jaccard ' +
+              ', '.join(f'{np.nanmedian(stack("jaccard")[:, t]):.2f}' for t in range(3)))
+    if any('sub_group' in r for r in rows.values()):
+        sg, fg = stack('sub_group'), stack('full_group')
+        print('mean attribution per unit by region, equal units per region (retrained on the subsample) vs the full model '
+              '(same channels; median over sessions with the region):')
+        from experiments.robustness import GROUPS
+        for g, name in enumerate(GROUPS):
+            print(f'  {name:22s} ' + ' | '.join(f'{TARGET_NAMES[t]} {np.nanmedian(sg[:, g, t]):.2e} (full {np.nanmedian(fg[:, g, t]):.2e})'
+                                               for t in range(3)))
+        for t in range(3):
+            agree = [spearmanr(a[:, t], b[:, t])[0] for a, b in zip(sg, fg) if np.isfinite(a[:, t]).sum() >= 3 and
+                     np.isfinite(b[:, t]).sum() >= 3]
+            print(f'  {TARGET_NAMES[t]}: region order, subsample vs full model (Spearman per session) median {np.nanmedian(agree):.2f}')
+        keep = [i for i, r in enumerate(rows.values()) if 'sub_group' in r]
+        v = np.array([np.log10(r['sub_group'][0] / r['sub_group'][1]) for r in rows.values() if 'sub_group' in r])
+        for t in range(3):
+            print(f'  log10(VISp / other visual) per unit, equal counts, {TARGET_NAMES[t]}: {st_.describe(v[:, t], mice[keep])}')
+    if any('ablation' in r for r in rows.values()):
+        r0 = next(r for r in rows.values() if 'ablation' in r)
+        ab, sd = stack('ablation'), stack('ablation_seed_sd')
+        ref = r0['measures'].index('ridge_weight')
+        print(f'retrained ablation, R2 lost (mean over seeds 0-2; median over channels, sessions); fractions {r0["fractions"]}:')
+        for t in range(2):
+            for i, m in enumerate(r0['measures']):
+                vs = '' if i == ref else ' | minus ridge ' + ', '.join(paired(ab[:, i, k, t] - ab[:, ref, k, t]) for k in range(ab.shape[2]))
+                print(f'  {TARGET_NAMES[t]:10s} {m:28s} {np.round(np.nanmedian(ab[:, i, :, t], 0), 3)} '
+                      f'(seed SD {np.round(np.nanmedian(sd[:, i, :, t], 0), 3)}){vs}')
+
+
+def spectral_r2():
+    """R2 of the broadband model trained on each unit group (experiments/spectral_r2.py), broadband and band-passed, by band."""
+    groups = ['full_model', 'cortex', 'cortex_no_visp', 'hpc', 'subcortical']
+    rows = {}
+    for sid in sessions():
+        v = variables_dir(sid)
+        if (v / 'r2_results_full_model.csv').exists():
+            ch = pooled_channels(sid)
+            rows[sid] = {g: pd.read_csv(v / f'r2_results_{g}.csv', index_col=0).iloc[:, ch].median(axis=1)
+                         for g in groups if (v / f'r2_results_{g}.csv').exists()}
+    print(f'{len(rows)} sessions with spectral_r2 results; median over pooled channels, then over sessions:')
+    bands = next(iter(rows.values()))['full_model'].index
+    print(f'  {"":16s}' + ''.join(f'{b:>13s}' for b in bands))
+    for g in groups:
+        v = pd.DataFrame([r[g] for r in rows.values() if g in r])
+        print(f'  {g:16s}' + ''.join(f'{v[b].median():13.3f}' for b in bands) + f'   (n = {len(v)})')
+
+
 SESSION_SUMMARIES = {'training_length': training_length, 'attribution_baseline': attribution_baseline,
                      'simulation': simulation}
 ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'region_ablation': region_ablation,
@@ -1101,7 +1250,8 @@ ALL_SESSIONS = {'baselines': baselines, 'ranked_ablation': ranked_ablation, 'reg
                 'region_events': region_events, 'region_depth': region_depth,
                 'region_depth_thalamus': lambda: region_depth('region_events_thalamus'),
                 'stimulus_clock': stimulus_clock, 'attribution_baseline': attribution_baseline_sessions,
-                'simulation': simulation_sessions}
+                'simulation': simulation_sessions, 'firing_rate_control': firing_rate_control, 'robustness': robustness,
+                'spectral_r2': spectral_r2}
 
 
 def main():
