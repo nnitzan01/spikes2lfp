@@ -156,14 +156,14 @@ def inference_ablation(pipeline, scores, targets, n_random, rng, measures=MEASUR
     return r2_full, r2_ablated, r2_random
 
 
-def retrained_ablation(pipeline, scores, targets, fractions, n_seeds, n_random, rng, measures=MEASURES):
+def retrained_ablation(pipeline, scores, targets, fractions, n_seeds, n_random, rng, measures=MEASURES, channels=None):
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
     n_ch, n_tg, n_units = Y.shape[1], Y.shape[2], X.shape[1]
     r2 = np.full((len(measures), len(fractions), n_seeds, n_ch, n_tg), np.nan)
     r2_random = np.full((n_random, len(fractions), n_seeds, n_ch, n_tg), np.nan)
     r2_full = np.full((n_seeds, n_ch, n_tg), np.nan)
     for band in targets:
-        for chan in range(n_ch):
+        for chan in range(n_ch) if channels is None else channels:
             y = Y[:, chan, band]
             ranked, random_orders = orders(scores, chan, band, n_random, rng, measures)
             for seed in range(n_seeds):

@@ -284,16 +284,16 @@ class SessionPipeline:
         """Seed-0 models, used by the attribution stages."""
         return self.load_models(seed=0)
 
-    def fit_and_score(self, X, y, seed=0, num_epochs=config.NUM_EPOCHS, patience=config.PATIENCE):
+    def fit_and_score(self, X, y, seed=0, num_epochs=config.NUM_EPOCHS, patience=config.PATIENCE, architecture='cnn_lstm'):
         """
-        Train the standard model on inputs X (bins x features) for one target y (bins,) with this
-        session's blocked split and validation-based epoch selection. Returns (model, test R2).
-        Used by the experiments that retrain on modified inputs.
+        Train the standard model (or another models.ARCHITECTURES) on inputs X (bins x features) for one
+        target y (bins,) with this session's blocked split and validation-based epoch selection.
+        Returns (model, test R2). Used by the experiments that retrain on modified inputs.
         """
         torch.manual_seed(config.TORCH_SEED + seed)
         loaders = {part: make_loader(take_chunks(X, self.split[part]), take_chunks(y[:, None], self.split[part]),
                                      shuffle=(part == 'train')) for part in ('train', 'val', 'test')}
-        model = models.build_lstm(X.shape[1], self.device)
+        model = models.build_model(architecture, X.shape[1], self.device)
         model.train(loaders['train'], loaders['val'], num_epochs, select_best=True, patience=patience)
         return model, r2(model, loaders['test'])
 

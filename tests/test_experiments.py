@@ -27,10 +27,14 @@ def test_ablation(pipeline_module, session_dir, monkeypatch):
 def test_firing_rate_contribution(pipeline_module, session_dir):
     from experiments import firing_rate_contribution
     pipeline = _trained_pipeline(pipeline_module, session_dir)
-    results = firing_rate_contribution.run(pipeline, chan=0, n_top=3, n_iter=2)
-    assert len(results['top_neuron_indices']) == 3
-    assert all(len(d) == 2 for d in results['downsampled_attributions'])
-    assert all(len(d) == 2 for d in results['downsampled_per_spike'])
+    out = firing_rate_contribution.run(pipeline, bands=[0], chan=0, n_top=3, n_iter=2, exclude_fraction=0.2)
+    assert out['top'].shape == (1, 3) and out['attr_downsampled'].shape == (1, 3, 2)
+    assert not set(out['top'][0]) & set(out['control'][0])                          # controls are not top units
+    assert np.isfinite(out['attr_control']).all() and np.isfinite(out['attr_downsampled']).all()
+    rate = np.array([0.1, 5.0, 5.2, 9.0, 4.9])
+    control, same = firing_rate_contribution.matched_controls(np.array([3]), rate, np.array(['a', 'a', 'b', 'a', 'a']),
+                                                              np.array([0, 0, 0, 1, 0], bool))
+    assert control.tolist() == [1] and same.tolist() == [True]                     # same area, closest rate
 
 
 def test_spectral_r2(pipeline_module, session_dir):
@@ -124,6 +128,22 @@ def test_baselines(pipeline_module, session_dir):
     assert int(out['n_inputs_units_stimulus_behaviour']) == N_UNITS + 4 + 4
     out = baselines.run_lstm(pipeline, ['regions'])
     assert np.isfinite(out['r2_lstm_regions']).all()
+    out = baselines.run_arch(pipeline, ['cnn', 'lstm'], targets=[0])
+    for variant in ('cnn', 'lstm'):
+        assert np.isfinite(out[f'r2_arch_{variant}'][:, 0]).all() and np.isnan(out[f'r2_arch_{variant}'][:, 1]).all()
+        assert int(out[f'n_params_arch_{variant}']) > 0
+    assert int(out['n_params_cnn_lstm']) > 0
+
+
+def test_causal_cnn_is_causal():
+    import torch
+    import models
+    net = models.build_model('cnn', 4, 'cpu', seqlength=50).model
+    x = torch.randn(1, 50, 4)
+    y = net(x)
+    x2 = x.clone()
+    x2[:, 30:] = torch.randn(1, 20, 4)                    # change only the future of bin 29
+    assert torch.allclose(net(x2)[:, :30], y[:, :30]) and not torch.allclose(net(x2)[:, 30:], y[:, 30:])
 
 
 def test_ranked_ablation(pipeline_module, session_dir, monkeypatch):
@@ -199,6 +219,30 @@ def test_attribution_baseline(pipeline_module, session_dir, monkeypatch):
     assert (out['completeness'][:, 0] <= 0.01).all() or (out['n_steps'][:, 0] == 400).all()
     assert out['r2_retrained'].shape == (len(ab.MEASURES), 1, 1, n_ch, 9)
     assert np.isfinite(out['spearman_zero_baseline'][:, 0]).all()
+
+
+def test_robustness(pipeline_module, session_dir, monkeypatch):
+    from experiments import attribution_baseline as ab
+    from experiments import ranked_ablation as ra
+    from experiments import robustness as rb
+    monkeypatch.setattr(ra, 'FRACTIONS', [0.1, 0.5])
+    monkeypatch.setattr(rb, 'MIN_UNITS', 1)
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    _, scores = ra.run(pipeline, targets=[0], n_random=1, retrain_targets=[])
+    np.savez(pipeline.dirs.variables / 'ranked_ablation_measures.npz', **scores)
+    np.savez(pipeline.dirs.variables / 'attribution_baseline.npz', **ab.run(pipeline, targets=[0], n_random=1, retrain_targets=[]))
+    out = rb.run(pipeline, targets=[0], n_seeds=1, n_subsamples=2, per_region=2, ablation_targets=[0],
+                 ablation_channel_step=2, fractions=[0.25], n_random=1)
+    n_ch, ch = pipeline.n_channels, out['channels']                    # the pooled channels of the alignment table
+    assert out['r2_seeds'].shape == (2, n_ch, 9) and np.isfinite(out['r2_seeds'][:, ch, 0]).all()
+    assert np.isfinite(out['attr_seeds'][:, ch, 0]).all() and np.isnan(out['attr_seeds'][1, :, 1]).all()
+    drawn = out['sub_units']
+    assert drawn.shape == (2, N_UNITS) and (drawn.sum(1) == drawn[0].sum()).all()
+    assert np.isfinite(out['attr_sub'][0, ch, 0][:, drawn[0]]).all() and np.isnan(out['attr_sub'][0, ch, 0][:, ~drawn[0]]).all()
+    for g in np.unique(out['unit_groups'][drawn[0]]):
+        assert (out['unit_groups'][drawn[0]] == g).sum() == int(out['sub_n_per_group'])     # same count per group
+    assert out['r2_ablation'].shape == (len(rb.ABLATION_MEASURES), 1, 2, n_ch, 9)
+    assert np.isfinite(out['r2_ablation'][..., out['ablation_channels'], 0]).all()
 
 
 def test_simulation(pipeline_module, session_dir):

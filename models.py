@@ -18,6 +18,26 @@ def build_lstm(input_size, device, seqlength=config.SEQLENGTH):
                          torch.nn.MSELoss(), device)
 
 
+ARCHITECTURES = ['cnn_lstm', 'lstm', 'cnn']
+
+
+def build_model(architecture, input_size, device, seqlength=config.SEQLENGTH):
+    """
+    'cnn_lstm' (the standard model, build_lstm), 'lstm' (the same without the conv front end) or 'cnn'
+    (CausalCNN: the same front end and dilated causal convolutions instead of the LSTM), ready to train.
+    """
+    if architecture == 'cnn_lstm':
+        return build_lstm(input_size, device, seqlength)
+    if architecture == 'lstm':
+        net = LSTMnet(input_size, seqlength=seqlength, **dict(config.LSTM_KWARGS, conv=False))
+    elif architecture == 'cnn':
+        net = CausalCNN(input_size, seqlength, out_channels=config.LSTM_KWARGS['out_channels'],
+                        kernel_size=config.LSTM_KWARGS['kernel_size'])
+    else:
+        raise ValueError(f'unknown architecture {architecture!r}; choose from {ARCHITECTURES}')
+    return process_model(net.to(device), torch.nn.MSELoss(), device)
+
+
 class CausalConv1d(nn.Module):
     """
     Conv1d over time that only sees the present and past: (batch, time, channels) in and out.
@@ -25,10 +45,10 @@ class CausalConv1d(nn.Module):
     The input is padded with kernel_size - 1 zeros on the left only, so the output at bin t
     depends on bins t - kernel_size + 1 ... t and never on later bins.
     """
-    def __init__(self, in_channels, out_channels, kernel_size):
+    def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
         super().__init__()
-        self.left_pad = kernel_size - 1
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size)
+        self.left_pad = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, dilation=dilation)
 
     def forward(self, x):
         x = nn.functional.pad(x.permute(0, 2, 1), (self.left_pad, 0))   # Conv1d wants (batch, channels, time)
@@ -93,6 +113,28 @@ class LSTMnet(nn.Module):
         if self.verbose:
             print(f'Output: {list(o.shape)}')
         return o, hidden
+
+
+class CausalCNN(nn.Module):
+    """
+    (batch, time, units) -> (batch, time, 1) without recurrence (the CNN-only baseline): LSTMnet's causal
+    Conv1d front end (units -> out_channels), then n_layers causal Conv1d layers of `hidden` channels with
+    dilations 1, 2, 4, ... and ReLU, and a linear readout at every time step. Receptive field
+    1 + (kernel_size - 1) * (2 ** (n_layers + 1) - 1) bins (n_layers 8, kernel 3: 1023 bins, 4 s).
+    """
+    def __init__(self, input_size, seqlength, out_channels=16, hidden=32, n_layers=8, kernel_size=3):
+        super().__init__()
+        self.input_size, self.seqlength = input_size, seqlength
+        self.conv1d = CausalConv1d(input_size, out_channels, kernel_size)
+        self.dilated = nn.ModuleList([CausalConv1d(out_channels if i == 0 else hidden, hidden, kernel_size, dilation=2 ** i)
+                                      for i in range(n_layers)])
+        self.out = nn.Linear(hidden, 1)
+
+    def forward(self, x):
+        x = self.conv1d(x)
+        for layer in self.dilated:
+            x = torch.relu(layer(x))
+        return self.out(x)
 
 
 class GRUnet(nn.Module):

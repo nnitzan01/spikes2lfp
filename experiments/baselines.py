@@ -17,10 +17,14 @@ LSTM (the standard CNN-LSTM, fit_and_score) on:
   lstm_regions_behaviour     the same plus the behavioural covariates
   (--lstm-epochs sets their epoch cap, saved as epochs_lstm_<variant>; with region counts the model
   converges more slowly than with units: best epoch 34 of 40 on the timing session)
+Other architectures on the same inputs as the CNN-LSTM (every unit; --arch, --arch-targets):
+  arch_cnn                   models.CausalCNN: the conv front end and dilated causal convolutions, no LSTM
+  arch_lstm                  the LSTM without the conv front end
+  (r2_arch_<variant>, and n_params_arch_<variant> / n_params_cnn_lstm, trainable parameters of one model)
 
 usage (from the repo root):
     python -m experiments.baselines <session_dir> [--ridge all|units,regions,...] [--lstm regions,... | none]
-                                    [--lstm-targets 0,1,2] [--lstm-epochs 60]
+                                    [--lstm-targets 0,1,2] [--lstm-epochs 60] [--arch cnn,lstm] [--arch-targets 0,1,2]
 
 Needs the 'train' and 'covariates' stages. Saves variables/<session_id>/baselines.npz:
 r2_<variant> (channels x targets, test R2), alpha_<variant> (chosen penalty, ridge only),
@@ -32,6 +36,7 @@ import numpy as np
 import torch
 
 import config
+import models
 import paths
 from analysis.lagged_ridge import fit_select_predict, r2_columns, raised_cosine_basis
 from preprocess_data import SpikeScaler
@@ -41,6 +46,7 @@ from splits import chunk_bins
 RIDGE_VARIANTS = ['units_instant', 'units', 'regions', 'stimulus', 'behaviour', 'stimulus_behaviour',
                   'regions_stimulus_behaviour', 'units_stimulus_behaviour']
 LSTM_VARIANTS = ['regions', 'regions_behaviour']
+ARCH_VARIANTS = ['cnn', 'lstm']
 
 
 def region_counts(pipeline):
@@ -116,6 +122,21 @@ def run_lstm(pipeline, variants=LSTM_VARIANTS, targets=None, num_epochs=config.N
     return out
 
 
+def run_arch(pipeline, variants=ARCH_VARIANTS, targets=(0, 1, 2)):
+    X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
+    out = {'n_params_cnn_lstm': np.array(models.build_model('cnn_lstm', X.shape[1], 'cpu').n_parameters())}
+    for variant in variants:
+        r2 = np.full(Y.shape[1:], np.nan)
+        for band in targets:
+            for chan in range(Y.shape[1]):
+                r2[chan, band] = pipeline.fit_and_score(X, Y[:, chan, band], architecture=variant)[1]
+        out[f'r2_arch_{variant}'] = r2
+        out[f'n_params_arch_{variant}'] = np.array(models.build_model(variant, X.shape[1], 'cpu').n_parameters())
+        print(f'architecture {variant}: {int(out[f"n_params_arch_{variant}"])} parameters, median test R2 by target '
+              f'{np.round(np.nanmedian(r2, axis=0), 3)}', flush=True)
+    return out
+
+
 def parse(text, allowed):
     if text == 'none':
         return []
@@ -134,6 +155,8 @@ def main():
     parser.add_argument('--lstm-targets', default='all', help="model targets of the LSTM baselines, e.g. 0,1,2")
     parser.add_argument('--lstm-epochs', type=int, default=config.NUM_EPOCHS,
                         help='epoch cap of the LSTM baselines (region counts converge more slowly than units)')
+    parser.add_argument('--arch', default='none', help=f"'all', 'none' or a comma-separated subset of {ARCH_VARIANTS}")
+    parser.add_argument('--arch-targets', default='0,1,2', help='model targets of the architecture baselines')
     args = parser.parse_args()
 
     data_root, session_id = paths.parse_session_dir(args.session_dir)
@@ -142,6 +165,8 @@ def main():
     out = run_ridge(pipeline, parse(args.ridge, RIDGE_VARIANTS))
     lstm_targets = None if args.lstm_targets == 'all' else [int(t) for t in args.lstm_targets.split(',')]
     out.update(run_lstm(pipeline, parse(args.lstm, LSTM_VARIANTS), lstm_targets, args.lstm_epochs))
+    if args.arch != 'none':
+        out.update(run_arch(pipeline, parse(args.arch, ARCH_VARIANTS), [int(t) for t in args.arch_targets.split(',')]))
     model_r2 = pipeline.dirs.variables / 'r2_scores.npy'
     if model_r2.exists():
         out['model_r2'] = np.load(model_r2)
