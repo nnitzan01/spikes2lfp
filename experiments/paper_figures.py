@@ -269,13 +269,17 @@ def fig3():
         a = ax[1, p]
         letter(a, 'de'[p])
         for t, color in zip((0, 1, 2, 3), ('k', 'tab:blue', 'tab:green', 'tab:red')):
-            rows = np.array([v[p, :, t] for v in prof.values()])
-            a.plot(np.nanmedian(rows, 0), depth, color=color, label=BANDS[t])
+            rows = smooth_depth(np.array([v[p, :, t] for v in prof.values()]))
+            m, sem = mean_sem(rows)
+            few = np.sum(np.isfinite(rows), 0) < MIN_DEPTH_SESSIONS
+            m[few], sem[few] = np.nan, np.nan
+            a.plot(m, depth, color=color, label=BANDS[t])
+            a.fill_betweenx(depth, m - sem, m + sem, color=color, alpha=0.2, lw=0)
         a.axhspan(-2, 2, color='gray', alpha=0.1)
         a.set_xlim(0, 0.85)
-        a.set_xlabel("fraction of the channel's R² lost (inference)")
+        a.set_xlabel("fraction of the channel's R² lost")
         a.set_ylabel('channels from the L4 centre (grey ≈ L4)')
-        a.set_title(f'{rf.label(grp)} by depth', fontsize=9)
+        a.set_title(f'{rf.label(grp)} removed, by depth\n(mean ± SEM over sessions, 3-channel smoothing)', fontsize=9)
         a.legend(fontsize=7)
     a = ax[1, 2]
     letter(a, 'f')
@@ -289,6 +293,27 @@ def fig3():
     a.set_ylabel('fraction of the R² lost')
     a.set_title('single areas (black broadband, green 4-8 Hz)', fontsize=9)
     save(fig, 'fig3', 'Figure 3 | Two sources: the local population carries the broadband LFP, the visual network the band envelopes')
+
+
+DEPTH_SMOOTH = np.array([0.25, 0.5, 0.25])            # across neighbouring channels (40 um), per session
+MIN_DEPTH_SESSIONS = 20                               # depths reached by fewer sessions are not drawn
+
+
+def smooth_depth(rows):
+    """Sessions x depth: 3-point smoothing across depth, NaN-aware (missing neighbours are left out of the weights)."""
+    ok = np.isfinite(rows)
+    pad = lambda x: np.pad(x, ((0, 0), (1, 1)))
+    num = sum(w * pad(np.where(ok, rows, 0))[:, i:i + rows.shape[1]] for i, w in enumerate(DEPTH_SMOOTH))
+    den = sum(w * pad(ok.astype(float))[:, i:i + rows.shape[1]] for i, w in enumerate(DEPTH_SMOOTH))
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return np.where(ok, num / den, np.nan)
+
+
+def mean_sem(rows):
+    """Mean and SEM over sessions (axis 0), NaN ignored."""
+    n = np.sum(np.isfinite(rows), 0)
+    with np.errstate(invalid='ignore', divide='ignore'):
+        return np.nanmean(rows, 0), np.nanstd(rows, 0, ddof=1) / np.sqrt(n)
 
 
 def profile(d, ch):
