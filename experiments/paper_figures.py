@@ -42,7 +42,7 @@ from experiments.region_ablation import region_masks
 OUT = paths.DATA_ROOT / paths.OUTPUT_SUBDIR / 'figures_paper'
 POOLED = paths.DATA_ROOT / paths.OUTPUT_SUBDIR / 'pooled'
 ALIGNED = 16                                          # aligned channels (pool_sessions.ALIGNED_CHANNELS)
-EXAMPLE_SESSION = 1047969464
+EXAMPLE_SESSION = 1044385384                          # v1's example session (start_notebook.ipynb, channel 5)
 COLORS = dict(rf.COLORS, LGN='tab:cyan', LP='tab:olive', thalamus_other='tab:red', rest='tab:gray')
 BANDS = S.ALL_BANDS
 
@@ -179,6 +179,21 @@ def l4_lines(ax, vertical=False):
         (ax.axvline if vertical else ax.axhline)(c, color='tab:red', ls='--', lw=0.8)
 
 
+def example_window(d, chan, seconds, targets):
+    """The stretch of the example trace (seconds long, 0.25 s steps) where the mean R2 of the given targets is highest."""
+    t = d['t']
+    best, best_score = None, -np.inf
+    for start in np.arange(0, t[-1] - seconds, 0.25):
+        seg = (t >= start) & (t < start + seconds)
+        score = []
+        for k in targets:
+            y, p = d['target'][k, seg, chan], d['prediction'][k, seg, chan]
+            score.append(1 - np.sum((y - p) ** 2) / np.sum((y - y.mean()) ** 2))
+        if np.mean(score) > best_score:
+            best, best_score = seg, np.mean(score)
+    return best
+
+
 def fig2():
     fig = plt.figure(figsize=(20, 15))
     g = fig.add_gridspec(3, 3, hspace=0.42, wspace=0.28, width_ratios=[1, 1.3, 1])
@@ -191,7 +206,7 @@ def fig2():
     letter(a, 'B')
     if f.exists() and 'ridge_lagged' in np.load(f):
         d = np.load(f)
-        l4, t = int(d['layer4_channel']), d['t']
+        l4, t = int(d['channel']), d['t']
         b = np.load(S.variables_dir(EXAMPLE_SESSION) / 'baselines.npz')
         seg = (t >= 3) & (t < 6)
         y = d['target'][0, :, l4]
@@ -201,9 +216,10 @@ def fig2():
             off = -k * 6
             a.plot(t[seg], y[seg] + off, color='k', lw=0.7)
             a.plot(t[seg], pred[seg] + off, color='tab:red', lw=0.9)
-            a.text(t[seg][0], off + 2.6, f'{name}: test R² {r2:.2f} (this channel, whole test block)', fontsize=8)
+            a.text(t[seg][0], off + 3.4, f'{name}: test R² {r2:.2f} (this channel, whole test block)', fontsize=8,
+                   bbox=dict(facecolor='white', edgecolor='none', pad=1))
         a.set_yticks([])
-        a.set_xlabel('time in the test block (s); black recorded, red predicted (broadband, layer 4 channel)')
+        a.set_xlabel(f'time in the test block (s); black recorded, red predicted (broadband, channel {l4}; stretch at the 90th percentile of fit)')
     else:
         missing(a, 'example predictions of the linear models: example_trace.py is running')
     r2 = np.load(POOLED / 'r2.npz')
@@ -223,17 +239,19 @@ def fig2():
     missing(a, 'v1 Figure 3D (targets schematic)')
     a = fig.add_subplot(g[1, 1])
     letter(a, 'E')
-    if f.exists():
-        d = np.load(f)
-        l4, t = int(d['layer4_channel']), d['t']
-        seg = (t >= 3) & (t < 5.5)
+    fb = S.variables_dir(EXAMPLE_SESSION) / 'example_trace_bands.npz'                      # stretch chosen on the band models
+    f_e = fb if fb.exists() else f
+    if f_e.exists():
+        d = np.load(f_e)
+        l4, t = int(d['channel']), d['t']
+        seg = example_window(d, l4, 6.0, targets=(0, 1, 2, 3, 4))
         for k, band in enumerate(d['targets']):
             y, p = d['target'][k, seg, l4], d['prediction'][k, seg, l4]
-            scale = np.nanmax(np.abs(y - np.nanmean(y))) + 1e-9
+            scale = np.nanpercentile(np.abs(y - np.nanmean(y)), 99) + 1e-9         # one large event does not set the scale
             a.plot(t[seg], (y - np.nanmean(y)) / scale * 0.45 - k, color='k', lw=0.7)
             a.plot(t[seg], (p - np.nanmean(y)) / scale * 0.45 - k, color='tab:red', lw=0.9)
         a.set_yticks(-np.arange(len(d['targets'])), [BANDS[int(x)] for x in d['targets']], fontsize=8)
-        a.set_xlabel('time in the test block (s); black recorded, red predicted (layer 4 channel)')
+        a.set_xlabel(f'time in the test block (s); black recorded, red predicted (channel {l4})')
     else:
         missing(a, 'example trace not computed yet')
     a = fig.add_subplot(g[1, 2])

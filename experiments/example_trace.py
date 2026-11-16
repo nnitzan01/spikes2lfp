@@ -1,16 +1,22 @@
 """
-An example stretch of the test block for the overview figure: the recorded targets and the seed-0 predictions on every
-channel (broadband, 0.5-4 Hz, 100-200 Hz), the firing rate of each region group, and the stimulus and lick times.
+An example stretch of the test block for the figures: the recorded targets and the seed-0 predictions on every
+channel (broadband and the eight band envelopes), the firing rate of each region group, and the stimulus and lick times.
+
+The stretch is chosen on the shown channel's models of --select-targets (default broadband; mean R2): every run of consecutive test-block chunks of the
+requested length is scored by its R2, and the run at the --quantile of those scores is taken (a typical good fit,
+not the best one); --start-chunk sets it by hand instead.
 
 usage (from the repo root):
-    python -m experiments.example_trace <session_dir> [--seconds 12] [--start-chunk 2]
+    python -m experiments.example_trace <session_dir> [--seconds 12] [--channel 5] [--quantile 0.9] [--start-chunk N]
+        [--select-targets 0] [--output example_trace]
 
 Needs the 'train' stage. Saves variables/<session_id>/example_trace.npz:
   t (s from the start of the stretch), target / prediction (targets x bins x channels; scaled targets),
   targets, rate (bins x groups, spikes/s per unit, 20 ms bins), rate_t, groups, image_times, change_times,
-  omission_times, lick_times (s from the start), layer4_channel,
+  omission_times, lick_times (s from the start), layer4_channel, channel (the shown channel; default layer 4),
+  start_chunk, window_r2 (broadband R2 of every candidate stretch, in test-chunk order), quantile,
   ridge_lagged / ridge_instant (targets x bins): the lagged unit ridge (1 s history) and the current-bin ridge of
-  experiments/baselines.py, fitted on the training block for the layer 4 channel, on the same stretch
+  experiments/baselines.py, fitted on the training block for the shown channel, on the same stretch
 """
 import argparse
 
@@ -45,10 +51,29 @@ def ridge_predictions(pipeline, chan, bins):
     return out
 
 
-def run(pipeline, seconds=12.0, start_chunk=2, ridge=True):
+def window_scores(pipeline, chan, n_chunks, targets=(0,)):
+    """Mean R2 over `targets` of the shown channel's models on every run of n_chunks consecutive test chunks."""
+    test = pipeline.split['test']
+    X = torch.as_tensor(take_chunks(pipeline.active_spikes.spkMat, test), dtype=torch.float32)
+    scores = np.zeros(len(test) - n_chunks + 1)
+    for band in targets:
+        y = take_chunks(pipeline.active_lfp.lfpMat[:, chan, band], test)                # chunks x bins
+        p = pipeline.models[chan, band].evaluate(X).numpy().reshape(y.shape)
+        for i in range(len(scores)):
+            a, b = y[i:i + n_chunks].ravel(), p[i:i + n_chunks].ravel()
+            scores[i] += (1 - np.sum((a - b) ** 2) / np.sum((a - a.mean()) ** 2)) / len(targets)
+    return scores
+
+
+def run(pipeline, seconds=12.0, start_chunk=None, ridge=True, channel=None, quantile=0.9, select_targets=(0,)):
     n = int(round(seconds / config.BIN_SIZE))
     n_chunks = int(np.ceil(n / config.SEQLENGTH))
     test = pipeline.split['test']
+    l4 = layer4_channel(pipeline.session_id, pipeline.n_channels)[0]
+    channel = l4 if channel is None else channel
+    scores = window_scores(pipeline, channel, n_chunks, select_targets)
+    if start_chunk is None:
+        start_chunk = int(np.argmin(np.abs(scores - np.quantile(scores, quantile))))
     chunks = test[start_chunk:start_chunk + n_chunks]
     X = torch.as_tensor(take_chunks(pipeline.active_spikes.spkMat, chunks), dtype=torch.float32)
     Y = take_chunks(pipeline.active_lfp.lfpMat, chunks).reshape(-1, pipeline.n_channels, config.N_TARGETS)[:n]
@@ -65,8 +90,7 @@ def run(pipeline, seconds=12.0, start_chunk=2, ridge=True):
     m = n // RATE_BIN * RATE_BIN
     binned = counts[:m].reshape(-1, RATE_BIN, counts.shape[1]).sum(1) / (RATE_BIN * config.BIN_SIZE)
     rate = np.stack([binned[:, masks[g]].mean(1) if masks[g].any() else np.full(len(binned), np.nan) for g in GROUPS], 1)
-    l4 = layer4_channel(pipeline.session_id, pipeline.n_channels)[0]
-    extra = ridge_predictions(pipeline, l4, chunk_bins(chunks)[:n]) if ridge else {}
+    extra = ridge_predictions(pipeline, channel, chunk_bins(chunks)[:n]) if ridge else {}
     s = pipeline.session
     events = task_events(s.active, s.licks.timestamps, auto_rewarded_changes(s))[0]
     in_window = lambda x: np.sort(np.asarray(x, float)[(np.asarray(x) >= t0) & (np.asarray(x) < t0 + n * config.BIN_SIZE)] - t0)
@@ -76,20 +100,26 @@ def run(pipeline, seconds=12.0, start_chunk=2, ridge=True):
                 image_times=in_window(np.concatenate([events['image'], events['post_omission']])),
                 change_times=in_window(changes), omission_times=in_window(events['omission']),
                 lick_times=in_window(s.licks.timestamps),
-                layer4_channel=np.array(l4), **extra)
+                layer4_channel=np.array(l4), channel=np.array(channel), start_chunk=np.array(start_chunk),
+                window_r2=scores, quantile=np.array(quantile), select_targets=np.array(select_targets), **extra)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('session_dir')
     parser.add_argument('--seconds', type=float, default=12.0)
-    parser.add_argument('--start-chunk', type=int, default=2, help='test-block chunk (3 s) to start from')
+    parser.add_argument('--channel', type=int, default=None, help='channel shown (default: the layer 4 channel)')
+    parser.add_argument('--quantile', type=float, default=0.9, help='fit quantile of the chosen stretch among all stretches')
+    parser.add_argument('--start-chunk', type=int, default=None, help='test-block chunk (3 s) to start from (overrides --quantile)')
+    parser.add_argument('--select-targets', default='0', help='targets whose mean R2 chooses the stretch')
+    parser.add_argument('--output', default='example_trace', help='file name (without .npz) in variables/<session_id>/')
     args = parser.parse_args()
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pipeline = SessionPipeline(data_root, session_id, device)
-    out = run(pipeline, args.seconds, args.start_chunk)
-    f = pipeline.dirs.variables / 'example_trace.npz'
+    out = run(pipeline, args.seconds, args.start_chunk, channel=args.channel, quantile=args.quantile,
+              select_targets=[int(t) for t in args.select_targets.split(',')])
+    f = pipeline.dirs.variables / f'{args.output}.npz'
     save_npz(f, **out)
     print('Saved', f)
 
