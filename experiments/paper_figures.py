@@ -804,12 +804,19 @@ def fig8():
     a = ax[0, 0]
     letter(a, 'a')
     shown = ['ig_mean', 'ridge_weight', 'spike_lfp_correlation', 'stlfp', 'firing_rate']
+    conditions = ['linear', 'nonlinear_arousal', 'gain', 'burst']
+    ccolors = dict(zip(conditions, ('tab:blue', 'tab:purple', 'tab:green', 'tab:orange')))
     for i, m in enumerate(shown):
-        rf.strip(a, [r[(m, 'auc')] for rows in draws.values() for r in rows], i, 'k' if m == 'ig_mean' else 'gray')
+        for j, c in enumerate([c for c in conditions if c in draws]):          # conditions side by side: each its own median
+            rf.strip(a, [r[(m, 'auc')] for r in draws[c]], i + (j - 1.5) * 0.2, ccolors[c], width=0.16, s=3)
+    for c in conditions:
+        if c in draws:
+            a.plot([], [], 'o', color=ccolors[c], label=f'{c.replace("_", " + ")} ({len(draws[c])} draws)')
     a.axhline(0.5, color='k', lw=0.5)
     a.set_xticks(range(len(shown)), ['attribution', 'ridge weight', 'spike-LFP corr.', 'stLFP', 'firing rate'], fontsize=8)
     a.set_ylabel('finding the true drivers (AUC)')
-    a.set_title(f'ground-truth simulation ({sum(map(len, draws.values()))} draws, 4 conditions)', fontsize=9)
+    a.legend(fontsize=6, loc='lower left')
+    a.set_title('ground-truth simulation, by generative condition (bars: medians)', fontsize=9)
     rk = per_session('attribution_baseline', lambda d, ch: dict(fr=d['fractions'], measures=[str(m) for m in d['measures']],
                                                               drop=S.channel_median(d['r2_full'] - d['r2_ablated'][0], ch)))
     ra = per_session('ranked_ablation', lambda d, ch: dict(fr=d['fractions'], measures=[str(m) for m in d['measures']],
