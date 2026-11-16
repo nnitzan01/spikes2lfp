@@ -2,13 +2,18 @@
 Preliminary main figures 1-7 of the reframed manuscript ("local and network sources of the laminar LFP"), from the
 saved results of all sessions (nothing is rerun). Panels whose inputs have not been computed yet say so.
 
-  fig1  approach and prediction: example stretch, recorded vs predicted depth profile, R2 by depth, units per region
-  fig2  the prediction follows single trials: linear baselines, stimulus clock, swapped and shifted spikes, transfer
-  fig3  two sources: R2 lost per region and band (inference, retrained), per session, by depth, single visual areas
-  fig4  laminar decomposition: CSD of each region's contribution vs the recorded CSD, layer fractions vs the Allen atlas
-  fig5  trial-specific vs evoked contributions, and their timing against each region's own firing
-  fig6  experience: shared images on the novel vs familiar day, contribution vs firing rate
-  fig7  which neurons: attribution in the simulation and in unit removal, firing-rate control, hierarchy, layers
+Figure 1 is v1 Figure 1 (experimental design), unchanged.
+
+  fig2  model and performance (v1 Figure 3 updated): example predictions of the current-bin and lagged linear models
+        and the CNN-LSTM, R2 by channel (active, passive), example band predictions, R2 by channel x band, R2 after
+        smoothing against the time-shift null (panels A and D are the v1 schematics)
+  fig3  the prediction follows single trials: linear baselines over sessions, stimulus clock, swapped and shifted spikes
+  fig4  two sources: R2 lost per region and band (inference, retrained), per session, by depth, single visual areas
+  fig5  laminar decomposition: CSD of each region's contribution vs the recorded CSD, layer fractions vs the Allen atlas
+  fig6  trial-specific vs evoked contributions, and their timing against each region's own firing
+  fig7  experience: shared images on the novel vs familiar day, contribution vs firing rate
+  fig8  which neurons: attribution in the simulation and in unit removal, firing-rate control, hierarchy, layers
+  overview  example stretch with region firing, depth image, units per region (not a main figure)
 
 usage (on the cluster, from the repo root, after `source cluster/env.sh`):
     python -m experiments.paper_figures [fig1 fig2 ...]          # default: all
@@ -36,6 +41,7 @@ from experiments.region_ablation import region_masks
 
 OUT = paths.DATA_ROOT / paths.OUTPUT_SUBDIR / 'figures_paper'
 POOLED = paths.DATA_ROOT / paths.OUTPUT_SUBDIR / 'pooled'
+ALIGNED = 16                                          # aligned channels (pool_sessions.ALIGNED_CHANNELS)
 EXAMPLE_SESSION = 1047969464
 COLORS = dict(rf.COLORS, LGN='tab:cyan', LP='tab:olive', thalamus_other='tab:red', rest='tab:gray')
 BANDS = S.ALL_BANDS
@@ -65,7 +71,7 @@ def per_session(name, f):
 
 # ------------------------------------------------------------------------------------------------- figure 1
 
-def fig1():
+def overview():
     fig = plt.figure(figsize=(18, 11))
     g = fig.add_gridspec(3, 4, height_ratios=[1.3, 1, 1], hspace=0.45, wspace=0.3)
     f = S.variables_dir(EXAMPLE_SESSION) / 'example_trace.npz'
@@ -147,12 +153,144 @@ def fig1():
     missing(ax, 'schematic: brain-wide spikes (4 ms bins, 3 s history) → causal CNN-LSTM → each VISp channel × target\n'
                 'blocked split: train | validation | test (last 20%), 6 s buffers; attribution: history-aware IG, '
                 'region contributions: exact Shapley values (from v1 Fig. 1-2, redrawn)')
-    save(fig, 'fig1', 'Figure 1 | Predicting the laminar LFP of VISp from brain-wide spiking')
+    save(fig, 'overview', 'Overview (not a main figure; Figure 1 is v1 Figure 1) | Predicting the laminar LFP of VISp from brain-wide spiking')
 
 
 # ------------------------------------------------------------------------------------------------- figure 2
 
+def aligned(values, sid):
+    """Per-channel values (channels x ...) of a session on the 16 aligned channels of pool_sessions (deepest first,
+    upper L4 border at BELOW_L4), NaN where the session has no pooled channel."""
+    row = pd.read_csv(ALIGNMENT_TABLE).set_index('session').loc[sid]
+    upper = max(int(row['upper_border_index']), int(row['lower_border_index']))
+    out = np.full((ALIGNED,) + values.shape[1:], np.nan)
+    for ch in range(int(row['first_channel_index']), int(row['last_channel_index']) + 1):
+        dst = ch - upper + BELOW_L4
+        if 0 <= dst < ALIGNED and ch < len(values):
+            out[dst] = values[ch]
+    return out
+
+
+def l4_lines(ax, vertical=False):
+    """The L4 borders on an aligned-channel axis (1-based channel numbers, as v1): upper border and the median lower one."""
+    t = pd.read_csv(ALIGNMENT_TABLE)
+    thickness = np.median(np.abs(t['upper_border_index'] - t['lower_border_index']))
+    for c in (BELOW_L4 + 1, BELOW_L4 + 1 - thickness):
+        (ax.axvline if vertical else ax.axhline)(c, color='tab:red', ls='--', lw=0.8)
+
+
 def fig2():
+    fig = plt.figure(figsize=(20, 15))
+    g = fig.add_gridspec(3, 3, hspace=0.42, wspace=0.28, width_ratios=[1, 1.3, 1])
+    channels = np.arange(1, ALIGNED + 1)
+    a = fig.add_subplot(g[0, 0])
+    letter(a, 'A')
+    missing(a, 'v1 Figure 3A (network schematic)')
+    f = S.variables_dir(EXAMPLE_SESSION) / 'example_trace.npz'
+    a = fig.add_subplot(g[0, 1])
+    letter(a, 'B')
+    if f.exists() and 'ridge_lagged' in np.load(f):
+        d = np.load(f)
+        l4, t = int(d['layer4_channel']), d['t']
+        b = np.load(S.variables_dir(EXAMPLE_SESSION) / 'baselines.npz')
+        seg = (t >= 3) & (t < 6)
+        y = d['target'][0, :, l4]
+        for k, (name, pred, r2) in enumerate((('linear, current bin (v1)', d['ridge_instant'][0], b['r2_units_instant'][l4, 0]),
+                                              ('linear, 1 s history', d['ridge_lagged'][0], b['r2_units'][l4, 0]),
+                                              ('CNN-LSTM', d['prediction'][0, :, l4], b['model_r2'][l4, 0]))):
+            off = -k * 6
+            a.plot(t[seg], y[seg] + off, color='k', lw=0.7)
+            a.plot(t[seg], pred[seg] + off, color='tab:red', lw=0.9)
+            a.text(t[seg][0], off + 2.6, f'{name}: test R² {r2:.2f} (this channel, whole test block)', fontsize=8)
+        a.set_yticks([])
+        a.set_xlabel('time in the test block (s); black recorded, red predicted (broadband, layer 4 channel)')
+    else:
+        missing(a, 'example predictions of the linear models: example_trace.py is running')
+    r2 = np.load(POOLED / 'r2.npz')
+    a = fig.add_subplot(g[0, 2])
+    letter(a, 'C')
+    for key, color, text in (('test', 'k', 'active (test block)'), ('passive', 'tab:blue', 'passive replay')):
+        m, sem = mean_sem(r2[key][:, :, 0])
+        a.plot(m, channels, color=color, label=text)
+        a.fill_betweenx(channels, m - sem, m + sem, color=color, alpha=0.25, lw=0)
+    l4_lines(a)
+    a.set_xlim(0, 0.85)
+    a.set_xlabel('R² (broadband; mean ± SEM, 89 sessions)')
+    a.set_ylabel('aligned channel')
+    a.legend(fontsize=8)
+    a = fig.add_subplot(g[1, 0])
+    letter(a, 'D')
+    missing(a, 'v1 Figure 3D (targets schematic)')
+    a = fig.add_subplot(g[1, 1])
+    letter(a, 'E')
+    if f.exists():
+        d = np.load(f)
+        l4, t = int(d['layer4_channel']), d['t']
+        seg = (t >= 3) & (t < 5.5)
+        for k, band in enumerate(d['targets']):
+            y, p = d['target'][k, seg, l4], d['prediction'][k, seg, l4]
+            scale = np.nanmax(np.abs(y - np.nanmean(y))) + 1e-9
+            a.plot(t[seg], (y - np.nanmean(y)) / scale * 0.45 - k, color='k', lw=0.7)
+            a.plot(t[seg], (p - np.nanmean(y)) / scale * 0.45 - k, color='tab:red', lw=0.9)
+        a.set_yticks(-np.arange(len(d['targets'])), [BANDS[int(x)] for x in d['targets']], fontsize=8)
+        a.set_xlabel('time in the test block (s); black recorded, red predicted (layer 4 channel)')
+    else:
+        missing(a, 'example trace not computed yet')
+    a = fig.add_subplot(g[1, 2])
+    letter(a, 'F')
+    im = a.imshow(np.nanmean(r2['test'], 0), aspect='auto', origin='lower', cmap='viridis', vmin=0, vmax=0.7,
+                  extent=(-0.5, 8.5, 0.5, ALIGNED + 0.5))
+    l4_lines(a)
+    a.set_xticks(range(9), BANDS, rotation=45, ha='right', fontsize=8)
+    a.set_ylabel('aligned channel')
+    plt.colorbar(im, ax=a, fraction=0.046, label='test R² (mean, 89 sessions)')
+    ts = per_session('timescale_r2', lambda d, ch: dict(windows=d['windows_ms'], r2=S.channel_median(d['r2_timescale'], ch),
+                                                         null=S.channel_median(np.nanmean(d['r2_timescale_shift'], 0), ch)))
+    a = fig.add_subplot(g[2, 0])
+    letter(a, 'G')
+    rows = list(ts.values())
+    w = rows[0]['windows']
+    colors = plt.cm.viridis(np.linspace(0, 0.92, 8))
+    for t_, color in zip(range(1, 9), colors):
+        m, sem = mean_sem(np.array([r['r2'][:, t_] for r in rows]))
+        a.plot(w, m, color=color, label=BANDS[t_])
+        a.fill_between(w, m - sem, m + sem, color=color, alpha=0.25, lw=0)
+        a.plot(w, np.nanmean([r['null'][:, t_] for r in rows], 0), color=color, ls=':', lw=0.8)
+    a.axhline(0, color='k', lw=0.5)
+    a.set_xscale('log')
+    a.set_ylim(-0.3, 0.65)
+    a.set_xlabel('smoothing of target and prediction (ms)')
+    a.set_ylabel('test R² (mean ± SEM; dotted: spikes shifted 30-120 s)')
+    a.legend(fontsize=7, ncol=2)
+    a.set_title('band power: the slow modulation is predicted', fontsize=9)
+    smooth = {}
+    for sid in S.sessions():
+        fpath = S.variables_dir(sid) / 'timescale_r2.npz'
+        if fpath.exists():
+            smooth[sid] = aligned(np.load(fpath)['r2_timescale'][-1], sid)                # channels x targets at 250 ms
+    a = fig.add_subplot(g[2, 1])
+    letter(a, 'H')
+    im = a.imshow(np.nanmean(np.stack(list(smooth.values())), 0), aspect='auto', origin='lower', cmap='viridis', vmin=0, vmax=0.7,
+                  extent=(-0.5, 8.5, 0.5, ALIGNED + 0.5))
+    l4_lines(a)
+    a.set_xticks(range(9), BANDS, rotation=45, ha='right', fontsize=8)
+    a.set_ylabel('aligned channel')
+    a.set_title(f'as F, target and prediction smoothed over {int(w[-1])} ms', fontsize=9)
+    plt.colorbar(im, ax=a, fraction=0.046, label='test R² (mean)')
+    a = fig.add_subplot(g[2, 2])
+    letter(a, 'I')
+    hb = per_session('bleed_through', lambda d, ch: S.channel_median(d['ret_r2_timescale'], ch)[:, -1])
+    shown = [1, 5, 6, 7, 8]
+    for j, t_ in enumerate(shown):
+        for i, (gname, color) in enumerate(((0, 'k'), (2, 'tab:gray'))):
+            rf.strip(a, [v[gname, t_] for v in hb.values()], j + (i - 0.5) * 0.36, color, width=0.3, s=4)
+    a.set_xticks(range(len(shown)), [BANDS[t_] for t_ in shown], fontsize=8)
+    a.set_ylabel(f'test R², {int(w[-1])} ms smoothing (retrained)')
+    a.set_title('black: all units; grey: retrained without any VISp unit (not spike bleed-through)', fontsize=9)
+    save(fig, 'fig2', 'Figure 2 | Model comparison and performance (v1 Figure 3, updated)')
+
+
+def fig3():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     models = [('r2_units_instant', 'ridge,\ncurrent bin'), ('r2_units', 'ridge,\n1 s history'),
               ('r2_units_stimulus_behaviour', 'ridge 1 s +\nstim. + beh.'), ('r2_stimulus_behaviour', 'stimulus +\nbehaviour'),
@@ -202,19 +340,8 @@ def fig2():
     a.set_xlabel('stimulus clock R²')
     a.set_ylabel('model R² with spikes from another presentation of the same image')
     a.set_title('swapping single-trial spikes drops below the template', fontsize=9)
-    tr = per_session('transfer_scaling', lambda d, ch: {k: S.channel_median(d[k], ch)[:, :3] for k in ('r2_active', 'r2_recalibrated')})
-    a = ax[1, 2]
-    letter(a, 'f')
-    shown = [('task (test block)', 'r2_active', 0), ('passive replay', 'r2_active', 1), ('spontaneous\n(recalibrated)', 'r2_recalibrated', 2)]
-    for t, color in zip(range(2), ('k', 'tab:blue')):
-        for i, (_, k, e) in enumerate(shown):
-            rf.strip(a, [r[k][e, t] for r in tr.values()], i + (t - 0.5) * 0.35, color, width=0.3, s=4)
-    a.axhline(0, color='k', lw=0.5)
-    a.set_ylim(-0.3, 0.85)
-    a.set_xticks(range(3), [n for n, _, _ in shown])
-    a.set_ylabel('R² of the task-trained model')
-    a.set_title('transfer within session: passive yes, spontaneous only broadband', fontsize=9)
-    save(fig, 'fig2', 'Figure 2 | The prediction is trial-specific, not a stimulus clock, and needs history more than nonlinearity')
+    ax[1, 2].axis('off')
+    save(fig, 'fig3', 'Figure 3 | The prediction is trial-specific, not a stimulus clock, and needs history more than nonlinearity')
 
 
 # ------------------------------------------------------------------------------------------------- figure 3
@@ -222,7 +349,7 @@ def fig2():
 AREAS = ['VISl', 'VISal', 'VISrl', 'VISam', 'VISpm', 'LG', 'LP', 'CA1', 'DG', 'APN', 'MRN']
 
 
-def fig3():
+def fig4():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     inf = per_session('region_ablation', lambda d, ch: sx.fraction_lost(d, ch, 'r2_full', 'r2_removed', rf.REGIONS + AREAS))
     ret = per_session('region_ablation_bands', lambda d, ch: sx.fraction_lost(d, ch, 'r2_retrained_full', 'r2_retrained_removed',
@@ -292,7 +419,7 @@ def fig3():
     a.set_xticks(range(len(AREAS)), AREAS, rotation=45)
     a.set_ylabel('fraction of the R² lost')
     a.set_title('single areas (black broadband, green 4-8 Hz)', fontsize=9)
-    save(fig, 'fig3', 'Figure 3 | Two sources: the local population carries the broadband LFP, the visual network the band envelopes')
+    save(fig, 'fig4', 'Figure 4 | Two sources: the local population carries the broadband LFP, the visual network the band envelopes')
 
 
 DEPTH_SMOOTH = np.array([0.25, 0.5, 0.25])            # across neighbouring channels (40 um), per session
@@ -371,7 +498,7 @@ def csd_median(rows, name):
     return (np.nanmedian(np.stack(stack), 0), len(stack)) if stack else (None, 0), rel
 
 
-def fig4():
+def fig5():
     regions = [r['depth'] for r in rf.events().values() if r['depth'] is not None]
     thal = list(thalamus_depth().values())
     lags = regions[0]['lags']
@@ -442,12 +569,12 @@ def fig4():
     a.set_xticks([0], ['predicted vs\nrecorded CSD'])
     a.set_ylabel('correlation, 0-750 ms (broadband)')
     a.set_ylim(0, 1)
-    save(fig, 'fig4', 'Figure 4 | Each source has its own laminar profile, matching where its axons end')
+    save(fig, 'fig5', 'Figure 5 | Each source has its own laminar profile, matching where its axons end')
 
 
 # ------------------------------------------------------------------------------------------------- figure 5
 
-def fig5():
+def fig6():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
 
     def clock(d, ch):
@@ -518,7 +645,7 @@ def fig5():
     a.set_ylim(-200, 400)
     a.set_ylabel('extra delay behind own firing,\nother visual − VISp (ms)')
     a.set_title('the network contribution persists after the image', fontsize=9)
-    save(fig, 'fig5', 'Figure 5 | Contributions are trial-specific; hippocampus contributes through timing only')
+    save(fig, 'fig6', 'Figure 6 | Contributions are trial-specific; hippocampus contributes through timing only')
 
 
 # ------------------------------------------------------------------------------------------------- figure 6
@@ -564,7 +691,7 @@ def novelty_rows(t='image_shared', j=0):
     return out, lags
 
 
-def fig6():
+def fig7():
     ev, rates = rf.events(), event_rates()
     pairs = rf.mouse_pairs(ev)
     lags = next(iter(ev.values()))['lags']
@@ -639,13 +766,13 @@ def fig6():
             a.set_title('\n'.join(text), fontsize=7)
         else:
             missing(a, 'needs event_rates.npz')
-    save(fig, 'fig6', 'Figure 6 | Experience: for the same images on the novel day, the network contribution shrinks; '
+    save(fig, 'fig7', 'Figure 7 | Experience: for the same images on the novel day, the network contribution shrinks; '
                       'is it more than the change in firing?')
 
 
 # ------------------------------------------------------------------------------------------------- figure 7
 
-def fig7():
+def fig8():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     draws = {}
     for sid in S.sessions():
@@ -749,10 +876,10 @@ def fig7():
         a.set_title(f'rank stability across initialisations ({len(rob)} sessions)', fontsize=9)
     else:
         missing(a, 'rank stability across seeds running (experiments/robustness.py)')
-    save(fig, 'fig7', 'Figure 7 | Which neurons: attribution finds the units the prediction relies on, beyond firing rate')
+    save(fig, 'fig8', 'Figure 8 | Which neurons: attribution finds the units the prediction relies on, beyond firing rate')
 
 
-FIGURES = dict(fig1=fig1, fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7)
+FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, overview=overview)
 
 
 def main():

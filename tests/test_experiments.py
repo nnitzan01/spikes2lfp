@@ -256,8 +256,9 @@ def test_event_rates_and_example_trace(pipeline_module, session_dir):
     assert np.isfinite(out['eta_rate'][types.index('image'), :, visp]).all() and (out['eta_rate'] >= 0)[np.isfinite(out['eta_rate'])].all()
     assert out['eta_rate_units'].shape == (len(types), N_UNITS)
     trace = example_trace.run(pipeline, seconds=3, start_chunk=0)
-    assert trace['target'].shape == trace['prediction'].shape == (3, 750, pipeline.n_channels)
+    assert trace['target'].shape == trace['prediction'].shape == (9, 750, pipeline.n_channels)
     assert np.isfinite(trace['prediction'][0]).all() and trace['rate'].shape[1] == len(trace['groups'])
+    assert trace['ridge_lagged'].shape == (9, 750) and np.isfinite(trace['ridge_lagged'][:2]).all() and np.isnan(trace['ridge_lagged'][2:]).all()
 
 
 def test_simulation(pipeline_module, session_dir):

@@ -8,7 +8,9 @@ usage (from the repo root):
 Needs the 'train' stage. Saves variables/<session_id>/example_trace.npz:
   t (s from the start of the stretch), target / prediction (targets x bins x channels; scaled targets),
   targets, rate (bins x groups, spikes/s per unit, 20 ms bins), rate_t, groups, image_times, change_times,
-  omission_times, lick_times (s from the start), layer4_channel
+  omission_times, lick_times (s from the start), layer4_channel,
+  ridge_lagged / ridge_instant (targets x bins): the lagged unit ridge (1 s history) and the current-bin ridge of
+  experiments/baselines.py, fitted on the training block for the layer 4 channel, on the same stretch
 """
 import argparse
 
@@ -20,14 +22,30 @@ import paths
 from experiments.explore_task import auto_rewarded_changes, layer4_channel, task_events
 from experiments.region_ablation import region_masks
 from experiments.region_events import GROUPS
+from analysis.lagged_ridge import fit_select_predict, raised_cosine_basis
 from preprocess_data import take_chunks
 from run_session import SessionPipeline, save_npz
+from splits import chunk_bins
 
-TARGETS = [0, 1, 7]
+TARGETS = list(range(9))              # broadband and the eight band envelopes
+RIDGE_TARGETS = [0, 1]                # targets (of TARGETS) the ridge baselines are fitted for
 RATE_BIN = 5                          # spike bins per rate bin (20 ms)
 
 
-def run(pipeline, seconds=12.0, start_chunk=2):
+def ridge_predictions(pipeline, chan, bins):
+    """Predictions of the lagged and the current-bin unit ridge (baselines.py) for RIDGE_TARGETS of one channel at bins."""
+    Z, split = pipeline.active_spikes.spkMat, pipeline.split
+    Y = pipeline.active_lfp.lfpMat[:, chan, RIDGE_TARGETS]
+    train, val = (chunk_bins(split[p])[::config.RIDGE_TRAIN_STEP] for p in ('train', 'val'))
+    basis = raised_cosine_basis(int(round(config.RIDGE_HISTORY / config.BIN_SIZE)), config.RIDGE_N_BASIS)
+    out = {}
+    for name, b in (('ridge_lagged', basis), ('ridge_instant', np.ones((1, 1)))):
+        out[name] = np.full((len(TARGETS), len(bins)), np.nan)
+        out[name][[TARGETS.index(t) for t in RIDGE_TARGETS]] = fit_select_predict(Z, Y, b, train, val, bins, config.RIDGE_ALPHAS)[0].T
+    return out
+
+
+def run(pipeline, seconds=12.0, start_chunk=2, ridge=True):
     n = int(round(seconds / config.BIN_SIZE))
     n_chunks = int(np.ceil(n / config.SEQLENGTH))
     test = pipeline.split['test']
@@ -47,6 +65,8 @@ def run(pipeline, seconds=12.0, start_chunk=2):
     m = n // RATE_BIN * RATE_BIN
     binned = counts[:m].reshape(-1, RATE_BIN, counts.shape[1]).sum(1) / (RATE_BIN * config.BIN_SIZE)
     rate = np.stack([binned[:, masks[g]].mean(1) if masks[g].any() else np.full(len(binned), np.nan) for g in GROUPS], 1)
+    l4 = layer4_channel(pipeline.session_id, pipeline.n_channels)[0]
+    extra = ridge_predictions(pipeline, l4, chunk_bins(chunks)[:n]) if ridge else {}
     s = pipeline.session
     events = task_events(s.active, s.licks.timestamps, auto_rewarded_changes(s))[0]
     in_window = lambda x: np.sort(np.asarray(x, float)[(np.asarray(x) >= t0) & (np.asarray(x) < t0 + n * config.BIN_SIZE)] - t0)
@@ -56,7 +76,7 @@ def run(pipeline, seconds=12.0, start_chunk=2):
                 image_times=in_window(np.concatenate([events['image'], events['post_omission']])),
                 change_times=in_window(changes), omission_times=in_window(events['omission']),
                 lick_times=in_window(s.licks.timestamps),
-                layer4_channel=np.array(layer4_channel(pipeline.session_id, pipeline.n_channels)[0]))
+                layer4_channel=np.array(l4), **extra)
 
 
 def main():
