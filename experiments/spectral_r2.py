@@ -28,6 +28,7 @@ from splits import chunk_bins
 HIPPOCAMPAL = ('CA', 'DG', 'SUB', 'HPF', 'ProS', 'POST')   # substrings of hippocampal-formation acronyms
 # row names of units_counts_and_rates.csv (as read by pool_sessions.ipynb)
 COUNT_ROWS = {'cortex': 'cortex', 'cortex_no_visp': 'cortex_no_visp', 'hpc': 'hippocampus', 'subcortical': 'subcortical'}
+MIN_UNITS = 1                                               # groups with fewer units (none) are not modelled
 R2_BANDS = [b for b in config.BANDS if b[1] < 0.5 / config.BIN_SIZE]   # bands below the 125 Hz Nyquist
 
 
@@ -64,6 +65,8 @@ def run(pipeline):
     results, counts = {}, {}
     for name, mask in unit_groups(areas).items():
         print(f'{name}: {mask.sum()} units', flush=True)
+        if mask.sum() < MIN_UNITS:                                  # e.g. no hippocampal units in this session
+            continue
         if name in COUNT_ROWS:
             counts[COUNT_ROWS[name]] = [mask.sum(), units.loc[mask, 'firing_rate'].mean()]
         test_bins = chunk_bins(pipeline.split['test'])     # test block in the continuous recording

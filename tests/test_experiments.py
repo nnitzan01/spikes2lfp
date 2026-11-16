@@ -262,6 +262,15 @@ def test_event_rates_and_example_trace(pipeline_module, session_dir):
     assert trace['ridge_lagged'].shape == (9, 750) and np.isfinite(trace['ridge_lagged'][:2]).all() and np.isnan(trace['ridge_lagged'][2:]).all()
 
 
+def test_attribution_map(pipeline_module, session_dir):
+    from experiments import attribution_map
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = attribution_map.run(pipeline, channel=0, band=0, seconds=1, start_chunk=0, step=5)
+    assert out['attribution'].shape == (50, N_UNITS) and np.isfinite(out['attribution']).all()
+    assert out['target'].shape == out['prediction'].shape == (50,) and len(out['areas']) == N_UNITS
+    assert float(out['completeness']) < 0.05
+
+
 def test_simulation(pipeline_module, session_dir):
     from experiments import simulation as sim
     pipeline = _trained_pipeline(pipeline_module, session_dir)

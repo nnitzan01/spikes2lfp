@@ -897,7 +897,66 @@ def fig8():
     save(fig, 'fig8', 'Figure 8 | Which neurons: attribution finds the units the prediction relies on, beyond firing rate')
 
 
-FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, overview=overview)
+TOP_FRACTIONS = [0.10, 0.05, 0.01]
+
+
+def top_units(target):
+    """Pooled units with, per session, the rank of their mean-baseline attribution (attribution_baseline.npz mean_abs,
+    median over the pooled channels) for one target: columns score and top_<fraction> (in that session's top fraction)."""
+    units = pd.read_csv(POOLED / 'units.csv')
+    frames = []
+    for sid, u in units.groupby('session_id', sort=False):
+        f = S.variables_dir(sid) / 'attribution_baseline.npz'
+        if not f.exists():
+            continue
+        ch = S.pooled_channels(sid)
+        score = np.nanmedian(np.load(f)['mean_abs'][ch, target, :], axis=0)
+        u = u.copy()
+        u['score'] = score
+        rank = pd.Series(score).rank(ascending=False, pct=True).to_numpy()
+        for fr in TOP_FRACTIONS:
+            u[f'top_{fr:g}'] = rank <= fr
+        frames.append(u)
+    return pd.concat(frames)
+
+
+def supp_top_units():
+    fig, ax = plt.subplots(3, 1, figsize=(18, 13))
+    for row, target in enumerate((0, 2)):
+        u = top_units(target)
+        per_area = u.groupby('area').agg(n=('score', 'size'), **{f't{fr:g}': (f'top_{fr:g}', 'sum') for fr in TOP_FRACTIONS})
+        per_area = per_area[per_area['n'] >= 50]
+        if row == 0:
+            shown = per_area[per_area['t0.1'] > 0].sort_values('t0.1', ascending=False)
+            a = ax[0]
+            letter(a, 'A')
+            x = np.arange(len(shown))
+            for fr, color in zip(TOP_FRACTIONS, ('lightblue', 'orange', 'tab:red')):
+                a.bar(x, shown[f't{fr:g}'], color=color, label=f'top {fr:.0%}')
+            a.set_xticks(x, shown.index, rotation=90, fontsize=8)
+            a.set_ylabel('high-contributing units (all sessions)')
+            a.legend(fontsize=8)
+            a.set_title('broadband: units in their session\'s top 10 / 5 / 1% by mean-baseline attribution (median over pooled channels)',
+                        fontsize=9)
+            order = shown.index
+        a = ax[row + 1]
+        letter(a, 'BC'[row])
+        enrich = (per_area['t0.1'] / per_area['n'] / 0.10).reindex(order)
+        a.bar(np.arange(len(order)), enrich.values, color='tab:blue' if target == 0 else 'tab:green')
+        a.axhline(1, color='k', ls='--', lw=0.8)
+        for i, area in enumerate(order):
+            if area in per_area.index:
+                a.text(i, enrich[area] * 1.05 if np.isfinite(enrich[area]) else 0, f"{int(per_area.loc[area, 'n'])}", ha='center',
+                       fontsize=6, rotation=90, va='bottom')
+        a.set_yscale('log')
+        a.set_xticks(np.arange(len(order)), order, rotation=90, fontsize=8)
+        a.set_ylabel('enrichment in the top 10%\n(fraction of the area\'s units / 0.10)')
+        a.set_title(f'{BANDS[target]}: enrichment relative to the units recorded (numbers: units per area; dashed: chance)',
+                    fontsize=9)
+    save(fig, 'supp_top_units', 'Supplementary (v1 S3C, updated) | High-contributing units per area')
+
+
+FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, supp_top_units=supp_top_units, overview=overview)
 
 
 def main():
