@@ -872,7 +872,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
 - Notebook run time: the cluster decoder with 50 permutations takes 8.3 h; the whole notebook ≈ 11 h
   of the 12 h `cpu_short` limit. Next rerun needs fewer cluster permutations or its own setting.
 - High-band (> 25 Hz) results: keep with null + threshold, or cut. Not decided.
-- `start_notebook.ipynb` still uses the old instantaneous IG.
+- `start_notebook.ipynb` (old instantaneous IG) removed from this branch on 2026-11-16; it stays on main.
 - **Framing:** if the 89-session baselines confirm broadband CNN-LSTM ≈ lagged ridge, the paper can't
   argue that a nonlinear model is needed for broadband; the case rests on the band envelopes and on
   whether attribution tells us more than ridge weights (ranked ablation, ground-truth simulation).

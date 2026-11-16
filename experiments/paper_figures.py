@@ -42,7 +42,7 @@ from experiments.region_ablation import region_masks
 OUT = paths.DATA_ROOT / paths.OUTPUT_SUBDIR / 'figures_paper'
 POOLED = paths.DATA_ROOT / paths.OUTPUT_SUBDIR / 'pooled'
 ALIGNED = 16                                          # aligned channels (pool_sessions.ALIGNED_CHANNELS)
-EXAMPLE_SESSION = 1044385384                          # v1's example session (start_notebook.ipynb, channel 5)
+EXAMPLE_SESSION = 1044385384                          # v1 example session (start_notebook.ipynb on main, channel 5)
 COLORS = dict(rf.COLORS, LGN='tab:cyan', LP='tab:olive', thalamus_other='tab:red', rest='tab:gray')
 BANDS = S.ALL_BANDS
 
@@ -975,18 +975,36 @@ def supp_top_units():
     save(fig, 'supp_top_units', 'Supplementary (v1 S3C, updated) | High-contributing units per area')
 
 
+ATTR_MAP_SESSION = 1119946360                         # v1 Figure 4A (plots_for_manuscript.ipynb): channel 6, 27-30 s
+ATTR_MAP_ORDER = ['VISl', 'VISrl', 'VISal', 'VISpm', 'VISam', 'ProS', 'SUB', 'CA1', 'CA3', 'DG', 'LG', 'LP', 'POL', 'PIL',
+                  'APN', 'MB']                           # after VISp (by layer), as in v1
+
+
 def attr_map():
     """v1 Figure 4A redrawn with history-aware attribution (experiments/attribution_map.py)."""
-    f = S.variables_dir(EXAMPLE_SESSION) / 'attribution_map.npz'
-    d = np.load(f)
+    sid = ATTR_MAP_SESSION
+    d = np.load(S.variables_dir(sid) / 'attribution_map.npz')
     A, t, areas = d['attribution'], d['t'], d['areas']
-    masks = region_masks(areas)
-    group = np.full(len(areas), len(rf.REGIONS))
-    for i, g in enumerate(rf.REGIONS):
-        group[masks[g]] = i
-    order = np.lexsort((areas, group))                                      # by region group, then area
-    fig = plt.figure(figsize=(16, 9))
-    g = fig.add_gridspec(2, 2, height_ratios=[1, 5], width_ratios=[40, 1], hspace=0.05, wspace=0.02)
+    units = pd.read_csv(POOLED / 'units.csv')
+    layers = units.loc[units['session_id'] == sid, 'layer'].to_numpy() if (units['session_id'] == sid).any() else np.full(len(areas), np.nan)
+    order, labels = [], []
+    for layer in (2, 4, 5, 6):
+        idx = np.flatnonzero((areas == 'VISp') & (layers == layer))
+        if len(idx):
+            order.append(idx)
+            labels.append((f'VISp L{layer}' if layer != 2 else 'VISp L2/3', len(idx)))
+    rest = np.flatnonzero((areas == 'VISp') & ~np.isin(layers, (2, 4, 5, 6)))
+    if len(rest):
+        order.append(rest)
+        labels.append(('VISp', len(rest)))
+    others = [a for a in ATTR_MAP_ORDER if a in areas] + sorted(set(areas) - set(ATTR_MAP_ORDER) - {'VISp'})
+    for area in others:
+        idx = np.flatnonzero(areas == area)
+        order.append(idx)
+        labels.append((area if len(idx) >= 20 else '', len(idx)))
+    order = np.concatenate(order)
+    fig = plt.figure(figsize=(16, 10))
+    g = fig.add_gridspec(2, 2, height_ratios=[1, 6], width_ratios=[40, 1], hspace=0.05, wspace=0.02)
     a = fig.add_subplot(g[0, 0])
     a.plot(t, d['target'], color='k', lw=0.8, label='recorded')
     a.plot(t, d['prediction'], color='tab:red', lw=0.8, label='predicted')
@@ -994,20 +1012,20 @@ def attr_map():
     a.set_xticks([])
     a.set_yticks([])
     a.legend(fontsize=8, loc='upper right')
-    a.set_title(f'session {EXAMPLE_SESSION}, channel {int(d["channel"])}, broadband (held-out block); completeness error '
-                f'{float(d["completeness"]):.1e}', fontsize=9)
+    times = d['session_times']
+    a.set_title(f'session {sid}, channel {int(d["channel"])}, broadband, {times[0]:.1f}-{times[-1]:.1f} s of session time '
+                f'({", ".join(sorted(set(d["block"])))} block); completeness error {float(d["completeness"]):.1e}', fontsize=9)
     a = fig.add_subplot(g[1, 0])
     lim = np.nanpercentile(np.abs(A), 99.5)
     im = a.imshow(A[:, order].T, aspect='auto', cmap='RdBu_r', vmin=-lim, vmax=lim, interpolation='nearest',
                   extent=(t[0], t[-1], len(order), 0))
-    bounds = np.flatnonzero(np.diff(group[order])) + 1
-    for b in bounds:
-        a.axhline(b, color='k', lw=0.5)
-    centres = np.r_[0, bounds, len(order)]
-    names = [rf.label(rf.REGIONS[i]) if i < len(rf.REGIONS) else 'other' for i in np.unique(group[order])]
-    a.set_yticks((centres[:-1] + centres[1:]) / 2, names, fontsize=8)
-    a.set_xlabel('time in the held-out block (s)')
-    a.set_ylabel(f'units ({len(order)}), by region')
+    edges = np.cumsum([0] + [n for _, n in labels])
+    for e in edges[1:-1]:
+        a.axhline(e, color='k', lw=0.3)
+    ticks = [(edges[i] + edges[i + 1]) / 2 for i, (name, _) in enumerate(labels) if name]
+    a.set_yticks(ticks, [name for name, _ in labels if name], fontsize=7)
+    a.set_xlabel('time (s)')
+    a.set_ylabel(f'units ({len(order)})')
     plt.colorbar(im, cax=fig.add_subplot(g[1, 1]), label='attribution (signed; summed over 3 s of input history)')
     save(fig, 'attr_map', 'v1 Figure 4A, redrawn | Attribution of every unit to the prediction at every bin')
 

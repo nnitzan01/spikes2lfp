@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 
 from integrated_gradients import SequenceIG
-from models import CausalConv1d, LSTMnet, SpikingTransformer
+from models import CausalCNN, CausalConv1d, LSTMnet
 
 
 class LinearCausal(nn.Module):
@@ -56,14 +56,14 @@ def test_mean_baseline_credits_silence_and_keeps_completeness():
     assert (delta.abs() <= 1e-3 * (f_x - f_b).abs() + 1e-5).all()
 
 
-def test_batching_does_not_change_results_and_transformer_is_supported():
+def test_batching_does_not_change_results_and_non_recurrent_models_are_supported():
     torch.manual_seed(2)
-    net = SpikingTransformer(5, seqlength=20, embedding_dim=8, num_heads=2, num_layers=1, dropout=0.0)
+    net = CausalCNN(5, seqlength=20, out_channels=4, hidden=8, n_layers=3)
     x = _spiky(6, 20, 5)
     a1, *_ = SequenceIG(net, n_steps=10, max_sequences=10).attribute(x)     # one window per batch
     a2, f_x, f_b, delta = SequenceIG(net, n_steps=10, max_sequences=1000).attribute(x)
     torch.testing.assert_close(a1, a2, rtol=1e-4, atol=1e-6)
-    _, f_x, f_b, delta = SequenceIG(net, n_steps=50).attribute(x)
+    _, f_x, f_b, delta = SequenceIG(net, n_steps=400).attribute(x)      # ReLU: piecewise integrand, needs more steps
     assert (delta.abs() <= 1e-2 * (f_x - f_b).abs() + 1e-4).all()
 
 

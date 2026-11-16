@@ -24,8 +24,8 @@ pytest            # unit and end-to-end tests on synthetic data; no Allen data n
 | `paths.py` | Input/output directory layout; `DATA_ROOT` for the notebooks (env var `SPIKES2LFP_DATA_ROOT`) |
 | `run_session.py` | The per-session pipeline (below) |
 | `process_session.py`, `process_probe.py`, `preprocess_data.py` | Loading units, spikes, stimulus epochs and VISp LFP; binning, filtering, train/test chunking |
-| `models.py` | `LSTMnet` (used throughout), `GRUnet`, `SpikingTransformer`, linear baseline, training wrapper |
-| `integrated_gradients.py` | Integrated gradients for the recurrent models (`approx_param.py`, `captum_utils.py` are vendored from captum) |
+| `models.py` | `LSTMnet` (the CNN-LSTM used throughout), `CausalCNN` and LSTM-only baselines (`build_model`), training wrapper |
+| `integrated_gradients.py` | `SequenceIG`: history-aware integrated gradients for the causal models (`approx_param.py` is vendored from captum) |
 | `analysis/` | Attribution summaries, per-bin ranking and top-K Jaccard, peri-event snippets and regional dominance |
 | `spectral_analysis.py`, `plots.py` | Filters, band-wise R2, wavelet power; plotting helpers |
 | `experiments/` | Stand-alone analyses: unit ablation, firing-rate control, area-group spectral R2, HVS detection |
@@ -65,7 +65,7 @@ Experiments, run from the repo root after the relevant pipeline stages:
 
 ```bash
 python -m experiments.detect_cortical_oscillations $SESSION   # HVS events (not used by the pipeline)
-python -m experiments.ablation $SESSION --channel 5
+python -m experiments.ranked_ablation $SESSION
 python -m experiments.firing_rate_contribution $SESSION --channel 5
 python -m experiments.spectral_r2 $SESSION
 ```
@@ -74,7 +74,6 @@ python -m experiments.spectral_r2 $SESSION
 
 | Notebook | Purpose |
 |---|---|
-| `start_notebook.ipynb` | Step-by-step walk-through on one session: model comparison (Fig. 3B), training, attribution, Jaccard stability (Fig. 4D) |
 | `pool_sessions.ipynb` | Pooled figures across sessions; starts with a section-to-figure map |
 | `plots_for_manuscript.ipynb`, `simulate_lfp_for_figure.ipynb` | Example-session panels (Fig. 1A, 4A) and the Fig. 3D schematic |
 

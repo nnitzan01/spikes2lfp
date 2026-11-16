@@ -16,14 +16,6 @@ def _trained_pipeline(run_session, session_dir):
     return pipeline
 
 
-def test_ablation(pipeline_module, session_dir, monkeypatch):
-    from experiments import ablation
-    monkeypatch.setattr(ablation, 'PERCENT_REMOVED', np.array([25, 50]))
-    pipeline = _trained_pipeline(pipeline_module, session_dir)
-    r2_full, r2_rate, r2_attr, r2_rand = ablation.run_ablation(pipeline, chan=1, band=0, n_perm=2)
-    assert np.isfinite(r2_full) and r2_rate.shape == (2, 1) and r2_rand.shape == (2, 2)
-
-
 def test_firing_rate_contribution(pipeline_module, session_dir):
     from experiments import firing_rate_contribution
     pipeline = _trained_pipeline(pipeline_module, session_dir)
@@ -269,6 +261,10 @@ def test_attribution_map(pipeline_module, session_dir):
     assert out['attribution'].shape == (50, N_UNITS) and np.isfinite(out['attribution']).all()
     assert out['target'].shape == out['prediction'].shape == (50,) and len(out['areas']) == N_UNITS
     assert float(out['completeness']) < 0.05
+    ts = pipeline.active_spikes.timestamps
+    out = attribution_map.run(pipeline, channel=0, start_time=ts[10], end_time=ts[60], step=5)   # windows reach before the epoch
+    assert out['attribution'].shape == (10, N_UNITS) and np.isfinite(out['attribution']).all() and out['block'][0] in ('train', 'none')
+    np.testing.assert_allclose(out['session_times'][0], ts[10])
 
 
 def test_simulation(pipeline_module, session_dir):

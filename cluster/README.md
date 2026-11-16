@@ -143,7 +143,7 @@ cross-validation and session-within-mouse statistics) is built by `python -m exp
 ## Pooled figures
 
 `pool_sessions.ipynb` makes the pooled manuscript figures from `pooled/` (sections 2, 3 and 13 also
-need `experiments/spectral_r2.py`, `ablation.py` and `firing_rate_contribution.py`, and are skipped
+need `experiments/spectral_r2.py` and `firing_rate_contribution.py`, and are skipped
 until those have run). To run it without a browser (the classifier cells take a few hours on 16 cores):
 
 ```bash
