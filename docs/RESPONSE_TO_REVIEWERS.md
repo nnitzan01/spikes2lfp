@@ -78,6 +78,15 @@ For distant structures the answer changes our conclusions: removing thalamus or 
 
 We have separated the two. The methodological contribution is a causal model with history-aware attribution, validated against ground truth and against simpler measures (2.1, 2.2). The biological contribution is narrower than before and now stated against Nitzan & Buzsáki (2025), Jia et al. (2022) and de Vries et al. (2020): the split between local broadband and network-wide band-envelope sources, and the trial-specific component beyond the stimulus clock (Reviewer 1, point 1.1).
 
+**What is new relative to this work.** de Vries et al. (2020) and Jia et al. (2022) describe how single neurons and functional modules are organised across visual areas from their spiking. Nitzan & Buzsáki (2025) show that functional groups organise the relation between spikes and the LFP beyond anatomy. None of these asks what the field potential itself is made of. Our new results answer that question from the spikes. In 89 sessions from 48 mice:
+
+- The laminar LFP of VISp splits into two sources. The local population carries the evoked broadband signal; removing it costs 56% of R². The other visual areas carry the 0.5–25 Hz band envelopes, at 47–68% of R². The difference holds in 44 of 48 mice and after retraining (Fig. 3).
+- Each source has its own laminar profile. The CSD of the predicted LFP matches the recorded one (r 0.87). VISp's contribution carries the layer 4 sink. The other visual areas' contribution avoids layer 4, where their axons also avoid terminating in the Allen connectivity atlas (Fig. 4).
+- Most of each cortical contribution depends on single-trial spike timing rather than the stimulus-evoked average. The hippocampal contribution depends on timing alone (Fig. 5).
+- The decomposition tracks experience. For the same images, the other visual areas' contribution is smaller on the novel day, while VISp's does not change (Fig. 6).
+
+**[Authors]** Check the one-line characterisations of Nitzan & Buzsáki (2025), Jia et al. (2022) and de Vries et al. (2020) against the papers; they are written from the reviewer's summary and general knowledge. Figure numbers follow the proposed reframing (preliminary figures 1–7). The laminar claim waits for the LGN/LP positive control. Whether the novelty effect goes beyond the change in firing rate is being tested.
+
 **2.1 Does attribution add insight beyond conventional measures (firing dynamics, spike–LFP coupling, population coupling)?**
 
 We tested this directly on the recordings and on simulated data with known sources.
@@ -181,7 +190,7 @@ Refit with mouse-grouped cross-validation and held-out permutation importance: R
 
 **3.13 Cell types.** VIP is now descriptive only, with the number of mice and sessions per optotagged group; waveform classes are "putative". The pyramidal-vs-interneuron decoding claim is removed: firing rate alone decodes it better (0.935) than attribution (0.687).
 
-**Minor points.** **[Authors]** Text fixes, to confirm in the revision: R² equation (1); Fig. 6E/6F reference and neuron counts per panel (2, 3; Figure 6 was made in MATLAB outside the repository); CIs (4); CSD and layer 4 border procedure (5, 6); log-normality QQ plot (7); Fig. 7B is r = −0.53 over 5 areas, p = 0.36, so the claim must go (8); LGN terminology (9); code release (10); predictive verbs (11); language edit (12).
+**Minor points.** **[Authors]** Text fixes, to confirm in the revision: R² equation (1); Fig. 6E/6F reference and neuron counts per panel (2, 3; Figure 6 was made in MATLAB outside the repository); CIs (4); CSD and layer 4 border procedure (5, 6); log-normality QQ plot (7); Fig. 7B: the n = 5 area-level test is weak (r −0.23, p 0.71), but per session attribution falls along the hierarchy (Spearman −0.33 [−0.40, −0.25], 45/48 mice, p 7e-09; mixed model p 3e-12), so the claim stays with session-level statistics (8); LGN terminology (9); code release (10); predictive verbs (11); language edit (12).
 
 ## Pending
 

@@ -245,6 +245,21 @@ def test_robustness(pipeline_module, session_dir, monkeypatch):
     assert np.isfinite(out['r2_ablation'][..., out['ablation_channels'], 0]).all()
 
 
+def test_event_rates_and_example_trace(pipeline_module, session_dir):
+    from experiments import event_rates, example_trace
+    pipeline = _trained_pipeline(pipeline_module, session_dir)
+    out = event_rates.run(pipeline)
+    types = list(out['event_types'])
+    assert 'image' in types and 'passive_image' in types
+    assert out['eta_rate'].shape == (len(types), len(out['eta_lags_ms']), len(out['groups']))
+    visp = list(out['groups']).index('VISp')
+    assert np.isfinite(out['eta_rate'][types.index('image'), :, visp]).all() and (out['eta_rate'] >= 0)[np.isfinite(out['eta_rate'])].all()
+    assert out['eta_rate_units'].shape == (len(types), N_UNITS)
+    trace = example_trace.run(pipeline, seconds=3, start_chunk=0)
+    assert trace['target'].shape == trace['prediction'].shape == (3, 750, pipeline.n_channels)
+    assert np.isfinite(trace['prediction'][0]).all() and trace['rate'].shape[1] == len(trace['groups'])
+
+
 def test_simulation(pipeline_module, session_dir):
     from experiments import simulation as sim
     pipeline = _trained_pipeline(pipeline_module, session_dir)
