@@ -198,18 +198,18 @@ Fifteen items still need an analysis or a decision before their responses can be
 
 | Comment | Needs | State |
 | --- | --- | --- |
-| R1 1.1 | Frequency split confirmed after retraining (0.5–8 Hz) | Running on all 89 sessions |
-| R1 1.3, R3 3.1 | Which regions carry the trial-specific part | Running on one session; then all 89 |
-| R3 3.4 | Spontaneous-epoch R² under per-epoch scaling | Code ready, not submitted |
-| R1 1.7, R3 3.9 | Statistics: mixed models (sessions within mice), CIs, multiple-comparison correction | Not started |
-| R3 3.10 | Cluster decoding within layers; cluster × layer table | Not started |
-| R3 3.3 | Repeated seeds, parameter counts, CNN-only model | Not started |
-| R3 3.5 | Rank stability across seeds; a second attribution method | Not started |
-| R3 3.6 | Bands above 25 Hz: per-model null and threshold, or cut | Decision needed |
-| R3 3.7 | Fixed-size unit subsamples | Not started |
-| R3 3.8 | Firing-rate control and ablation: select on one block, test on another; matched controls | Code partly ready |
+| R1 1.1 | Frequency split confirmed after retraining (0.5–8 Hz) | Done (89 sessions): holds after retraining |
+| R1 1.3, R3 3.1 | Which regions carry the trial-specific part | Done (89 sessions) |
+| R3 3.4 | Spontaneous-epoch R² under per-epoch scaling | Done: broadband 0.22 recalibrated; envelopes do not transfer |
+| R1 1.7, R3 3.9 | Statistics: mixed models (sessions within mice), CIs, multiple-comparison correction | Done: mouse-level table with cluster-bootstrap CIs and FDR; mixed model for Fig. 7B |
+| R3 3.3 | Repeated seeds, parameter counts, CNN-only model | CNN-only and LSTM-only done (89 sessions): **the CNN-only model is better in every session** (decision on the main model); seeds running |
+| R3 3.5 | Rank stability across seeds; a second attribution method | Running (first session: Spearman 0.96 between seeds); exact Shapley region contributions agree with IG (r 1.00) |
+| R3 3.6 | Bands above 25 Hz: per-model null and threshold, or cut | Analysis done (timescale, null, bleed-through); decision on wording |
+| R3 3.7 | Fixed-size unit subsamples | Running (first session: region order unchanged with equal units per region) |
+| R3 3.8 | Firing-rate control and ablation: select on one block, test on another; matched controls | Running: rate-matched controls (first 8 sessions: top units about 3× their controls) and retrained ablation with 3 seeds |
 | R3 3.11 | Spike bleed-through: unit-to-contact distances; exclude nearby units | Analysis done (89 sessions); text to draft |
 | R3 3.12 | Fig. 8: predictors coupled to attribution vs independent ones | Not started |
+| R3 minor 7, 8 | QQ plot; Fig. 7B statistics | Done: approximately log-normal; the hierarchy gradient holds within sessions (45/48 mice) but is shallow |
 | R2 2.2 | Timing claims: attribution peak lags recover true latencies poorly in simulation (Spearman 0.11–0.34) | Decision: coarse early/late wording or drop |
 | R2 2.4 | R² correction: drop or keep as sensitivity analysis | Decision needed |
 | R1 1.5, 1.6, R3 3.13, minor | Text changes | With the text revision |
