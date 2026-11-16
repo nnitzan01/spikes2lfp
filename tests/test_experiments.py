@@ -170,6 +170,9 @@ def test_region_ablation(pipeline_module, session_dir):
         assert np.isfinite(out[key][r_visp, :, :, 0]).all()
         assert np.isnan(np.delete(out[key], r_visp, axis=0)).all()
     assert out['covariate_names'][-1] == 'population' and 'running_speed' in out['covariate_names']
+    cnn = ra.run(pipeline, targets=[], retrain_targets=[0], retrain_regions=['VISp'], covariates=False, architecture='cnn', channels=[0])
+    assert np.isfinite(cnn['r2_retrained_full'][0, 0, 0]) and np.isnan(cnn['r2_retrained_full'][0, 1:, 0]).all()
+    assert np.isfinite(cnn['r2_retrained_removed'][r_visp, 0, 0, 0]) and str(cnn['architecture']) == 'cnn'
     masks = ra.region_masks(np.array(['VISp', 'SCig', 'LG', 'CA1', 'VISl', 'XYZ']))
     assert masks['midbrain'].tolist() == [0, 1, 0, 0, 0, 0] and masks['SC'][1] and masks['other'].tolist() == [0, 0, 0, 0, 0, 1]
     assert masks['visual_cortex_other'][4] and not masks['visual_cortex_other'][0]

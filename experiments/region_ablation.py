@@ -24,7 +24,8 @@ stimulus timing, arousal and global activity. --retrain-regions sets which regio
 usage (from the repo root):
     python -m experiments.region_ablation <session_dir> [--targets 0,1,2,3,4] [--retrain-targets 0 | none]
         [--retrain-regions groups | all | VISp,thalamus,...] [--retrain-seeds 1] [--no-covariates]
-        [--output region_ablation]
+        [--output region_ablation] [--architecture cnn_lstm | cnn | lstm] [--pooled-only]
+(--targets none skips the inference-time removal; --architecture retrains another model of models.ARCHITECTURES)
 
 Needs the 'train' stage (the covariates are computed on first use). Saves
 variables/<session_id>/<--output>.npz (region axes in the order of REGIONS, NaN where not run):
@@ -123,7 +124,7 @@ def inference_ablation(pipeline, masks, targets):
     return r2_full, r2_removed, r2_only
 
 
-def retrained_ablation(pipeline, masks, targets, regions, n_seeds, Z=None):
+def retrained_ablation(pipeline, masks, targets, regions, n_seeds, Z=None, architecture='cnn_lstm', channels=None):
     """Retrained R2 on all units and without each region in `regions`, with covariates Z appended if given."""
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
     n_ch, n_tg = Y.shape[1], Y.shape[2]
@@ -134,33 +135,35 @@ def retrained_ablation(pipeline, masks, targets, regions, n_seeds, Z=None):
         return X[:, keep] if Z is None else np.hstack([X[:, keep], Z[:len(X)]])
 
     for band in targets:
-        for chan in range(n_ch):
+        for chan in range(n_ch) if channels is None else channels:
             y = Y[:, chan, band]
             for seed in range(n_seeds):
-                full[seed, chan, band] = pipeline.fit_and_score(inputs(np.ones(X.shape[1], bool)), y, seed)[1]
+                full[seed, chan, band] = pipeline.fit_and_score(inputs(np.ones(X.shape[1], bool)), y, seed,
+                                                                architecture=architecture)[1]
                 for region in regions:
                     mask = masks[region]
                     if mask.any() and not mask.all():
-                        removed[REGIONS.index(region), seed, chan, band] = pipeline.fit_and_score(inputs(~mask), y, seed)[1]
+                        removed[REGIONS.index(region), seed, chan, band] = pipeline.fit_and_score(
+                            inputs(~mask), y, seed, architecture=architecture)[1]
             log(f'retrained{" with covariates" if Z is not None else ""} chan {chan} band {band}: '
                 f'full {full[:, chan, band].mean():.3f}')
     return full, removed
 
 
 def run(pipeline, targets=(0, 1, 2, 3, 4), retrain_targets=(0,), retrain_regions=None, retrain_seeds=1,
-        covariates=True):
+        covariates=True, architecture='cnn_lstm', channels=None):
     masks = region_masks(pipeline.session.units['structure_acronym'].to_numpy().astype(str))
     retrain_regions = list(GLOBAL_REGIONS) + ['other'] if retrain_regions is None else list(retrain_regions)
     r2_full, r2_removed, r2_only = inference_ablation(pipeline, masks, list(targets))
-    out = dict(r2_full=r2_full, r2_removed=r2_removed, r2_only=r2_only, regions=np.array(REGIONS),
+    out = dict(r2_full=r2_full, r2_removed=r2_removed, r2_only=r2_only, regions=np.array(REGIONS), architecture=np.array(architecture),
                region_n_units=np.array([masks[r].sum() for r in REGIONS]), fills=np.array(FILLS))
     if retrain_targets:
         out['r2_retrained_full'], out['r2_retrained_removed'] = retrained_ablation(
-            pipeline, masks, list(retrain_targets), retrain_regions, retrain_seeds)
+            pipeline, masks, list(retrain_targets), retrain_regions, retrain_seeds, architecture=architecture, channels=channels)
         if covariates:
             Z, names = covariate_inputs(pipeline)
             out['r2_cov_full'], out['r2_cov_removed'] = retrained_ablation(
-                pipeline, masks, list(retrain_targets), retrain_regions, retrain_seeds, Z)
+                pipeline, masks, list(retrain_targets), retrain_regions, retrain_seeds, Z, architecture, channels)
             out['covariate_names'] = np.array(names)
     return out
 
@@ -174,6 +177,8 @@ def main():
     parser.add_argument('--retrain-seeds', type=int, default=1)
     parser.add_argument('--no-covariates', action='store_true', help='skip the retraining with covariates')
     parser.add_argument('--output', default='region_ablation', help='saved as variables/<session_id>/<output>.npz')
+    parser.add_argument('--architecture', default='cnn_lstm', help="retrained model: 'cnn_lstm' (standard), 'cnn' or 'lstm'")
+    parser.add_argument('--pooled-only', action='store_true', help='retrain only the pooled channels of the alignment table')
     args = parser.parse_args()
 
     regions = {'groups': None, 'all': REGIONS}.get(args.retrain_regions, args.retrain_regions.split(','))
@@ -183,9 +188,13 @@ def main():
     data_root, session_id = paths.parse_session_dir(args.session_dir)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pipeline = SessionPipeline(data_root, session_id, device)
-    targets = [int(t) for t in args.targets.split(',')]
+    targets = [] if args.targets == 'none' else [int(t) for t in args.targets.split(',')]
     retrain = [] if args.retrain_targets == 'none' else [int(t) for t in args.retrain_targets.split(',')]
-    out = run(pipeline, targets, retrain, regions, args.retrain_seeds, not args.no_covariates)
+    channels = None
+    if args.pooled_only:
+        from experiments.robustness import pooled_channels
+        channels = pooled_channels(session_id, pipeline.n_channels)
+    out = run(pipeline, targets, retrain, regions, args.retrain_seeds, not args.no_covariates, args.architecture, channels)
     f = pipeline.dirs.variables / f'{args.output}.npz'
     save_npz(f, **out)
     print('Saved', f)
