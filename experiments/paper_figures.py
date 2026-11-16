@@ -975,7 +975,44 @@ def supp_top_units():
     save(fig, 'supp_top_units', 'Supplementary (v1 S3C, updated) | High-contributing units per area')
 
 
-FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, supp_top_units=supp_top_units, overview=overview)
+def attr_map():
+    """v1 Figure 4A redrawn with history-aware attribution (experiments/attribution_map.py)."""
+    f = S.variables_dir(EXAMPLE_SESSION) / 'attribution_map.npz'
+    d = np.load(f)
+    A, t, areas = d['attribution'], d['t'], d['areas']
+    masks = region_masks(areas)
+    group = np.full(len(areas), len(rf.REGIONS))
+    for i, g in enumerate(rf.REGIONS):
+        group[masks[g]] = i
+    order = np.lexsort((areas, group))                                      # by region group, then area
+    fig = plt.figure(figsize=(16, 9))
+    g = fig.add_gridspec(2, 2, height_ratios=[1, 5], width_ratios=[40, 1], hspace=0.05, wspace=0.02)
+    a = fig.add_subplot(g[0, 0])
+    a.plot(t, d['target'], color='k', lw=0.8, label='recorded')
+    a.plot(t, d['prediction'], color='tab:red', lw=0.8, label='predicted')
+    a.set_xlim(t[0], t[-1])
+    a.set_xticks([])
+    a.set_yticks([])
+    a.legend(fontsize=8, loc='upper right')
+    a.set_title(f'session {EXAMPLE_SESSION}, channel {int(d["channel"])}, broadband (held-out block); completeness error '
+                f'{float(d["completeness"]):.1e}', fontsize=9)
+    a = fig.add_subplot(g[1, 0])
+    lim = np.nanpercentile(np.abs(A), 99.5)
+    im = a.imshow(A[:, order].T, aspect='auto', cmap='RdBu_r', vmin=-lim, vmax=lim, interpolation='nearest',
+                  extent=(t[0], t[-1], len(order), 0))
+    bounds = np.flatnonzero(np.diff(group[order])) + 1
+    for b in bounds:
+        a.axhline(b, color='k', lw=0.5)
+    centres = np.r_[0, bounds, len(order)]
+    names = [rf.label(rf.REGIONS[i]) if i < len(rf.REGIONS) else 'other' for i in np.unique(group[order])]
+    a.set_yticks((centres[:-1] + centres[1:]) / 2, names, fontsize=8)
+    a.set_xlabel('time in the held-out block (s)')
+    a.set_ylabel(f'units ({len(order)}), by region')
+    plt.colorbar(im, cax=fig.add_subplot(g[1, 1]), label='attribution (signed; summed over 3 s of input history)')
+    save(fig, 'attr_map', 'v1 Figure 4A, redrawn | Attribution of every unit to the prediction at every bin')
+
+
+FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, supp_top_units=supp_top_units, attr_map=attr_map, overview=overview)
 
 
 def main():
