@@ -790,6 +790,11 @@ def fig7():
 
 # ------------------------------------------------------------------------------------------------- figure 7
 
+def rng_jitter(n, width=0.012, seed=0):
+    """Small horizontal jitter for dots placed at a shared x."""
+    return np.random.default_rng(seed).uniform(-width, width, n)
+
+
 def fig8():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     draws = {}
@@ -861,11 +866,18 @@ def fig8():
     per = hva.groupby(['session_id', 'area'])['attr'].agg(['mean', 'size']).reset_index()
     per = per[per['size'] >= sx.MIN_AREA_UNITS]
     areas = list(sx.HIERARCHY)
-    for sid, u in per.groupby('session_id'):
-        u = u.set_index('area')
-        u = u.reindex([x for x in areas if x in u.index])
-        a.plot([sx.HIERARCHY[x] for x in u.index], u['mean'], color='gray', lw=0.3, alpha=0.5)
-    a.plot([sx.HIERARCHY[x] for x in areas], per.groupby('area')['mean'].median()[areas], 'k-o', lw=2)
+    x = per['area'].map(sx.HIERARCHY).to_numpy()
+    y = np.log10(per['mean'].to_numpy())
+    a.scatter(x + rng_jitter(len(x)), 10 ** y, s=5, color='gray', alpha=0.5, lw=0, label='session × area')
+    m = per.assign(log=y).groupby('area')['log'].agg(['mean', 'sem']).reindex(areas)
+    a.errorbar([sx.HIERARCHY[k] for k in areas], 10 ** m['mean'],
+               yerr=[10 ** m['mean'] - 10 ** (m['mean'] - m['sem']), 10 ** (m['mean'] + m['sem']) - 10 ** m['mean']],
+               fmt='o', color='k', ms=6, capsize=3, label='area mean ± SEM (log)')
+    fit = st.linregress(x, y)
+    xs = np.linspace(min(sx.HIERARCHY.values()), max(sx.HIERARCHY.values()), 50)
+    a.plot(xs, 10 ** (fit.intercept + fit.slope * xs), color='tab:red', lw=1.5,
+           label=f'regression: {fit.slope:+.2f} log10 units per hierarchy unit')
+    a.legend(fontsize=7)
     a.set_yscale('log')
     a.set_xticks([sx.HIERARCHY[x] for x in areas], areas, rotation=45)
     a.set_xlabel('anatomical hierarchy score')
