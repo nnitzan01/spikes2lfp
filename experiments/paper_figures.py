@@ -101,8 +101,9 @@ def fig1():
         ax2 = fig.add_subplot(g[1, 0:2])
         letter(ax2, 'b')
         seg = slice(0, 750)
-        y = d['target'][0, seg].T
-        p = d['prediction'][0, seg].T
+        pooled = S.pooled_channels(EXAMPLE_SESSION)                       # leave out channels above the probe track
+        y = d['target'][0, seg][:, pooled].T
+        p = d['prediction'][0, seg][:, pooled].T
         lim = np.nanpercentile(np.abs(y), 99)
         both = np.vstack([y, np.full((1, y.shape[1]), np.nan), p])
         ax2.imshow(both, aspect='auto', origin='lower', cmap='RdBu_r', vmin=-lim, vmax=lim,
