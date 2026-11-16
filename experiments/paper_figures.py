@@ -312,7 +312,7 @@ def fig3():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     models = [('r2_units_instant', 'ridge,\ncurrent bin'), ('r2_units', 'ridge,\n1 s history'),
               ('r2_units_stimulus_behaviour', 'ridge 1 s +\nstim. + beh.'), ('r2_stimulus_behaviour', 'stimulus +\nbehaviour'),
-              ('r2_arch_cnn', 'CNN only'), ('model_r2', 'CNN-LSTM')]
+              ('r2_arch_lstm', 'LSTM only'), ('model_r2', 'CNN-LSTM'), ('r2_arch_cnn', 'CNN only')]
     b = per_session('baselines', lambda d, ch: {k: S.channel_median(d[k], ch)[:3] for k, _ in models if k in d})
     a = ax[0, 0]
     letter(a, 'a')
@@ -916,6 +916,51 @@ def fig8():
     save(fig, 'fig8', 'Figure 8 | Which neurons: attribution finds the units the prediction relies on, beyond firing rate')
 
 
+SPECTRAL_GROUPS = [('full_model', 'all units'), ('cortex', 'visual cortex'), ('cortex_no_visp', 'visual cortex without VISp'),
+                   ('hpc', 'hippocampal formation'), ('subcortical', 'subcortical')]
+
+
+def supp_spectral():
+    """v1 Figure S2 in v2: R2 of the broadband model trained on each unit group, for the broadband LFP and its band-passed
+    components (experiments/spectral_r2.py), by aligned channel; mean ± SEM over sessions."""
+    per = {g: [] for g, _ in SPECTRAL_GROUPS}
+    bands = None
+    for sid in S.sessions():
+        v = S.variables_dir(sid)
+        if not (v / 'r2_results_full_model.csv').exists():
+            continue
+        for g, _ in SPECTRAL_GROUPS:
+            f = v / f'r2_results_{g}.csv'
+            if f.exists():
+                t = pd.read_csv(f, index_col=0)
+                bands = list(t.index)
+                per[g].append(aligned(t.to_numpy().T, sid))                     # aligned channels x bands
+    n = len(per['full_model'])
+    fig, ax = plt.subplots(1, len(SPECTRAL_GROUPS), figsize=(22, 5.5), sharey=True)
+    channels = np.arange(1, ALIGNED + 1)
+    colors = dict(zip(bands, plt.cm.viridis(np.linspace(0, 0.9, len(bands) - 1)).tolist() + [[0.85, 0.2, 0.55, 1]]))
+    for p, (g, title) in enumerate(SPECTRAL_GROUPS):
+        a = ax[p]
+        letter(a, 'ABCDE'[p])
+        if not per[g]:
+            missing(a, f'{title}: not computed yet')
+            continue
+        arr = np.stack(per[g])
+        for k, b in enumerate(bands):
+            m, sem = mean_sem(arr[:, :, k])
+            a.plot(m, channels, color=colors[b], label=b, lw=2 if b == 'broadband' else 1.2)
+            a.fill_betweenx(channels, m - sem, m + sem, color=colors[b], alpha=0.2, lw=0)
+        l4_lines(a)
+        a.axvline(0, color='k', lw=0.5)
+        a.set_xlim(-0.2, 1)
+        a.set_xlabel('test R²')
+        a.set_title(f'{title} ({len(arr)} sessions)', fontsize=9)
+    ax[0].set_ylabel('aligned channel')
+    ax[0].legend(fontsize=7)
+    save(fig, 'supp_spectral', f'Supplementary (v1 S2, updated) | Broadband models trained on unit subsets: R² of the LFP and its band-passed '
+                               f'components ({n} sessions)')
+
+
 TOP_FRACTIONS = [0.10, 0.05, 0.01]
 
 
@@ -1030,7 +1075,7 @@ def attr_map():
     save(fig, 'attr_map', 'v1 Figure 4A, redrawn | Attribution of every unit to the prediction at every bin')
 
 
-FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, supp_top_units=supp_top_units, attr_map=attr_map, overview=overview)
+FIGURES = dict(fig2=fig2, fig3=fig3, fig4=fig4, fig5=fig5, fig6=fig6, fig7=fig7, fig8=fig8, supp_top_units=supp_top_units, supp_spectral=supp_spectral, attr_map=attr_map, overview=overview)
 
 
 def main():
