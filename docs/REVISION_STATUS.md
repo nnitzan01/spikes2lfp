@@ -5,7 +5,7 @@ field potentials in the visual cortex* (Nitzan, Ji & Buzsáki; Nature Communicat
 review). It is updated as each analysis is built, run and reviewed; the change log at the end
 records what changed when.
 
-Last updated: 2026-11-03.
+Last updated: 2026-11-16.
 
 ---
 
@@ -734,7 +734,8 @@ stated; shares = each group's share of the summed RMS of the baseline-corrected 
   largest at the offset response (peak ≈ 340 ms; VISp's is at the onset plateau). So: during the image, VISp and
   the other areas contribute with the timing of their own spikes; after it, the other areas' contribution
   persists and dominates the offset response.
-- **Laminar profile (G).** The predicted CSD matches the recorded CSD (r 0.87 broadband, 0.83 0.5–4 Hz, image).
+- **Laminar profile (G; broadband only: the CSD of a band-power envelope is not a current density, so the 0.5–4 Hz
+  depth numbers are dropped).** The predicted CSD matches the recorded CSD (r 0.87, image).
   VISp's contribution carries the classic L4 sink (fraction of CSD power in L2/3 / L4 / L5/6: 0.35 / 0.47 / 0.16
   early). The other visual areas' contribution has no L4 sink: an early deep sink (≈ 300 µm below L4, 50–100 ms) and
   a brief superficial sink at onset; L4 fraction 0.37 early, 0.29 late (vs VISp −0.09, p 9e-04; −0.14, 26/89,
@@ -749,7 +750,12 @@ stated; shares = each group's share of the summed RMS of the baseline-corrected 
   Change vs repeat and hit vs miss differences are mostly VISp (0.42–0.66 broadband). What changes with the task is
   **midbrain in the slow band**: 0.5–4 Hz variance share 0.11 active vs 0.05 passive (74/85, p 2e-10), 0.28–0.30 of
   the post-change hit − image and hit − miss differences, 0.13 when stationary vs 0.04 when running: likely
-  licking / movement-related (to check against lick times).
+  movement-related. **Checked against behaviour (figures_review/midbrain_licks.png):** on hits the midbrain
+  contribution rises from ≈ 150 ms and peaks at ≈ 330 ms, after running starts to slow (≈ 100 ms) and before most
+  licking (from ≈ 250 ms, still rising at 750 ms, when the contribution has decayed); per session its time course
+  correlates with the slowing (median r ≈ 0.38), not with the lick rate (≈ 0); other visual cortex shows neither.
+  Misses: slight slowing, small midbrain contribution; images and passive: neither. So a slowing / response-initiation
+  signal rather than licking itself; trial-by-trial analysis needed before claiming it.
 - **Novelty (same shared images, same mouse, novel − familiar day; 41 mice).** The other visual areas' broadband
   contribution is smaller on the novel day: early −0.041 (13/41 > 0, p 0.05), post −0.037 (13/41, p 3e-03); passive
   early −0.065 (14/41, p 8e-03); VISp unchanged (p ≥ 0.6); hippocampus smaller (tiny, 9/41, p 8e-06). 0.5–4 Hz other
@@ -892,6 +898,10 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-16** `experiments/review_figures.py`: one figure per 89-session finding (written to
+  `spikes2lfp_v2/figures_review/`), from the saved results. `summarize region_depth` now broadband only (CSD of band
+  envelopes is meaningless); its per-session part is `summarize.depth_session`. Midbrain 0.5–4 Hz contribution checked
+  against licking and running (section 4).
 - **2026-11-13** region_events over 89 sessions (array 29538952, no failures) and Phase 2 G: `summarize region_events` (+ latency control vs each region's own firing, flash cycle and image-on windows), `summarize region_depth` (CSD of the contributions by layer), `experiments/allen_layers.py` (Allen connectivity, VISp layer projection density; tables/allen_visp_layers.csv), `region_events --grouping thalamus` (LGN / LP split; not run). Section 4.
 - **2026-11-13** Added `experiments/region_events.py` and `summarize region_events` (Phase 2 F, with the state sums for H and an IG cross-check).
 - **2026-11-13** `bleed_through` over 89 sessions (run 11-12, jobs 29449362/3): section 4; R3 #11 analysis done.

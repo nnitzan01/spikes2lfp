@@ -63,8 +63,8 @@ def test_summaries_over_sessions(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / str(sid))
     monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(1, 5))
     borders = tmp_path / 'borders.csv'
-    borders.write_text('session,lower_border_index,upper_border_index,first_channel_index\n'
-                       + ''.join(f'{sid},2,3,1\n' for sid in sids))
+    borders.write_text('session,lower_border_index,upper_border_index,first_channel_index,last_channel_index\n'
+                       + ''.join(f'{sid},2,3,1,4\n' for sid in sids))
     monkeypatch.setattr(summarize, 'ALIGNMENT_TABLE', borders)
     for f in (summarize.ranked_ablation, summarize.attribution_baseline_sessions, summarize.region_ablation,
               summarize.region_bands, summarize.region_clock, summarize.stimulus_clock):
@@ -72,6 +72,13 @@ def test_summaries_over_sessions(tmp_path, monkeypatch, capsys):
         out = capsys.readouterr().out
         assert '3 sessions with' in out and 'missing: 4' in out
     assert summarize.paired([0.1, 0.2, np.nan, -0.05]).startswith('+0.100 (2/3 > 0')
+
+    from experiments import review_figures as rf
+    monkeypatch.setattr(rf, 'OUT', tmp_path / 'figures')
+    monkeypatch.setattr(rf, 'ALIGNMENT_TABLE', borders)
+    for name in ('stimulus_clock', 'unit_ranking', 'region_bands', 'region_clock'):
+        rf.FIGURES[name]()
+        assert (tmp_path / 'figures' / f'{name}.png').exists()
 
 
 def test_simulation_pooled_over_sessions(tmp_path, monkeypatch, capsys):
@@ -162,7 +169,8 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
         lags = out['eta_lags_ms']
         rate = np.exp(-((lags - 60) / 30) ** 2)[None, :, None] * np.ones((3, 1, 5))       # firing peaking at 60 ms
         np.savez(d / 'explore_task.npz', event_types=np.array(['image', 'change_hit', 'passive_image']), eta_lags_ms=lags,
-                 region_groups=out['groups'][:5], eta_pop=rate)
+                 region_groups=out['groups'][:5], eta_pop=rate, eta_behaviour=np.zeros((3, len(lags), 3)) + rate[..., :3],
+                 behaviour_names=np.array(['running', 'pupil_z', 'licks']))
     monkeypatch.setattr(summarize, 'sessions', lambda: [1047969464, 1048189115])
     monkeypatch.setattr(summarize, 'variables_dir', lambda sid: tmp_path / 'summary' / 'variables' / str(sid))
     monkeypatch.setattr(summarize, 'pooled_channels', lambda sid: slice(0, 2))
@@ -191,6 +199,14 @@ def test_region_events_summary(pipeline_module, session_dir, tmp_path, monkeypat
     assert '2 sessions with region_events.npz and L4 borders' in text and 'CSD of prediction vs recorded CSD' in text
     assert 'L4 fraction, visual_cortex_other - thalamus' in text and 'anatomy (Allen connectivity atlas' in text
     assert (tmp_path / 'summary' / 'variables' / 'region_depth_pooled.png').exists()
+    from experiments import review_figures as rf
+    monkeypatch.setattr(rf, 'OUT', tmp_path / 'figures')
+    monkeypatch.setattr(rf, 'ALIGNMENT_TABLE', table)
+    rf.events.cache_clear()
+    for name in ('event_contributions', 'latency', 'novelty', 'depth', 'state', 'midbrain_licks'):
+        rf.FIGURES[name]()
+        assert (tmp_path / 'figures' / f'{name}.png').exists()
+    rf.events.cache_clear()
     split = dict(out, groups=np.array(['VISp', 'visual_cortex_other', 'LGN', 'LP', 'thalamus_other', 'rest']))
     for sid in (1047969464, 1048189115):
         np.savez(tmp_path / 'summary' / 'variables' / str(sid) / 'region_events_thalamus.npz', **split)

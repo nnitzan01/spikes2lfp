@@ -151,6 +151,13 @@ sbatch --partition=cpu_short --gres=none --cpus-per-task=16 --mem=64G --time=12:
 Figures are saved to `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/figures/`; the executed notebook, with
 every figure and printed result, is `pool_sessions_run.ipynb`.
 
+Review figures of the experiment results (one per finding; about 2 minutes on the login node, nothing rerun),
+saved to `$SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/figures_review/`:
+
+```bash
+python -m experiments.review_figures                      # all; or name some, e.g. region_bands depth
+```
+
 The cell-type, cluster and layer decoders and the Fig. 8 regression are cross-validated over mice
 (`analysis/decoders.py`, using `tables/sessions.csv`), each with a firing-rate-only control and a null
 from refits on labels shuffled within each session. `DECODER_PERMUTATIONS` (default 50) sets the

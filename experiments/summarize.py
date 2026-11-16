@@ -918,6 +918,7 @@ COMPARTMENTS = ['L2/3', 'L4', 'L5/6']
 CSD_SMOOTH = np.array([0.23, 0.54, 0.23])          # spatial (Hamming) smoothing before the second difference
 DEPTH_HALF_WIDTH = 8                                # channels either side of the L4 centre in the pooled figure
 CHANNEL_SPACING_UM = 40                             # LFP channels (channels.csv probe_vertical_position)
+DEPTH_TARGETS = (0,)                                # broadband only: the CSD of a band-power envelope is not a current density
 
 
 ALLEN_TABLE = paths.REPO_DIR / 'tables' / 'allen_visp_layers.csv'      # experiments/allen_layers.py
@@ -958,6 +959,44 @@ def compartments(channels, upper, lower):
     return np.where(channels > upper, 0, np.where(channels >= lower, 1, 2))
 
 
+def depth_session(d, sid, table):
+    """One session of region_depth: d = region_events npz, table = the alignment table indexed by session."""
+    row = table.loc[sid]
+    first, last = int(row['first_channel_index']), int(row['last_channel_index'])
+    upper, lower = sorted([int(row['upper_border_index']), int(row['lower_border_index'])])[::-1]
+    std = np.load(variables_dir(sid) / 'target_scaler.npz')['std']                   # channels x targets
+    lags, targets = d['eta_lags_ms'], [int(t) for t in d['targets'] if int(t) in DEPTH_TARGETS]
+    types = [str(t) for t in d['event_types']]
+    chans = np.arange(first, last + 1)[2:-2]                                          # interior after smoothing + difference
+    comp = compartments(chans, upper, lower)
+    l4 = (upper + lower) / 2
+    out = dict(lags=lags, groups=[str(g) for g in d['groups']], units=d['group_n_units'], targets=targets,
+               frac={}, sink={}, match={}, csd={}, evoked={}, rel=chans - l4)
+    for t in DEPTH_TYPES:
+        if t not in types or not len(chans):
+            continue
+        i = types.index(t)
+        scale = std[first:last + 1][:, targets]                                       # channels x targets
+        C = np.moveaxis(d['eta_contribution'][i, :, :, first:last + 1][..., targets] * scale, 2, -1)   # lags x groups x targets x channels
+        Y = np.moveaxis(d['eta_target'][i, :, first:last + 1][..., targets] * scale, 1, -1)            # lags x targets x channels
+        P = np.moveaxis(d['eta_prediction'][i, :, first:last + 1][..., targets] * scale, 1, -1)
+        C, Y, P = (event_csd(x - np.nanmean(x[lags < 0], axis=0)) for x in (C, Y, P))
+        frac = np.full((len(EVENT_WINDOWS_MS), C.shape[1], len(targets), len(COMPARTMENTS)), np.nan)
+        for w, (lo, hi) in enumerate(EVENT_WINDOWS_MS.values()):
+            ms = np.mean(C[(lags >= lo) & (lags < hi)] ** 2, axis=0)                  # groups x targets x channels
+            dens = np.stack([ms[..., comp == k].mean(-1) if (comp == k).any() else np.full(ms.shape[:-1], np.nan)
+                             for k in range(len(COMPARTMENTS))], -1)
+            frac[w] = dens / np.nansum(dens, -1, keepdims=True)
+        early = (lags >= EVENT_WINDOWS_MS['early'][0]) & (lags < EVENT_WINDOWS_MS['early'][1])
+        sink = (chans[np.argmin(C[early].min(axis=0), axis=-1)] - l4) * CHANNEL_SPACING_UM     # groups x targets (> 0: above L4)
+        after = (lags >= 0) & (lags < 750)
+        match = np.array([np.corrcoef(Y[after, j].ravel(), P[after, j].ravel())[0, 1] for j in range(len(targets))])
+        evoked = np.mean(C[after] ** 2, axis=(0, -1)) / np.mean(C[lags < 0] ** 2, axis=(0, -1))   # groups x targets
+        out['frac'][t], out['sink'][t], out['match'][t], out['csd'][t] = frac, sink, match, (C, Y, P)
+        out['evoked'][t] = evoked
+    return out
+
+
 def region_depth(name='region_events'):
     """
     Laminar profile of each group's contribution (Phase 2 G; from <name>.npz, all channels): the event-locked
@@ -973,44 +1012,7 @@ def region_depth(name='region_events'):
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     table = pd.read_csv(ALIGNMENT_TABLE).set_index('session')
-
-    def per_session(d, sid):
-        row = table.loc[sid]
-        first, last = int(row['first_channel_index']), int(row['last_channel_index'])
-        upper, lower = sorted([int(row['upper_border_index']), int(row['lower_border_index'])])[::-1]
-        std = np.load(variables_dir(sid) / 'target_scaler.npz')['std']                   # channels x targets
-        lags, targets = d['eta_lags_ms'], [int(t) for t in d['targets']]
-        types = [str(t) for t in d['event_types']]
-        chans = np.arange(first, last + 1)[2:-2]                                          # interior after smoothing + difference
-        comp = compartments(chans, upper, lower)
-        l4 = (upper + lower) / 2
-        out = dict(lags=lags, groups=[str(g) for g in d['groups']], units=d['group_n_units'], targets=targets,
-                   frac={}, sink={}, match={}, csd={}, evoked={}, rel=chans - l4)
-        for t in DEPTH_TYPES:
-            if t not in types or not len(chans):
-                continue
-            i = types.index(t)
-            scale = std[first:last + 1][:, targets]                                       # channels x targets
-            C = np.moveaxis(d['eta_contribution'][i, :, :, first:last + 1][..., targets] * scale, 2, -1)   # lags x groups x targets x channels
-            Y = np.moveaxis(d['eta_target'][i, :, first:last + 1][..., targets] * scale, 1, -1)            # lags x targets x channels
-            P = np.moveaxis(d['eta_prediction'][i, :, first:last + 1][..., targets] * scale, 1, -1)
-            C, Y, P = (event_csd(x - np.nanmean(x[lags < 0], axis=0)) for x in (C, Y, P))
-            frac = np.full((len(EVENT_WINDOWS_MS), C.shape[1], len(targets), len(COMPARTMENTS)), np.nan)
-            for w, (lo, hi) in enumerate(EVENT_WINDOWS_MS.values()):
-                ms = np.mean(C[(lags >= lo) & (lags < hi)] ** 2, axis=0)                  # groups x targets x channels
-                dens = np.stack([ms[..., comp == k].mean(-1) if (comp == k).any() else np.full(ms.shape[:-1], np.nan)
-                                 for k in range(len(COMPARTMENTS))], -1)
-                frac[w] = dens / np.nansum(dens, -1, keepdims=True)
-            early = (lags >= EVENT_WINDOWS_MS['early'][0]) & (lags < EVENT_WINDOWS_MS['early'][1])
-            sink = (chans[np.argmin(C[early].min(axis=0), axis=-1)] - l4) * CHANNEL_SPACING_UM     # groups x targets (> 0: above L4)
-            after = (lags >= 0) & (lags < 750)
-            match = np.array([np.corrcoef(Y[after, j].ravel(), P[after, j].ravel())[0, 1] for j in range(len(targets))])
-            evoked = np.mean(C[after] ** 2, axis=(0, -1)) / np.mean(C[lags < 0] ** 2, axis=(0, -1))   # groups x targets
-            out['frac'][t], out['sink'][t], out['match'][t], out['csd'][t] = frac, sink, match, (C, Y, P)
-            out['evoked'][t] = evoked
-        return out
-
-    rows = {sid: per_session(np.load(variables_dir(sid) / f'{name}.npz'), sid) for sid in sessions()
+    rows = {sid: depth_session(np.load(variables_dir(sid) / f'{name}.npz'), sid, table) for sid in sessions()
             if sid in table.index and (variables_dir(sid) / f'{name}.npz').exists()}
     print(f'{len(rows)} sessions with {name}.npz and L4 borders')
     if not rows:
