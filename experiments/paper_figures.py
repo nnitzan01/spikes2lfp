@@ -587,7 +587,7 @@ def fig5():
     a.set_xticks([0], ['predicted vs\nrecorded CSD'])
     a.set_ylabel('correlation, 0-750 ms (broadband)')
     a.set_ylim(0, 1)
-    save(fig, 'fig5', 'Figure 5 | Each source has its own laminar profile, matching where its axons end')
+    save(fig, 'fig5', 'Figure 5 | Laminar profile of each source\'s contribution: VISp carries the L4 sink; the LGN positive control fails')
 
 
 # ------------------------------------------------------------------------------------------------- figure 5
