@@ -65,8 +65,10 @@ class SequenceIG:
                 try:
                     attr, f_x, f_b = self._attribute_batch(x, baseline, alphas, step_sizes, target_bins)
                     out_of_memory = False
-                except torch.cuda.OutOfMemoryError:
-                    if self.windows_per_batch == 1:
+                except RuntimeError as e:
+                    # cuDNN reports a workspace it cannot allocate as CUDNN_STATUS_NOT_INITIALIZED / ALLOC_FAILED
+                    if not (isinstance(e, torch.cuda.OutOfMemoryError) or 'CUDNN_STATUS' in str(e)) \
+                            or self.windows_per_batch == 1:
                         raise
                     out_of_memory = True
                 if out_of_memory:
