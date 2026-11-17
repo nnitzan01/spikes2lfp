@@ -896,22 +896,16 @@ def fig8():
     a.set_title('VISp units by layer (broadband)', fontsize=9)
     a = ax[1, 2]
     letter(a, 'f')
-    rob = per_session('robustness', lambda d, ch: dict((k, d[k]) for k in ('attr_seeds', 'channels') if k in d))
+    rob = per_session('robustness', lambda d, ch: S.seed_stability(d, d['channels']) if 'attr_seeds' in d else None)
+    rob = {k: v for k, v in rob.items() if v is not None}
     if rob:
-        rho = []
-        for v in rob.values():
-            a_ = v['attr_seeds']
-            for chan in v['channels']:
-                for s in range(1, a_.shape[0]):
-                    x, y = a_[0, chan, 0], a_[s, chan, 0]
-                    ok = np.isfinite(x) & np.isfinite(y)
-                    if ok.sum() > 10:
-                        rho.append(st.spearmanr(x[ok], y[ok])[0])
-        rf.strip(a, rho, 0, 'k')
+        for m, color in enumerate(('k', 'tab:blue')):                     # Spearman, top-10% Jaccard
+            for t in range(3):
+                rf.strip(a, [v[m][t] for v in rob.values()], t + (m - 0.5) * 0.36, color, width=0.3, s=4)
         a.set_ylim(0, 1)
-        a.set_xticks([0], ['seed s vs seed 0'])
-        a.set_ylabel('Spearman of unit attribution (broadband)')
-        a.set_title(f'rank stability across initialisations ({len(rob)} sessions)', fontsize=9)
+        a.set_xticks(range(3), BANDS[:3])
+        a.set_ylabel('unit attribution, seeds 1-2 vs seed 0\n(black Spearman, blue top-10% Jaccard)')
+        a.set_title(f'rank stability across initialisations (dots: {len(rob)} sessions)', fontsize=9)
     else:
         missing(a, 'rank stability across seeds running (experiments/robustness.py)')
     save(fig, 'fig8', 'Figure 8 | Which neurons: attribution finds the units the prediction relies on, beyond firing rate')

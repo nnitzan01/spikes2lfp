@@ -1133,6 +1133,29 @@ def firing_rate_control():
 RATE_MATCH = 1.25
 
 
+def seed_stability(d, chans, n_targets=3):
+    """
+    Rank agreement of unit attribution between seed s and seed 0 (robustness.npz): Spearman and top-10% Jaccard,
+    median over `chans`, then mean over seeds s > 0; each (n_targets,).
+    """
+    from scipy.stats import spearmanr
+    n = d['attr_seeds'].shape[0] - 1
+    rho, jac = np.full((n, n_targets), np.nan), np.full((n, n_targets), np.nan)
+    for s in range(1, n + 1):
+        for t in range(n_targets):
+            vals, js = [], []
+            for c in chans:
+                a, b = d['attr_seeds'][0, c, t], d['attr_seeds'][s, c, t]
+                ok = np.isfinite(a) & np.isfinite(b)
+                if ok.sum() > 10:
+                    vals.append(spearmanr(a[ok], b[ok])[0])
+                    k = max(1, int(0.1 * ok.sum()))
+                    ta, tb = set(np.argsort(-a[ok])[:k]), set(np.argsort(-b[ok])[:k])
+                    js.append(len(ta & tb) / len(ta | tb))
+            rho[s - 1, t], jac[s - 1, t] = np.nanmedian(vals) if vals else np.nan, np.nanmedian(js) if js else np.nan
+    return np.nanmean(rho, 0), np.nanmean(jac, 0)
+
+
 def robustness():
     """
     Seeds, fixed-size region subsamples and retrained ablation with seeds (experiments/robustness.py): test R2 spread over
@@ -1149,20 +1172,7 @@ def robustness():
             r2 = d['r2_seeds'][:, chans][..., :3]                                      # seeds x channels x targets
             out['r2_sd'] = np.nanmedian(np.nanstd(r2, 0), 0)
             out['r2_range'] = np.nanmedian(np.nanmax(r2, 0) - np.nanmin(r2, 0), 0)
-            rho, jac = np.full((d['attr_seeds'].shape[0] - 1, 3), np.nan), np.full((d['attr_seeds'].shape[0] - 1, 3), np.nan)
-            for s in range(1, d['attr_seeds'].shape[0]):
-                for t in range(3):
-                    vals, js = [], []
-                    for c in chans:
-                        a, b = d['attr_seeds'][0, c, t], d['attr_seeds'][s, c, t]
-                        ok = np.isfinite(a) & np.isfinite(b)
-                        if ok.sum() > 10:
-                            vals.append(spearmanr(a[ok], b[ok])[0])
-                            k = max(1, int(0.1 * ok.sum()))
-                            ta, tb = set(np.argsort(-a[ok])[:k]), set(np.argsort(-b[ok])[:k])
-                            js.append(len(ta & tb) / len(ta | tb))
-                    rho[s - 1, t], jac[s - 1, t] = np.nanmedian(vals) if vals else np.nan, np.nanmedian(js) if js else np.nan
-            out['rho'], out['jaccard'] = np.nanmean(rho, 0), np.nanmean(jac, 0)
+            out['rho'], out['jaccard'] = seed_stability(d, chans)
         if 'attr_sub' in d and len(d['sub_units']):
             groups = [str(g) for g in d['groups']]
             sub = np.nanmean(d['attr_sub'][:, chans][:, :, :3], 1)                     # draws x targets x units
