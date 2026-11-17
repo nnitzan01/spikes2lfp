@@ -4,6 +4,12 @@ import config
 import models
 
 
+def test_build_standard_is_config_architecture():
+    model = models.build_standard(input_size=7, device='cpu', seqlength=20)
+    expected = models.build_model(config.ARCHITECTURE, 7, 'cpu', seqlength=20)
+    assert type(model.model) is type(expected.model) and model.n_parameters() == expected.n_parameters()
+
+
 def test_build_lstm_matches_config_and_runs():
     model = models.build_lstm(input_size=7, device='cpu', seqlength=20)
     assert model.model.num_hidden == config.LSTM_KWARGS['num_hidden']

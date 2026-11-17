@@ -19,7 +19,8 @@ if [[ -f "${CONDA_PREFIX}/lib/libstdc++.so.6" ]]; then
 fi
 
 # AllenSDK cache directory (contains visual-behavior-neuropixels-0.4.0/).
-# Outputs are written to $SPIKES2LFP_DATA_ROOT/spikes2lfp_v2/ (first-version results stay in spikes2lfp/).
+# Outputs are written to $SPIKES2LFP_DATA_ROOT/spikes2lfp_v3/ (paths.OUTPUT_SUBDIR; the CNN-LSTM results of v2 stay in
+# spikes2lfp_v2/, read with SPIKES2LFP_OUTPUT=spikes2lfp_v2; first-version results in spikes2lfp/).
 export SPIKES2LFP_DATA_ROOT=/gpfs/data/buzsakilab/nitzan01/Allen2022
 
 # keep numpy/BLAS to the CPUs Slurm allocated

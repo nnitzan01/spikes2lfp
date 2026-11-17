@@ -5,7 +5,7 @@ usage:
     python run_session.py <data_root>/visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/<session_id>
                           [--stages train,plots,...] [--retrain] [--seeds N] [--ig-batch N] [--device cuda|cpu]
 
-Outputs go to <data_root>/spikes2lfp_v2/<kind>/<session_id>/ (see paths.py). Stages run in the order
+Outputs go to <data_root>/<paths.OUTPUT_SUBDIR>/<kind>/<session_id>/ (see paths.py). Stages run in the order
 below. Each one skips outputs that already exist, so an interrupted job can simply be resubmitted,
 and later stages load what earlier ones saved.
 
@@ -14,7 +14,7 @@ train | buffer | validation | buffer | test, with the test set the last 20%. Spi
 min-max scaled per unit and targets z-scored per channel and target, both with statistics from the
 training chunks only (variables/spike_scaler.npz, target_scaler.npz, split.npz, split.json).
 
-  train      one causal CNN-LSTM per VISp channel x model target x seed, trained on the training
+  train      one causal model (config.ARCHITECTURE) per VISp channel x model target x seed, trained on the training
              chunks; the epoch with the lowest validation loss is kept (models are loaded instead
              when all files exist, unless --retrain)
              models/     lstm_model_chan{c}_band{b}_seed{s}.pt
@@ -274,7 +274,7 @@ class SessionPipeline:
                 f = paths.model_file(self.dirs, chan, band, seed)
                 if not f.exists():
                     raise FileNotFoundError(f'{f} not found; run the train stage first')
-                model = models.build_lstm(len(self.session.units), self.device)
+                model = models.build_standard(len(self.session.units), self.device)
                 model.load_model(f)
                 loaded[chan, band] = model
         return loaded
@@ -284,7 +284,7 @@ class SessionPipeline:
         """Seed-0 models, used by the attribution stages."""
         return self.load_models(seed=0)
 
-    def fit_and_score(self, X, y, seed=0, num_epochs=config.NUM_EPOCHS, patience=config.PATIENCE, architecture='cnn_lstm'):
+    def fit_and_score(self, X, y, seed=0, num_epochs=config.NUM_EPOCHS, patience=config.PATIENCE, architecture=config.ARCHITECTURE):
         """
         Train the standard model (or another models.ARCHITECTURES) on inputs X (bins x features) for one
         target y (bins,) with this session's blocked split and validation-based epoch selection.
@@ -326,11 +326,11 @@ class SessionPipeline:
                     train_dl, val_dl, test_dl = (make_loader(X[part], y[part][..., chan:chan + 1], shuffle=(part == 'train'))
                                                  for part in ('train', 'val', 'test'))
                     if f.exists() and not self.retrain:
-                        model = models.build_lstm(input_size, self.device)
+                        model = models.build_standard(input_size, self.device)
                         history = model.load_model(f)
                     else:
                         torch.manual_seed(model_seed(seed, chan, band))    # before building: covers weight init too
-                        model = models.build_lstm(input_size, self.device)
+                        model = models.build_standard(input_size, self.device)
                         t0 = time.time()
                         loss_tr, loss_val = model.train(train_dl, val_dl, config.NUM_EPOCHS,
                                                         select_best=True, patience=config.PATIENCE)
@@ -361,7 +361,7 @@ class SessionPipeline:
         save_npy(out / 'losses_val.npy', losses['val'])
         save_npy(out / 'best_epoch.npy', best_epoch)
         save_text(out / 'model_info.json', json.dumps(dict(
-            architecture=config.LSTM_KWARGS, n_parameters=models.build_lstm(input_size, 'cpu').n_parameters(),
+            architecture=config.ARCHITECTURE, lstm_kwargs=config.LSTM_KWARGS, n_parameters=models.build_standard(input_size, 'cpu').n_parameters(),
             n_units=int(input_size), seeds=self.n_seeds, max_epochs=config.NUM_EPOCHS, patience=config.PATIENCE,
             batch_size=config.BATCH_SIZE), indent=2))
 

@@ -12,18 +12,24 @@ import config
 
 
 def build_lstm(input_size, device, seqlength=config.SEQLENGTH):
-    """The project's standard per-channel model (architecture in config.LSTM_KWARGS) on `device`, ready to train or load."""
+    """The CNN-LSTM (config.LSTM_KWARGS; the standard model of v2) on `device`, ready to train or load."""
     return process_model(LSTMnet(input_size, seqlength=seqlength, **config.LSTM_KWARGS).to(device),
                          torch.nn.MSELoss(), device)
 
 
 ARCHITECTURES = ['cnn_lstm', 'lstm', 'cnn']
+ARCHITECTURE_NAMES = {'cnn_lstm': 'CNN-LSTM', 'lstm': 'LSTM only', 'cnn': 'CNN'}
+
+
+def build_standard(input_size, device, seqlength=config.SEQLENGTH):
+    """The project's standard per-channel model (config.ARCHITECTURE) on `device`, ready to train or load."""
+    return build_model(config.ARCHITECTURE, input_size, device, seqlength)
 
 
 def build_model(architecture, input_size, device, seqlength=config.SEQLENGTH):
     """
-    'cnn_lstm' (the standard model, build_lstm), 'lstm' (the same without the conv front end) or 'cnn'
-    (CausalCNN: the same front end and dilated causal convolutions instead of the LSTM), ready to train.
+    'cnn_lstm' (build_lstm), 'lstm' (the same without the conv front end) or 'cnn' (CausalCNN: the same
+    front end and dilated causal convolutions instead of the LSTM; the standard model), ready to train.
     """
     if architecture == 'cnn_lstm':
         return build_lstm(input_size, device, seqlength)

@@ -4,15 +4,18 @@ Where inputs and outputs live.
 Data root = the AllenSDK S3 cache directory. Scripts are given a session directory inside it,
     <data_root>/visual-behavior-neuropixels-0.4.0/behavior_ecephys_sessions/<session_id>
 and write their results under
-    <data_root>/spikes2lfp_v2/{models,variables,attrs,plots}/<session_id>/
-(results of the first, published model version are under <data_root>/spikes2lfp/)
+    <data_root>/<OUTPUT_SUBDIR>/{models,variables,attrs,plots}/<session_id>/
+(results of the first, published model version are under <data_root>/spikes2lfp/, of the CNN-LSTM of v2
+under spikes2lfp_v2/)
 """
 import os
 from pathlib import Path
 from types import SimpleNamespace
 
 REPO_DIR = Path(__file__).resolve().parent
-OUTPUT_SUBDIR = 'spikes2lfp_v2'   # v2: causal CNN-LSTM, blocked splits, training-only scaling
+# v2: causal CNN-LSTM, blocked splits, training-only scaling; v3: the same with the causal CNN (config.ARCHITECTURE).
+# SPIKES2LFP_OUTPUT=spikes2lfp_v2 reads or writes the v2 results.
+OUTPUT_SUBDIR = os.environ.get('SPIKES2LFP_OUTPUT', 'spikes2lfp_v3')
 
 # Data root used by the notebooks; set SPIKES2LFP_DATA_ROOT to override (scripts take the
 # session directory on the command line instead).

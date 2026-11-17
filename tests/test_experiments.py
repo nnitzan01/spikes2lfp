@@ -1,6 +1,7 @@
 """The experiments run end to end on the synthetic session from conftest.py."""
 import numpy as np
 
+import config
 import paths
 from conftest import N_UNITS
 
@@ -120,11 +121,12 @@ def test_baselines(pipeline_module, session_dir):
     assert int(out['n_inputs_units_stimulus_behaviour']) == N_UNITS + 4 + 4
     out = baselines.run_lstm(pipeline, ['regions'])
     assert np.isfinite(out['r2_lstm_regions']).all()
-    out = baselines.run_arch(pipeline, ['cnn', 'lstm'], targets=[0])
-    for variant in ('cnn', 'lstm'):
+    out = baselines.run_arch(pipeline, baselines.ARCH_VARIANTS, targets=[0])
+    assert config.ARCHITECTURE not in baselines.ARCH_VARIANTS and len(baselines.ARCH_VARIANTS) == 2
+    for variant in baselines.ARCH_VARIANTS:
         assert np.isfinite(out[f'r2_arch_{variant}'][:, 0]).all() and np.isnan(out[f'r2_arch_{variant}'][:, 1]).all()
         assert int(out[f'n_params_arch_{variant}']) > 0
-    assert int(out['n_params_cnn_lstm']) > 0
+    assert int(out['n_params_standard']) > 0 and str(out['architecture']) == config.ARCHITECTURE
 
 
 def test_causal_cnn_is_causal():
@@ -211,7 +213,8 @@ def test_attribution_baseline(pipeline_module, session_dir, monkeypatch):
     n_ch = pipeline.n_channels
     assert out['r2_ablated'].shape == (2, len(ab.MEASURES), 2, n_ch, 9) and np.isfinite(out['r2_ablated'][..., 0]).all()
     assert out['mean_abs'].shape == (n_ch, 9, N_UNITS) and np.isfinite(out['mean_abs'][:, 0]).all()
-    assert (out['completeness'][:, 0] <= 0.01).all() or (out['n_steps'][:, 0] == 400).all()
+    # the refinement contract (IG_MAX_ERROR and IG_N_STEPS are lowered for the tests in conftest.py)
+    assert ((out['completeness'][:, 0] <= config.IG_MAX_ERROR) | (out['n_steps'][:, 0] == config.IG_MAX_STEPS)).all()
     assert out['r2_retrained'].shape == (len(ab.MEASURES), 1, 1, n_ch, 9)
     assert np.isfinite(out['spearman_zero_baseline'][:, 0]).all()
 

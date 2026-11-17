@@ -124,7 +124,7 @@ def inference_ablation(pipeline, masks, targets):
     return r2_full, r2_removed, r2_only
 
 
-def retrained_ablation(pipeline, masks, targets, regions, n_seeds, Z=None, architecture='cnn_lstm', channels=None):
+def retrained_ablation(pipeline, masks, targets, regions, n_seeds, Z=None, architecture=config.ARCHITECTURE, channels=None):
     """Retrained R2 on all units and without each region in `regions`, with covariates Z appended if given."""
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
     n_ch, n_tg = Y.shape[1], Y.shape[2]
@@ -151,7 +151,7 @@ def retrained_ablation(pipeline, masks, targets, regions, n_seeds, Z=None, archi
 
 
 def run(pipeline, targets=(0, 1, 2, 3, 4), retrain_targets=(0,), retrain_regions=None, retrain_seeds=1,
-        covariates=True, architecture='cnn_lstm', channels=None):
+        covariates=True, architecture=config.ARCHITECTURE, channels=None):
     masks = region_masks(pipeline.session.units['structure_acronym'].to_numpy().astype(str))
     retrain_regions = list(GLOBAL_REGIONS) + ['other'] if retrain_regions is None else list(retrain_regions)
     r2_full, r2_removed, r2_only = inference_ablation(pipeline, masks, list(targets))
@@ -177,7 +177,7 @@ def main():
     parser.add_argument('--retrain-seeds', type=int, default=1)
     parser.add_argument('--no-covariates', action='store_true', help='skip the retraining with covariates')
     parser.add_argument('--output', default='region_ablation', help='saved as variables/<session_id>/<output>.npz')
-    parser.add_argument('--architecture', default='cnn_lstm', help="retrained model: 'cnn_lstm' (standard), 'cnn' or 'lstm'")
+    parser.add_argument('--architecture', default=config.ARCHITECTURE, help="retrained model: 'cnn' (standard), 'cnn_lstm' or 'lstm'")
     parser.add_argument('--pooled-only', action='store_true', help='retrain only the pooled channels of the alignment table')
     args = parser.parse_args()
 

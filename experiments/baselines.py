@@ -1,5 +1,5 @@
 """
-Baselines for the CNN-LSTM (reviewers 1 and 3, comment 3): how well do simpler models predict the
+Baselines for the standard model (config.ARCHITECTURE) (reviewers 1 and 3, comment 3): how well do simpler models predict the
 same targets, on the same blocked split?
 
 Lagged ridge (analysis/lagged_ridge.py; RIDGE_HISTORY s of history on RIDGE_N_BASIS raised-cosine
@@ -12,12 +12,12 @@ lags, penalty chosen on the validation block) on these inputs:
                              linear stimulus-clock model
   behaviour                  running speed, pupil area, licks, rewards (z-scored)
   stimulus_behaviour, regions_stimulus_behaviour, units_stimulus_behaviour   combinations
-LSTM (the standard CNN-LSTM, fit_and_score) on:
+the standard model (fit_and_score) on:
   lstm_regions               population counts per area, min-max scaled with training statistics
   lstm_regions_behaviour     the same plus the behavioural covariates
   (--lstm-epochs sets their epoch cap, saved as epochs_lstm_<variant>; with region counts the model
   converges more slowly than with units: best epoch 34 of 40 on the timing session)
-Other architectures on the same inputs as the CNN-LSTM (every unit; --arch, --arch-targets):
+Other architectures on the same inputs as the standard model (every unit; --arch, --arch-targets):
   arch_cnn                   models.CausalCNN: the conv front end and dilated causal convolutions, no LSTM
   arch_lstm                  the LSTM without the conv front end
   (r2_arch_<variant>, and n_params_arch_<variant> / n_params_cnn_lstm, trainable parameters of one model)
@@ -28,7 +28,7 @@ usage (from the repo root):
 
 Needs the 'train' and 'covariates' stages. Saves variables/<session_id>/baselines.npz:
 r2_<variant> (channels x targets, test R2), alpha_<variant> (chosen penalty, ridge only),
-n_inputs_<variant>, and model_r2 (the session's CNN-LSTM, for reference).
+n_inputs_<variant>, and model_r2 (the session's standard model, for reference).
 """
 import argparse
 
@@ -46,7 +46,7 @@ from splits import chunk_bins
 RIDGE_VARIANTS = ['units_instant', 'units', 'regions', 'stimulus', 'behaviour', 'stimulus_behaviour',
                   'regions_stimulus_behaviour', 'units_stimulus_behaviour']
 LSTM_VARIANTS = ['regions', 'regions_behaviour']
-ARCH_VARIANTS = ['cnn', 'lstm']
+ARCH_VARIANTS = [a for a in models.ARCHITECTURES if a != config.ARCHITECTURE]   # the other architectures
 
 
 def region_counts(pipeline):
@@ -96,7 +96,7 @@ def run_ridge(pipeline, variants=RIDGE_VARIANTS):
 
 
 def lstm_inputs(pipeline, variant, train):
-    """inputs() for the CNN-LSTM, with region counts min-max scaled on the training bins like the unit inputs."""
+    """inputs() for the standard model, with region counts min-max scaled on the training bins like the unit inputs."""
     Z = inputs(pipeline, variant, train).astype(np.float32)
     if variant.startswith('regions'):
         n_regions = len(region_counts(pipeline)[1])
@@ -124,7 +124,8 @@ def run_lstm(pipeline, variants=LSTM_VARIANTS, targets=None, num_epochs=config.N
 
 def run_arch(pipeline, variants=ARCH_VARIANTS, targets=(0, 1, 2)):
     X, Y = pipeline.active_spikes.spkMat, pipeline.active_lfp.lfpMat
-    out = {'n_params_cnn_lstm': np.array(models.build_model('cnn_lstm', X.shape[1], 'cpu').n_parameters())}
+    out = {'n_params_standard': np.array(models.build_standard(X.shape[1], 'cpu').n_parameters()),
+           'architecture': np.array(config.ARCHITECTURE)}
     for variant in variants:
         r2 = np.full(Y.shape[1:], np.nan)
         for band in targets:

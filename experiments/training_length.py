@@ -1,6 +1,6 @@
 """
 Are the models undertrained? Most broadband models of the timing session keep their last epoch
-(NUM_EPOCHS = 15) with the validation loss still falling. This retrains the standard CNN-LSTM with
+(NUM_EPOCHS = 15) with the validation loss still falling. This retrains the standard model with
 a higher epoch cap (same patience, same split and seed) and compares test R2 with the saved models.
 
 Also measures the cost of the zero initial state: every 3 s sequence starts with an empty LSTM

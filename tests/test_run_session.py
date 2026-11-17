@@ -33,7 +33,7 @@ def test_all_stages(pipeline_module, session_dir):
     assert (t['sampled_test_recent_spikes'] <= t['sampled_test_spikes']).all()
     assert a['kernel_mean'].shape == (config.ATTR_HISTORY // config.LAG_KERNEL_BIN, N_UNITS)
     assert set(t['event_partition']) <= {'train', 'val', 'test', 'buffer'}
-    assert np.nanmax(np.load(dirs.attrs / 'attribution_completeness.npy')) < 0.05
+    assert np.nanmax(np.load(dirs.attrs / 'attribution_completeness.npy')) < 0.1     # 4 integration steps in the tests
 
     for s in ('train', 'test', 'active', 'spont', 'recent_train', 'recent_active', 'recent_spont'):
         u = np.load(dirs.attrs / f'unit_attribution_{s}.npz')

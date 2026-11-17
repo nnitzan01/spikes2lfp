@@ -24,7 +24,7 @@ The truth is counterfactual: a driver's contribution at a target is the change i
 its drive is set to 0 (or, for ig_mean, to its training mean), so it is defined for every condition
 (for 'linear' it is the drive itself).
 
-The standard CNN-LSTM is trained on the target (fit_and_score, the session's blocked split) and
+The standard model is trained on the target (fit_and_score, the session's blocked split) and
 the training-block targets are attributed (SequenceIG, zero and training-mean baselines). Every
 unit is scored by MEASURES:
   ig_zero, ig_zero_per_spike, ig_zero_recent   mean |attribution|, |attribution per spike| and mean

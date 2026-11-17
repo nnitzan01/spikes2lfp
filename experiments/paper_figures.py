@@ -5,7 +5,7 @@ saved results of all sessions (nothing is rerun). Panels whose inputs have not b
 Figure 1 is v1 Figure 1 (experimental design), unchanged.
 
   fig2  model and performance (v1 Figure 3 updated): example predictions of the current-bin and lagged linear models
-        and the CNN-LSTM, R2 by channel (active, passive), example band predictions, R2 by channel x band, R2 after
+        and the standard model, R2 by channel (active, passive), example band predictions, R2 by channel x band, R2 after
         smoothing against the time-shift null (panels A and D are the v1 schematics)
   fig3  the prediction follows single trials: linear baselines over sessions, stimulus clock, swapped and shifted spikes
   fig4  two sources: R2 lost per region and band (inference, retrained), per session, by depth, single visual areas
@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats as st
 
+import models as M
 import paths
 from analysis import stats
 from experiments import review_figures as rf
@@ -150,7 +151,7 @@ def overview():
     ax.set_title(f'{len(units)} units in {len(counts)} sessions, 48 mice (model inputs)', fontsize=9)
     ax = fig.add_subplot(g[2, 2:])
     letter(ax, 'e')
-    missing(ax, 'schematic: brain-wide spikes (4 ms bins, 3 s history) → causal CNN-LSTM → each VISp channel × target\n'
+    missing(ax, 'schematic: brain-wide spikes (4 ms bins, 3 s history) → causal CNN → each VISp channel × target\n'
                 'blocked split: train | validation | test (last 20%), 6 s buffers; attribution: history-aware IG, '
                 'region contributions: exact Shapley values (from v1 Fig. 1-2, redrawn)')
     save(fig, 'overview', 'Overview (not a main figure; Figure 1 is v1 Figure 1) | Predicting the laminar LFP of VISp from brain-wide spiking')
@@ -212,7 +213,7 @@ def fig2():
         y = d['target'][0, :, l4]
         for k, (name, pred, r2) in enumerate((('linear, current bin (v1)', d['ridge_instant'][0], b['r2_units_instant'][l4, 0]),
                                               ('linear, 1 s history', d['ridge_lagged'][0], b['r2_units'][l4, 0]),
-                                              ('CNN-LSTM', d['prediction'][0, :, l4], b['model_r2'][l4, 0]))):
+                                              (S.MODEL, d['prediction'][0, :, l4], b['model_r2'][l4, 0]))):
             off = -k * 6
             a.plot(t[seg], y[seg] + off, color='k', lw=0.7)
             a.plot(t[seg], pred[seg] + off, color='tab:red', lw=0.9)
@@ -312,7 +313,7 @@ def fig3():
     fig, ax = plt.subplots(2, 3, figsize=(18, 10))
     models = [('r2_units_instant', 'ridge,\ncurrent bin'), ('r2_units', 'ridge,\n1 s history'),
               ('r2_units_stimulus_behaviour', 'ridge 1 s +\nstim. + beh.'), ('r2_stimulus_behaviour', 'stimulus +\nbehaviour'),
-              ('r2_arch_lstm', 'LSTM only'), ('model_r2', 'CNN-LSTM'), ('r2_arch_cnn', 'CNN only')]
+              *[(f'r2_arch_{a}', M.ARCHITECTURE_NAMES[a]) for a in S.OTHER_ARCHITECTURES], ('model_r2', S.MODEL)]
     b = per_session('baselines', lambda d, ch: {k: S.channel_median(d[k], ch)[:3] for k, _ in models if k in d})
     a = ax[0, 0]
     letter(a, 'a')
@@ -330,7 +331,7 @@ def fig3():
     a.axhline(0, color='k', lw=0.5)
     a.set_xticks(range(3), BANDS[:3])
     a.set_ylim(-0.15, 0.3)
-    a.set_ylabel('CNN-LSTM − ridge with 1 s history')
+    a.set_ylabel(f'{S.MODEL} − ridge with 1 s history')
     a.set_title('nonlinear gain: small but in 75-90% of sessions', fontsize=9)
     keys = [('r2_model', 'model'), ('r2_template', 'stimulus\nclock'), ('r2_shuffle', 'spikes from another\npresentation'),
             ('r2_shift', 'spikes shifted\n30-120 s')]

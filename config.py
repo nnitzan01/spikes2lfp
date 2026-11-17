@@ -2,7 +2,7 @@
 Settings shared by the spikes -> LFP pipeline, experiments and notebooks.
 
 Change values here rather than in individual scripts. Models saved with one LSTM configuration
-cannot be loaded with another, so LSTM_KWARGS must match the models on disk.
+cannot be loaded with another, so ARCHITECTURE and its settings must match the models on disk.
 """
 
 # --- Data -------------------------------------------------------------------------------
@@ -17,7 +17,10 @@ N_TARGETS = len(BANDS) + 1
 
 # --- Model and training -----------------------------------------------------------------
 SEQLENGTH = 750                         # bins per sequence (3 s); also the train/test chunk size
-# causal CNN-LSTM: Conv1d over time (16 filters, kernel 3 = the current and 2 previous bins)
+# The standard model (models.ARCHITECTURES): 'cnn' since v3, the causal CNN (models.CausalCNN: the Conv1d front end,
+# then residual dilated causal convolutions, 4 s receptive field), which beat the CNN-LSTM of v2 in 89/89 sessions.
+ARCHITECTURE = 'cnn'
+# CNN-LSTM (v2) and the CNN's front end: Conv1d over time (16 filters, kernel 3 = the current and 2 previous bins)
 # -> LSTM (50 units) -> linear readout at every time step
 LSTM_KWARGS = dict(num_hidden=50, num_layers=1, conv=True, kernel_size=3, out_channels=16)
 NUM_EPOCHS = 15                         # maximum; the epoch with the lowest validation loss is kept

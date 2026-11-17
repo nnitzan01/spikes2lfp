@@ -46,19 +46,19 @@ def check_gpu():
     report(True, f'GPU {torch.cuda.get_device_name(0)}, torch {torch.__version__}, CUDA {torch.version.cuda}, '
                  f'cuDNN {cudnn}')
 
-    # the exact GPU code path of the pipeline: causal CNN-LSTM training step and SequenceIG
-    # (cuDNN RNN backward with the recurrent layer in train mode and the rest in eval mode)
+    # the exact GPU code path of the pipeline: a training step of the standard model and SequenceIG
     import config
     import models
     from integrated_gradients import SequenceIG
     torch.manual_seed(0)
     device = torch.device('cuda')
-    model = models.build_lstm(300, device)
+    model = models.build_standard(300, device)
     x = (torch.rand(8, config.SEQLENGTH, 300, device=device) < 0.02).float()
     model.model.train()
-    out, _ = model.model(x)
+    out = model.model(x)
+    out = out[0] if isinstance(out, tuple) else out          # recurrent models also return their state
     out.mean().backward()
-    report(True, f'CNN-LSTM forward/backward on GPU ({model.n_parameters()} parameters for 300 units)')
+    report(True, f'{config.ARCHITECTURE} forward/backward on GPU ({model.n_parameters()} parameters for 300 units)')
 
     t0 = time.time()
     attr, f_x, f_b, delta = SequenceIG(model.model, n_steps=config.IG_N_STEPS).attribute(x)

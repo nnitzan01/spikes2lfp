@@ -8,7 +8,7 @@ usage (on the cluster, from the repo root, after `source cluster/env.sh`):
     python -m experiments.review_figures [baselines stimulus_clock ...]      # default: all
 
 Saves <data root>/spikes2lfp_v2/figures_review/<name>.png:
-    baselines            CNN-LSTM vs ridge and stimulus / behaviour models (test R2)
+    baselines            standard model vs ridge and stimulus / behaviour models (test R2)
     stimulus_clock       model vs stimulus-clock template, spikes swapped between presentations, time-shifted
     unit_ranking         R2 lost when the top units by each measure are removed (inference and retrained)
     simulation           ground-truth simulation: drivers found by attribution vs ridge weight and the rest
@@ -103,7 +103,7 @@ def on_grid(values, rel, half=S.DEPTH_HALF_WIDTH):
 
 BASELINE_MODELS = [('r2_units_instant', 'ridge, current bin'), ('r2_units', 'ridge, 1 s history'),
                    ('r2_units_stimulus_behaviour', 'ridge, 1 s + stim. + beh.'), ('r2_regions', 'ridge, region counts'),
-                   ('r2_stimulus_behaviour', 'stimulus + behaviour'), ('model_r2', 'CNN-LSTM')]
+                   ('r2_stimulus_behaviour', 'stimulus + behaviour'), ('model_r2', S.MODEL)]
 
 
 def baselines():
@@ -121,10 +121,10 @@ def baselines():
         ax[1, t].set_xlim(left=-0.3)
         ax[1, t].set_ylim(bottom=-0.3)
         ax[1, t].set_xlabel('ridge, 1 s history (axes clipped at -0.3)')
-        ax[1, t].set_ylabel('CNN-LSTM')
-        ax[1, t].set_title(f'{BANDS[t]}: CNN-LSTM − ridge {np.nanmedian(y - x):+.3f}, higher in {np.sum(y > x)}/{len(x)}', fontsize=9)
+        ax[1, t].set_ylabel(S.MODEL)
+        ax[1, t].set_title(f'{BANDS[t]}: {S.MODEL} − ridge {np.nanmedian(y - x):+.3f}, higher in {np.sum(y > x)}/{len(x)}', fontsize=9)
     save(fig, 'baselines', f'Baselines ({len(rows)} sessions): history is most of the gain over the v1 linear model; '
-                           'the CNN-LSTM is a little but consistently better')
+                           f'the {S.MODEL} is consistently better')
 
 
 CLOCK_KEYS = [('r2_model', 'model'), ('r2_template', 'stimulus clock\n(template)'),
@@ -225,7 +225,7 @@ def simulation():
     ax[2].set_xlim(-0.5, 0.8)
     ax[2].set_ylim(-0.5, 0.8)
     ax[2].set_xlabel('ridge test R² (axes clipped at -0.5)')
-    ax[2].set_ylabel('CNN-LSTM test R²')
+    ax[2].set_ylabel(f'{S.MODEL} test R²')
     ax[0].legend(fontsize=7)
     for i, c in enumerate(conditions):
         for j, m in enumerate(shown):

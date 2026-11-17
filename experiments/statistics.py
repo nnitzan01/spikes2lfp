@@ -73,7 +73,7 @@ def claims():
 
     b = per_session('baselines', lambda d, ch: S.channel_median(d['model_r2'], ch)[:3] - S.channel_median(d['r2_units'], ch)[:3])
     for t in range(3):
-        add('prediction', f'CNN-LSTM - lagged unit ridge R2, {S.TARGET_NAMES[t]}', {s: v[t] for s, v in b.items()})
+        add('prediction', f'{S.MODEL} - lagged unit ridge R2, {S.TARGET_NAMES[t]}', {s: v[t] for s, v in b.items()})
     b = per_session('baselines', lambda d, ch: S.channel_median(d['r2_units'], ch)[:3] - S.channel_median(d['r2_units_instant'], ch)[:3])
     add('prediction', 'lagged - current-bin ridge R2 (history), broadband', {s: v[0] for s, v in b.items()})
     c = per_session('stimulus_clock', lambda d, ch: dict(

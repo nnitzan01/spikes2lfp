@@ -22,8 +22,12 @@ from scipy.ndimage import uniform_filter1d
 from scipy.stats import wilcoxon
 
 import config
+import models
 import paths
 from experiments.pool_sessions import ALIGNMENT_TABLE
+
+MODEL = models.ARCHITECTURE_NAMES[config.ARCHITECTURE]            # the standard model's name in printouts and figures
+OTHER_ARCHITECTURES = [a for a in models.ARCHITECTURES if a != config.ARCHITECTURE]
 
 TARGET_NAMES = ['broadband', '0.5-4 Hz', '4-8 Hz', '8-12 Hz', '12-25 Hz']
 np.set_printoptions(precision=3, suppress=True, linewidth=160)
@@ -189,10 +193,10 @@ def paired(diff):
 
 def baselines():
     keys = ['model_r2', 'r2_units', 'r2_units_instant', 'r2_regions', 'r2_stimulus_behaviour',
-            'r2_regions_stimulus_behaviour', 'r2_units_stimulus_behaviour', 'r2_lstm_regions', 'r2_arch_cnn', 'r2_arch_lstm']
+            'r2_regions_stimulus_behaviour', 'r2_units_stimulus_behaviour', 'r2_lstm_regions'] + [f'r2_arch_{a}' for a in OTHER_ARCHITECTURES]
     rows = over_sessions('baselines', lambda d, ch: {**{k: channel_median(d[k], ch)[:3] for k in keys if k in d},
                                                     **{k: float(d[k]) for k in d.files if k.startswith('n_params')}})
-    params = {k: np.median([r[k] for r in rows.values() if k in r]) for k in ('n_params_cnn_lstm', 'n_params_arch_cnn', 'n_params_arch_lstm')
+    params = {k: np.median([r[k] for r in rows.values() if k in r]) for k in ['n_params_standard'] + [f'n_params_arch_{a}' for a in OTHER_ARCHITECTURES]
               if any(k in r for r in rows.values())}
     if params:
         print('trainable parameters per model (median over sessions): ' + ', '.join(f'{k[9:]} {v:.0f}' for k, v in params.items()))
@@ -201,7 +205,7 @@ def baselines():
         v = np.array([r[k] for r in rows.values() if k in r])
         if len(v):
             print(f'  {k:32s} {np.median(v, axis=0)}  (n = {len(v)})')
-    print('CNN-LSTM minus each ridge, per session (median over sessions; sessions where the CNN-LSTM is higher; Wilcoxon p):')
+    print(f'{MODEL} minus each baseline, per session (median over sessions; sessions where the {MODEL} is higher; Wilcoxon p):')
     for k in keys[1:]:
         both = [r for r in rows.values() if k in r and 'model_r2' in r]
         if both:
