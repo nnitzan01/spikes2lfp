@@ -855,6 +855,7 @@ paired difference from ridge weight, and sessions where the measure is best of t
   measure for the descriptive maps.
 - Layer-controlled cluster decoder tabled (supplementary at most).
 - **Standard model is the causal CNN (2026-11-17, v3).** It beat the CNN-LSTM in 89/89 sessions on all three tested targets (broadband +0.051, 0.5-4 Hz +0.126, 4-8 Hz +0.087 median R2; smallest per-session gains +0.021 / +0.011 / +0.001; better on 99 / 94 / 95% of session-channels). `config.ARCHITECTURE = 'cnn'`, outputs in `spikes2lfp_v3/`; the CNN-LSTM results stay in `spikes2lfp_v2/` (`SPIKES2LFP_OUTPUT=spikes2lfp_v2`). Every session and every downstream analysis is rerun on v3; the CNN-LSTM becomes the baseline.
+- **A biological claim must be model independent (2026-11-18).** The band half of the region dissociation held for the CNN-LSTM and not for the CNN, so a claim counts only if it holds for the CNN (v3) and the CNN-LSTM (v2), and where possible for lagged ridge and a model-free measure (spike-LFP coupling, coherence; units.csv). Every claim in the paper states which of these it was tested on.
 
 ### Open
 - **Figure 6 is not in the repo:** it was made in MATLAB outside this codebase. Reviewer 3 asks only
