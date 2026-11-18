@@ -882,6 +882,12 @@ paired difference from ridge weight, and sessions where the measure is best of t
   Proposed final run: LFP-like, 4 conditions (linear, nonlinear_arousal, gain, burst), 10 draws,
   3 sessions (`simulation_final_<condition>`, submitted 2026-11-10); `summarize simulation` pools it.
 - Region-count CNN-LSTM: slow convergence (above). Rerun with `--lstm-epochs 60 --lstm-targets 0,1,2`.
+- **Biological insights (2026-11-18):** the VISp-broadband vs other-visual-envelopes dissociation does not
+  hold with the CNN (change log 2026-11-18). It was not in v1, so nothing is retracted, but the paper
+  needs other biological findings. Decide how to proceed once the full v3 run (job 29819902) is done,
+  expected early in the week of 2026-11-23. Candidates: CNN population modes (front-end SVD, region
+  specificity), timescale ablation of the dilated blocks, VISp layer and cell-type structure of the top
+  units on v3, the DG/CA1 fast-spiking state signal (Fig. S3C).
 
 ---
 
