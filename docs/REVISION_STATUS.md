@@ -5,7 +5,7 @@ field potentials in the visual cortex* (Nitzan, Ji & Buzsáki; Nature Communicat
 review). It is updated as each analysis is built, run and reviewed; the change log at the end
 records what changed when.
 
-Last updated: 2026-11-16.
+Last updated: 2026-11-24.
 
 ---
 
@@ -835,6 +835,69 @@ paired difference from ridge weight, and sessions where the measure is best of t
   contribution is to the broadband signal only (faster components?); see the depth analysis (open).
 - Covariates add 0.001 to the full model; visual cortex carries the prediction (VISp alone 0.385).
 
+### Model-independence checks of the biological candidates (`biology_checks`, `state_ridge`; 89 sessions, 2026-11-24)
+CNN = v3, CNN-LSTM = v2, ridge = causal lagged ridge on all units at the layer 4 channel (exact Shapley
+split by region; test R² median 0.58 broadband, 0.35 at 0.5–4 Hz), model free = correlation of a
+region's population rate (causal 0.25 s boxcar) with the recorded LFP. Mouse-level Wilcoxon (48 mice;
+41 with both days for novelty).
+
+**1. Midbrain 0.5–4 Hz contribution falls with running and arousal: holds in all three models, not in the
+model-free correlation.** Share of the layer 4 prediction, running deciles 7–9 minus 0–2:
+
+| | CNN | CNN-LSTM | ridge | model free (rate–LFP corr.) |
+|---|---|---|---|---|
+| Midbrain, running, 0.5–4 Hz | 0.126 → 0.028 (2/48 up, p 5e-9) | 0.122 → 0.037 (p 3e-8) | 0.127 → 0.064 (p 3e-8) | 0.115 → 0.101 (p 0.1) |
+| Midbrain, pupil, 0.5–4 Hz | 0.107 → 0.061 (p 1e-7) | 0.112 → 0.072 (p 1e-6) | 0.125 → 0.072 (p 1e-6) | 0.158 → 0.098 (p 0.2) |
+| VISp, running, 0.5–4 Hz | 0.393 → 0.451 (p 7e-14) | 0.289 → 0.380 (p 6e-10) | 0.266 → 0.341 (p 2e-11) | 0.360 → 0.370 (p 1) |
+| Midbrain, running, broadband | 0.041 → 0.021 (p 1e-8) | 0.043 → 0.025 (p 6e-7) | 0.065 → 0.031 (p 7e-9) | −0.047 → −0.082 (p 5e-4) |
+
+- The absolute covariance shows it is not only a renormalization: running lowers every region's
+  covariance with the prediction (the slow LFP is smaller), but the midbrain's falls 5–8 fold
+  (CNN 0.096 → 0.012) against 1.5 fold for VISp and other visual cortex; the ridge gives the same.
+- The model-free correlation of the midbrain rate with the 0.5–4 Hz envelope barely changes with
+  state. So the midbrain's *unique* share (what the models credit to it given everything else)
+  falls, while its raw co-variation with the LFP does not: during running the midbrain signal becomes
+  redundant with visual cortex (both track locomotion), or is credited to it. Claim wording: "the
+  models' attribution to the midbrain is state dependent", not "the midbrain drives slow LFP at rest".
+- Hippocampus by running is the only region whose model-free broadband correlation changes strongly
+  (−0.081 → −0.011, 45/48 mice, p 4e-13), while its model shares barely move.
+
+![state](figures/state_midbrain.png)
+
+**2. Smaller hippocampal contribution on the novel day: survives the unit-count and firing-rate
+controls in both models; partly explained by smaller event-locked hippocampal firing (model free).**
+Same mouse, images shown on both days (`image_shared`, `change_shared`, `passive_image_shared`).
+- Day-to-day differences in the recording: hippocampal units 212 → 179 (median; p 0.1), total
+  hippocampal rate lower on the novel day (p 8e-3), mean rate per unit unchanged (p 0.07).
+- Control: log10(novel / familiar contribution) regressed on log unit-count ratio and log mean-rate
+  ratio; the intercept is the change at equal counts and rates. Broadband, late window (100–250 ms):
+  image_shared CNN −0.23 (p 3e-4), CNN-LSTM −0.20 (p 5e-3); change_shared −0.20 (p 2e-4) and −0.20
+  (p 8e-5); passive replay −0.18 (p 4e-3) and −0.15 (p 0.03). About 35% smaller.
+- Mice whose unit count changes by < 1.5× (32 mice): same effect (e.g. change_shared late CNN 5/32
+  mice up, p 7e-6; CNN-LSTM 4/32, p 8e-5).
+- Model free: the event-locked hippocampal firing is itself smaller on the novel day (change_shared
+  late, per unit p 4e-5; image_shared late, population p 1e-3), and dividing the contribution by it
+  removes the change_shared effect (p 0.2–0.3) but not the image_shared early / post-window effect
+  (p 1e-2 to 7e-4). Hippocampal 2–5 Hz spike–LFP coherence is slightly lower on the novel day (p 2e-4).
+- Only broadband: at 0.5–4 Hz there is no consistent change (except change_shared late, p 2e-3 / 0.02).
+- Reading: on the novel day the hippocampus responds less to the shared images and contributes less
+  to the visual cortical LFP; the models agree, and the drop is not a sampling artefact. Not yet
+  checked with the ridge (next: run `state_ridge`-style event contributions, or the region_events
+  ridge variant).
+
+![novelty](figures/novelty_hippocampus.png)
+
+**3. Other candidates, both models** (overview figure):
+- Region removal at inference, VISp minus other visual cortex (fraction of R² lost): broadband CNN
+  +0.35 (42/48 mice, p 8e-12), CNN-LSTM +0.33 (p 6e-12); 8–12 Hz −0.43 and −0.33; 12–25 Hz −0.28 and
+  −0.32; 4–8 Hz −0.18 (p 1e-3) and −0.30. 0.5–4 Hz differs between models (CNN +0.01 n.s.).
+- Layer 4 fraction of the region-driven CSD (image, late): VISp 0.44 / 0.49 vs other visual 0.25 /
+  0.29 (p 1e-7 / 4e-7).
+- Hippocampal share of the hit − miss difference (broadband, late): median 0.13 (CNN) and 0.16
+  (CNN-LSTM), 88 sessions.
+
+![overview](figures/candidates_overview.png)
+
 ---
 
 ## 5. Open issues and decisions
@@ -891,6 +954,10 @@ paired difference from ridge weight, and sessions where the measure is best of t
   units on v3, the DG/CA1 fast-spiking state signal (Fig. S3C). Update 2026-11-24 (change log): five
   candidates hold in both models, including two new ones (midbrain slow-band contribution by state;
   smaller hippocampal contribution on the novel day); each still needs ridge / model-free checks.
+  Update 2026-11-24, checks (section 4, "Model-independence checks"): the midbrain state effect holds
+  in CNN, CNN-LSTM and ridge but not in the model-free rate–LFP correlation (an attribution claim, not
+  a raw-coupling claim); the novelty effect survives unit-count and rate controls in both models and
+  follows a model-free drop in event-locked hippocampal firing; ridge check of novelty still to do.
 
 ---
 
@@ -908,6 +975,10 @@ paired difference from ridge weight, and sessions where the measure is best of t
 ---
 
 ## 7. Change log
+- **2026-11-24** **Model-independence checks** (`experiments/state_ridge.py`, CPU array 30166340, 89
+  sessions; `experiments/biology_checks.py`, jobs 30162156 and 30167706). Results and figures
+  (`docs/figures/`) in section 4. Midbrain state effect: CNN, CNN-LSTM and ridge agree, model-free
+  correlation does not. Novelty: survives unit-count / rate controls in both models.
 - **2026-11-24** **Completed v3 experiments summarized next to v2** (`summarize` on both trees, CPU job 30161062; ranked_ablation, attribution_baseline, region_clock, robustness still running). Medians over 89 sessions, CNN (v3) vs CNN-LSTM (v2); "both" = holds in both models.
   - *Baselines:* the CNN beats lagged unit ridge by +0.080 / +0.161 / +0.142 (broadband / 0.5-4 / 4-8 Hz; 87-89/89 sessions), vs +0.027 / +0.028 / +0.042 for the CNN-LSTM; it beats the region-rate, stimulus+behaviour and instantaneous baselines in both. Exception: the region-rate LSTM ties the CNN at 4-8 Hz (-0.007, 41/89). (v2 `baselines.npz` predates `--arch all`, so its CNN-LSTM/LSTM rows are not comparable.)
   - *Stimulus clock:* spikes beat the stimulus template in all bands, both (CNN +0.30 / +0.26 / +0.22, CNN-LSTM +0.25 / +0.12 / +0.12); template / model 0.57 / 0.49 / 0.45 vs 0.61 / 0.67 / 0.60. Adding the template to the spikes adds about 0 to the CNN (+0.003 to +0.013) and +0.03 to the CNN-LSTM's slow bands: the CNN already captures the stimulus-locked part.
