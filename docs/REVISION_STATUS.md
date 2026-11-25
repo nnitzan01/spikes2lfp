@@ -5,7 +5,7 @@ field potentials in the visual cortex* (Nitzan, Ji & Buzsáki; Nature Communicat
 review). It is updated as each analysis is built, run and reviewed; the change log at the end
 records what changed when.
 
-Last updated: 2026-11-24.
+Last updated: 2026-11-25.
 
 ---
 
@@ -898,6 +898,52 @@ Same mouse, images shown on both days (`image_shared`, `change_shared`, `passive
 
 ![overview](figures/candidates_overview.png)
 
+**4. Predictability by behavioural state** (`biology_checks predictability`, 2026-11-25; prompted by Raglio et
+al. 2026, below). R² and r of the layer 4 prediction on held-out bins (active-epoch test bins; passive
+replay), per running / pupil decile; deciles 7–9 minus 0–2, per mouse.
+
+| | CNN | CNN-LSTM | ridge |
+|---|---|---|---|
+| 0.5–4 Hz r, running (active test) | 0.66 → 0.72 (p 1e-3) | 0.59 → 0.65 (p 2e-3) | 0.58 → 0.63 (p 6e-4) |
+| 0.5–4 Hz r, running (passive) | 0.63 → 0.66 (p 1e-8) | 0.53 → 0.60 (p 2e-8) | 0.47 → 0.54 (p 2e-7) |
+| broadband R², running (active test) | 0.68 → 0.63 (p 2e-5) | 0.61 → 0.58 (p 1e-3) | 0.60 → 0.56 (p 1e-4) |
+| recorded variance, running (z units) | 0.5–4 Hz 1.82 → 1.02 (p 6e-12); broadband 1.40 → 1.05 (p 3e-10) | | |
+
+- All three models agree: when the mouse runs, the slow (0.5–4 Hz) envelope gets smaller but *more*
+  predictable from spikes; broadband gets slightly less predictable (−0.02 to −0.03 R²). The least
+  predictable slow LFP is in the stillest decile, where it is largest (figure, first decile), and at both
+  pupil extremes (inverted U, clearest in the passive replay: CNN 0.5–4 Hz R² 0.24 → 0.35, p 1e-7).
+- So within wakefulness, more slow power does not mean more predictable, unlike anesthesia vs wake in
+  Raglio et al. A candidate reading: during quiet stillness part of the slow LFP comes from sources the
+  recorded spikes do not reflect (e.g. volume-conducted or unsampled inputs), while running-related slow
+  fluctuations are carried by the recorded population. Check before claiming: the stillest decile pools
+  many bins at zero speed; hippocampal sharp waves / quiet-state events at layer 4.
+
+![predictability](figures/predictability_state.png)
+
+**Related work: Raglio et al. 2026, iScience 29:118219** ("Predicting local field potentials from spiking
+activity reveals state-dependent cortical dynamics"). Two macaques, Utah arrays in PFc and PMc, one session
+each through wake, ketamine–dexmedetomidine anesthesia and awakening; LFP predicted from 345 ms of past MUA
+(200–1500 Hz power) of all channels with an unregularized linear filter (pseudoinverse), 200 s train /
+50 s test, Pearson r. Findings: anesthesia most predictable (r ≈ 0.8), wake least (≈ 0.1–0.3), awakening
+intermediate; kernel dimensionality the reverse; weights decay with distance; PMc → PFc better than the
+reverse; an adaptation signature after Up → Down transitions captured within but not across areas. They
+argue linear models suffice and blame low wake predictability on unrecorded inputs.
+- Overlap: causal spike → LFP prediction, state dependence, cross-area prediction, linear vs nonlinear.
+- Where we are stronger: 89 sessions / 48 mice with mouse-level statistics (theirs n = 2, channels as n);
+  sorted units brain-wide and layer-specific targets; spike bleed-through control (their MUA and LFP are
+  from the same electrode, so the self-weight maximum may be contamination); regularized, cross-validated
+  fits scored by R²; exact attribution instead of reading collinear kernel weights; band-specific targets,
+  stimulus-clock and covariate controls; a direct linear-vs-nonlinear test (CNN beats ridge by +0.08 /
+  +0.16 R², the CNN-LSTM by less).
+- Our data answer two of their open points: (1) recording brain-wide adds little in awake mice
+  (subcortical groups ≤ 0.01 R², except hippocampus broadband), so "unrecorded inputs" is not the main limit
+  on awake predictability; (2) within wakefulness, predictability of the slow band rises with arousal
+  (item 4), the opposite of their synchronized-is-predictable trend across anesthesia.
+- Cite in the introduction / discussion and in the response if reviewers raise state dependence or linear
+  models. Possible follow-ups: ridge lag kernels by region (their adaptation point), cross-area prediction
+  where a second visual-area probe has usable LFP.
+
 ---
 
 ## 5. Open issues and decisions
@@ -975,6 +1021,9 @@ Same mouse, images shown on both days (`image_shared`, `change_shared`, `passive
 ---
 
 ## 7. Change log
+- **2026-11-25** **Predictability by state** (`biology_checks predictability`, job 30192271) and a summary
+  of Raglio et al. 2026 (iScience) in section 4: the slow band is more predictable when running in all
+  three models, unlike their anesthesia-vs-wake trend.
 - **2026-11-24** **Model-independence checks** (`experiments/state_ridge.py`, CPU array 30166340, 89
   sessions; `experiments/biology_checks.py`, jobs 30162156 and 30167706). Results and figures
   (`docs/figures/`) in section 4. Midbrain state effect: CNN, CNN-LSTM and ridge agree, model-free

@@ -7,6 +7,8 @@ level (analysis/stats.wilcoxon_mice). Figures go to --figures (default docs/figu
                the absolute Cov(c_g, p) by running and pupil decile for the CNN and the CNN-LSTM (region_events.npz),
                the same for the lagged ridge, and the model-free correlation of each group's population rate with the
                target (state_ridge.npz, spikes2lfp_v3)
+    predictability  held-out R2 and r of the layer 4 prediction (CNN, CNN-LSTM, ridge) by running and pupil decile,
+               active test bins and passive replay, with the recorded variance (cf. Raglio et al. 2026)
     novelty    the hippocampal contribution to the responses to the shared images, novel minus familiar day of the
                same mouse, against the day-to-day change in hippocampal unit count, firing rate (tables/units_info.csv)
                and event-locked firing (explore_task.npz eta_pop); per-unit normalisations; a regression of the log
@@ -15,7 +17,7 @@ level (analysis/stats.wilcoxon_mice). Figures go to --figures (default docs/figu
                at inference by band (region_ablation.npz), the layer 4 fraction of the VISp- and other-visual-driven
                CSD (region_events.npz), and the hippocampal share of the hit-minus-miss difference
 
-    python -m experiments.biology_checks state | novelty | overview | all [--figures docs/figures]
+    python -m experiments.biology_checks state | predictability | novelty | overview | all [--figures docs/figures]
 """
 import argparse
 from pathlib import Path
@@ -159,6 +161,82 @@ def state_figure(sources, out):
     fig.savefig(out / 'state_midbrain.png', dpi=120)
     plt.close(fig)
     print(f'figure: {out / "state_midbrain.png"}')
+
+
+# ---- predictability by state --------------------------------------------------------------------
+
+def fit_curves(d, stats_key, l4=True, epoch='active_test'):
+    """(vars running/pupil) x levels x (R2, r, Var(y)) x targets of the prediction p against the target y."""
+    names, V, E = [str(n) for n in d['stat_names']], [str(v) for v in d['state_vars']], [str(e) for e in d['state_epochs']]
+    st = d[stats_key]
+    if l4:
+        st = st[..., int(d['layer4_channel']), :][..., [int(t) for t in d['targets']]]
+    col = {k: i for i, k in enumerate(names)}
+    out = np.full((2, 10, 3, st.shape[-1]), np.nan)
+    for i, var in enumerate(('running', 'pupil')):
+        s = st[E.index(epoch), V.index(var)]                                         # levels x stats x targets
+        n = s[:, col['n']]
+        with np.errstate(invalid='ignore', divide='ignore'):
+            n = np.where(n > 0, n, np.nan)
+            vy = s[:, col['yy']] / n - (s[:, col['y']] / n) ** 2
+            vp = s[:, col['pp']] / n - (s[:, col['p']] / n) ** 2
+            cov = s[:, col['yp']] / n - s[:, col['y']] / n * s[:, col['p']] / n
+            mse = (s[:, col['yy']] - 2 * s[:, col['yp']] + s[:, col['pp']]) / n
+            out[i, :, 0] = 1 - mse / vy
+            out[i, :, 1] = cov / np.sqrt(vy * vp)
+            out[i, :, 2] = vy
+    return out
+
+
+def predictability(out):
+    """How well each model predicts the layer 4 LFP within running / pupil deciles (cf. Raglio et al. 2026, anesthesia
+    vs wake): held-out R2 and r on the active epoch's test bins and on the passive replay, and the target variance."""
+    print('=== predictability: layer 4 prediction by running / pupil decile (R2, r; target variance in z units)')
+    sources = {}
+    for epoch in ('active_test', 'passive'):
+        for model, tree in TREES.items():
+            sources[(model, epoch)] = {sid: fit_curves(d, 'state_stats', epoch=epoch) for sid, d in load(tree, 'region_events').items()}
+        sources[('ridge', epoch)] = {sid: fit_curves(d, 'ridge_stats', l4=False, epoch=epoch)
+                                     for sid, d in load(TREES['CNN'], 'state_ridge').items()}
+    for (name, epoch), rows in sources.items():
+        sids = np.array(list(rows))
+        c = np.stack(list(rows.values()))                                     # sessions x vars x levels x 3 x targets
+        print(f'--- {name}, {epoch} ({len(sids)} sessions): deciles {HIGH} minus {LOW}, per mouse')
+        for i, var in enumerate(('running', 'pupil')):
+            for j, tn in TARGETS.items():
+                for m, mn in enumerate(('R2', 'r', 'Var(y)')):
+                    if mn == 'Var(y)' and name != 'CNN':
+                        continue
+                    hi, lo = np.nanmean(c[:, i, list(HIGH), m, j], 1), np.nanmean(c[:, i, list(LOW), m, j], 1)
+                    print(f'  {var:8s} {tn:10s} {mn:7s} {np.nanmedian(lo):.3f} -> {np.nanmedian(hi):.3f}  diff {mouse_test(hi - lo, sids)}')
+    fig, ax = plt.subplots(2, 2 * len(TARGETS) + len(TARGETS), figsize=(16, 6), squeeze=False)
+    colors = {'CNN': 'tab:blue', 'CNN-LSTM': 'tab:orange', 'ridge': 'tab:green'}
+    for i, var in enumerate(('running', 'pupil')):
+        for j, tn in TARGETS.items():
+            for e, epoch in enumerate(('active_test', 'passive')):
+                a = ax[i, 2 * j + e]
+                for name in colors:
+                    c = np.stack(list(sources[(name, epoch)].values()))[:, i, :, 0, j]
+                    ok = np.isfinite(c).all(1)
+                    a.plot(np.arange(10), np.median(c[ok], 0), color=colors[name], label=name)
+                    a.fill_between(np.arange(10), *np.percentile(c[ok], [25, 75], 0), color=colors[name], alpha=0.12, lw=0)
+                a.set_title(f'R2, {tn}, {epoch}\nby {var} decile', fontsize=8)
+            c = np.stack(list(sources[('CNN', 'active_test')].values()))[:, i, :, 2, j]
+            ok = np.isfinite(c).all(1)
+            a = ax[i, 2 * len(TARGETS) + j]
+            a.plot(np.arange(10), np.median(c[ok], 0), 'k')
+            a.fill_between(np.arange(10), *np.percentile(c[ok], [25, 75], 0), color='k', alpha=0.12, lw=0)
+            a.set_title(f'recorded variance, {tn}\nby {var} decile (z units)', fontsize=8)
+    for a in ax.flat:
+        a.set_xticks([0, 9])
+        a.set_xticklabels(['low', 'high'], fontsize=7)
+        a.tick_params(labelsize=7)
+    ax[0, 0].legend(fontsize=7)
+    fig.suptitle('Predictability of the layer 4 LFP by behavioural state (median over sessions, IQR shaded; held-out bins)', fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out / 'predictability_state.png', dpi=120)
+    plt.close(fig)
+    print(f'figure: {out / "predictability_state.png"}')
 
 
 # ---- novelty ------------------------------------------------------------------------------------
@@ -379,7 +457,7 @@ def overview(out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('what', choices=['state', 'novelty', 'overview', 'all'])
+    parser.add_argument('what', choices=['state', 'predictability', 'novelty', 'overview', 'all'])
     parser.add_argument('--figures', default=str(paths.REPO_DIR / 'docs' / 'figures'))
     args = parser.parse_args()
     out = Path(args.figures)
@@ -388,6 +466,8 @@ def main():
         sources = state()
         if sources:
             state_figure(sources, out)
+    if args.what in ('predictability', 'all'):
+        predictability(out)
     if args.what in ('novelty', 'all'):
         novelty_figure(novelty(), out)
     if args.what in ('overview', 'all'):
